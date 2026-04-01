@@ -14,6 +14,8 @@ import PatientQueue from '@/pages/PatientQueue';
 import PatientWorkspace from '@/pages/PatientWorkspace';
 import Appointments from '@/pages/Appointments';
 import MedicalRecords from '@/pages/MedicalRecords';
+import Profile from '@/pages/Profile';
+import SettingsPage from '@/pages/Settings';
 
 const queryClient = new QueryClient();
 
