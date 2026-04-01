@@ -42,6 +42,8 @@ function AppContent() {
       {currentPage === 'workspace' && <PatientWorkspace />}
       {currentPage === 'appointments' && <Appointments />}
       {currentPage === 'records' && <MedicalRecords />}
+      {currentPage === 'profile' && <Profile />}
+      {currentPage === 'settings' && <SettingsPage />}
     </AppLayout>
   );
 }

@@ -157,8 +157,8 @@ export default function AppLayout({ children, currentPage, onNavigate }: AppLayo
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>Profile</DropdownMenuItem>
-              <DropdownMenuItem>Settings</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onNavigate('profile')}>Profile</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onNavigate('settings')}>Settings</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={logout} className="text-destructive">
                 <LogOut className="w-4 h-4 mr-2" /> Sign Out
