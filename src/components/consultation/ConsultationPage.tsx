@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
 import {
   Stethoscope, Pill, FlaskConical, Scan, FileText, Plus,
   Save, Pause, CheckCircle2, Printer, Heart, Thermometer,
@@ -14,6 +15,8 @@ import {
 } from 'lucide-react';
 import DiagnosisModal from '@/components/consultation/DiagnosisModal';
 import MedicationModal from '@/components/consultation/MedicationModal';
+import LabOrderModal from '@/components/consultation/LabOrderModal';
+import ReferralModal from '@/components/consultation/ReferralModal';
 import PrescriptionPreview from '@/components/consultation/PrescriptionPreview';
 import NotesTimeline from '@/components/consultation/NotesTimeline';
 import OrdersPanel from '@/components/consultation/OrdersPanel';
@@ -32,6 +35,10 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [activeView, setActiveView] = useState<TabView>('consultation');
   const [diagnosisOpen, setDiagnosisOpen] = useState(false);
   const [medicationOpen, setMedicationOpen] = useState(false);
+  const [labOrderOpen, setLabOrderOpen] = useState(false);
+  const [labOrderType, setLabOrderType] = useState<'lab' | 'radiology'>('lab');
+  const [referralOpen, setReferralOpen] = useState(false);
+  const [referralType, setReferralType] = useState<'referral' | 'admission' | 'followup'>('referral');
 
   // Consultation form state
   const [chiefComplaint, setChiefComplaint] = useState('');
@@ -53,24 +60,31 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     markUnsaved(patientId, true);
   }, [patientId, markUnsaved]);
 
-  const addDiagnosis = (dx: Diagnosis) => {
-    setDiagnoses(prev => [...prev, dx]);
+  const addDiagnosis = (dx: Diagnosis) => { setDiagnoses(prev => [...prev, dx]); markUnsaved(patientId, true); };
+  const removeDiagnosis = (id: string) => { setDiagnoses(prev => prev.filter(d => d.id !== id)); markUnsaved(patientId, true); };
+  const addMedication = (med: Medication) => { setMedications(prev => [...prev, med]); markUnsaved(patientId, true); };
+  const removeMedication = (id: string) => { setMedications(prev => prev.filter(m => m.id !== id)); markUnsaved(patientId, true); };
+  const addLabOrder = (order: LabOrder) => {
+    setLabOrders(prev => [...prev, order]);
     markUnsaved(patientId, true);
+    toast.success(`${order.testName} ordered`, { description: `Priority: ${order.priority}` });
   };
 
-  const removeDiagnosis = (id: string) => {
-    setDiagnoses(prev => prev.filter(d => d.id !== id));
-    markUnsaved(patientId, true);
+  const openLabModal = (type: 'lab' | 'radiology') => { setLabOrderType(type); setLabOrderOpen(true); };
+  const openReferralModal = (type: 'referral' | 'admission' | 'followup') => { setReferralType(type); setReferralOpen(true); };
+
+  const handleSaveDraft = () => {
+    markUnsaved(patientId, false);
+    toast.success('Draft saved', { description: `${patient?.name} consultation saved as draft` });
   };
 
-  const addMedication = (med: Medication) => {
-    setMedications(prev => [...prev, med]);
-    markUnsaved(patientId, true);
+  const handleHold = () => {
+    toast.info('Consultation on hold', { description: `${patient?.name} — will appear in your pending list` });
   };
 
-  const removeMedication = (id: string) => {
-    setMedications(prev => prev.filter(m => m.id !== id));
-    markUnsaved(patientId, true);
+  const handleComplete = () => {
+    markUnsaved(patientId, false);
+    toast.success('Visit completed', { description: `${patient?.name} consultation finalized`, icon: <CheckCircle2 className="w-4 h-4 text-success" /> });
   };
 
   if (!patient) return <div className="p-6 text-muted-foreground">Patient not found</div>;
@@ -86,11 +100,11 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const quickActions = [
     { label: 'Diagnosis', icon: Plus, color: 'text-primary', action: () => setDiagnosisOpen(true) },
     { label: 'Medication', icon: Pill, color: 'text-success', action: () => setMedicationOpen(true) },
-    { label: 'Lab Order', icon: FlaskConical, color: 'text-warning', action: () => {} },
-    { label: 'Radiology', icon: Scan, color: 'text-info', action: () => {} },
-    { label: 'Referral', icon: ArrowRightLeft, color: 'text-destructive', action: () => {} },
-    { label: 'Admission', icon: Building2, color: 'text-muted-foreground', action: () => {} },
-    { label: 'Follow-up', icon: CalendarPlus, color: 'text-accent', action: () => {} },
+    { label: 'Lab Order', icon: FlaskConical, color: 'text-warning', action: () => openLabModal('lab') },
+    { label: 'Radiology', icon: Scan, color: 'text-info', action: () => openLabModal('radiology') },
+    { label: 'Referral', icon: ArrowRightLeft, color: 'text-destructive', action: () => openReferralModal('referral') },
+    { label: 'Admission', icon: Building2, color: 'text-muted-foreground', action: () => openReferralModal('admission') },
+    { label: 'Follow-up', icon: CalendarPlus, color: 'text-accent', action: () => openReferralModal('followup') },
   ];
 
   return (
@@ -113,6 +127,11 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
           {patientNotes.length > 0 && (
             <Badge variant="outline" className="text-xs">
               {patientNotes.length} previous visit{patientNotes.length > 1 ? 's' : ''}
+            </Badge>
+          )}
+          {labOrders.length > 0 && (
+            <Badge variant="outline" className="text-xs bg-warning/10 text-warning border-warning/20">
+              {labOrders.length} order{labOrders.length > 1 ? 's' : ''}
             </Badge>
           )}
         </div>
@@ -256,6 +275,31 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                   </div>
                 )}
               </div>
+
+              {/* Lab Orders */}
+              {labOrders.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-foreground mb-2">Lab & Radiology Orders</h3>
+                  <div className="space-y-2">
+                    {labOrders.map(order => (
+                      <div key={order.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                        <div className={`w-7 h-7 rounded-md flex items-center justify-center ${order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI') ? 'bg-info/10' : 'bg-warning/10'}`}>
+                          {order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI')
+                            ? <Scan className="w-3.5 h-3.5 text-info" />
+                            : <FlaskConical className="w-3.5 h-3.5 text-warning" />}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-foreground">{order.testName}</p>
+                          <p className="text-xs text-muted-foreground">{order.category}</p>
+                        </div>
+                        <Badge variant="outline" className={`text-[10px] ${order.priority === 'stat' ? 'border-destructive/30 text-destructive' : order.priority === 'urgent' ? 'border-warning/30 text-warning' : ''}`}>
+                          {order.priority}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right quick action rail */}
@@ -304,17 +348,17 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
       {/* Bottom action bar */}
       <div className="bg-card border-t border-border px-4 lg:px-6 py-3 flex items-center gap-3 no-print">
-        <Button variant="outline" size="sm" className="gap-1.5">
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={handleSaveDraft}>
           <Save className="w-4 h-4" /> Save Draft
         </Button>
-        <Button variant="outline" size="sm" className="gap-1.5">
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={handleHold}>
           <Pause className="w-4 h-4" /> Hold
         </Button>
         <div className="flex-1" />
         <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setActiveView('prescription')}>
           <Printer className="w-4 h-4" /> Print Rx
         </Button>
-        <Button size="sm" className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground">
+        <Button size="sm" className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground" onClick={handleComplete}>
           <CheckCircle2 className="w-4 h-4" /> Complete Visit
         </Button>
       </div>
@@ -322,6 +366,8 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       {/* Modals */}
       <DiagnosisModal open={diagnosisOpen} onOpenChange={setDiagnosisOpen} onAdd={addDiagnosis} existingIds={diagnoses.map(d => d.id)} />
       <MedicationModal open={medicationOpen} onOpenChange={setMedicationOpen} onAdd={addMedication} />
+      <LabOrderModal open={labOrderOpen} onOpenChange={setLabOrderOpen} onAdd={addLabOrder} type={labOrderType} />
+      <ReferralModal open={referralOpen} onOpenChange={setReferralOpen} type={referralType} patientName={patient.name} />
     </div>
   );
 }

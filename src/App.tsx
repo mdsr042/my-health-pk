@@ -12,6 +12,8 @@ import AppLayout from '@/components/layout/AppLayout';
 import Dashboard from '@/pages/Dashboard';
 import PatientQueue from '@/pages/PatientQueue';
 import PatientWorkspace from '@/pages/PatientWorkspace';
+import Appointments from '@/pages/Appointments';
+import MedicalRecords from '@/pages/MedicalRecords';
 
 const queryClient = new QueryClient();
 
@@ -36,18 +38,8 @@ function AppContent() {
       {currentPage === 'dashboard' && <Dashboard onOpenPatient={handleOpenPatient} onNavigate={setCurrentPage} />}
       {currentPage === 'queue' && <PatientQueue onOpenPatient={handleOpenPatient} />}
       {currentPage === 'workspace' && <PatientWorkspace />}
-      {currentPage === 'appointments' && (
-        <div className="p-6 text-center text-muted-foreground animate-fade-in">
-          <p className="text-lg font-medium">Appointments</p>
-          <p className="text-sm">Calendar and appointment scheduling module — coming soon</p>
-        </div>
-      )}
-      {currentPage === 'records' && (
-        <div className="p-6 text-center text-muted-foreground animate-fade-in">
-          <p className="text-lg font-medium">Medical Records</p>
-          <p className="text-sm">Search and browse all patient records — coming soon</p>
-        </div>
-      )}
+      {currentPage === 'appointments' && <Appointments />}
+      {currentPage === 'records' && <MedicalRecords />}
     </AppLayout>
   );
 }
