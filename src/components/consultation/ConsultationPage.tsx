@@ -78,7 +78,13 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
   const addDiagnosis = (dx: Diagnosis) => { setDiagnoses(prev => [...prev, dx]); markUnsaved(patientId, true); };
   const removeDiagnosis = (id: string) => { setDiagnoses(prev => prev.filter(d => d.id !== id)); markUnsaved(patientId, true); };
-  const addMedication = (med: Medication) => { setMedications(prev => [...prev, med]); markUnsaved(patientId, true); };
+  const addMedication = (med: Medication) => {
+    setMedications(prev => {
+      const exists = prev.some(item => item.id === med.id);
+      return exists ? prev.map(item => item.id === med.id ? med : item) : [...prev, med];
+    });
+    markUnsaved(patientId, true);
+  };
   const removeMedication = (id: string) => { setMedications(prev => prev.filter(m => m.id !== id)); markUnsaved(patientId, true); };
   const addLabOrder = (order: LabOrder) => {
     setLabOrders(prev => [...prev, order]);
@@ -483,7 +489,13 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
       {/* Modals */}
       <DiagnosisModal open={diagnosisOpen} onOpenChange={setDiagnosisOpen} onAdd={addDiagnosis} existingIds={diagnoses.map(d => d.id)} />
-      <MedicationModal open={medicationOpen} onOpenChange={setMedicationOpen} onAdd={addMedication} />
+      <MedicationModal
+        open={medicationOpen}
+        onOpenChange={setMedicationOpen}
+        onAdd={addMedication}
+        onRemove={removeMedication}
+        prescribedMedications={medications}
+      />
       <LabOrderModal open={labOrderOpen} onOpenChange={setLabOrderOpen} onAdd={addLabOrder} type={labOrderType} />
       <ReferralModal open={referralOpen} onOpenChange={setReferralOpen} type={referralType} patientName={patient.name} />
     </div>
