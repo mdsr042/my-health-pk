@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { getAppointmentsForClinic, getPatient } from '@/data/mockData';
 import { Card, CardContent } from '@/components/ui/card';
