@@ -64,7 +64,7 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
           <h1 className="text-2xl font-bold text-foreground">Patient Queue</h1>
           <p className="text-muted-foreground text-sm">{filtered.length} patients • {activeClinic?.name}</p>
         </div>
-        <Button className="gap-2"><UserPlus className="w-4 h-4" /> Walk-in</Button>
+        <Button className="gap-2" onClick={() => setWalkInOpen(true)}><UserPlus className="w-4 h-4" /> Walk-in</Button>
       </div>
 
       {/* Filters */}
