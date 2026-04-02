@@ -17,6 +17,7 @@ interface WalkInModalProps {
 }
 
 export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInModalProps) {
+  const { activeClinic } = useAuth();
   const [form, setForm] = useState({
     name: '',
     phone: '',
