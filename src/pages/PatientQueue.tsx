@@ -170,6 +170,13 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
           </div>
         </CardContent>
       </Card>
+      <WalkInModal
+        open={walkInOpen}
+        onClose={() => setWalkInOpen(false)}
+        onPatientCreated={(id) => {
+          toast.success('Patient added to queue');
+        }}
+      />
     </div>
   );
 }
