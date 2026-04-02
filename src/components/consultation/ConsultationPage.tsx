@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
-import { getPatient, getPatientNotes, sampleVitals, type Diagnosis, type Medication, type LabOrder } from '@/data/mockData';
+import { useData } from '@/contexts/DataContext';
+import { getPatientNotes, sampleVitals, type Diagnosis, type Medication, type LabOrder } from '@/data/mockData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
