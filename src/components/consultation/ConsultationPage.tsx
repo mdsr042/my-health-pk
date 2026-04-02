@@ -30,6 +30,7 @@ type TabView = 'consultation' | 'notes' | 'orders' | 'documents' | 'prescription
 
 export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const { markUnsaved } = usePatientTabs();
+  const { getPatient, appointments, updateAppointmentStatus } = useData();
   const patient = getPatient(patientId);
   const patientNotes = getPatientNotes(patientId);
 
