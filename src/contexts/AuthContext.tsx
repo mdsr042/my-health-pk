@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { doctor, clinics, type Clinic } from '@/data/mockData';
+import { readStorage, writeStorage } from '@/lib/storage';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -17,13 +18,32 @@ interface AuthContextType extends AuthState {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+const AUTH_STORAGE_KEY = 'my-health/auth-state';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>({
-    isAuthenticated: false,
-    doctor: null,
-    activeClinic: null,
-    clinicSelected: false,
+  const [state, setState] = useState<AuthState>(() => {
+    const stored = readStorage<AuthState>(AUTH_STORAGE_KEY, {
+      isAuthenticated: false,
+      doctor: null,
+      activeClinic: null,
+      clinicSelected: false,
+    });
+
+    if (!stored.isAuthenticated) {
+      return {
+        isAuthenticated: false,
+        doctor: null,
+        activeClinic: null,
+        clinicSelected: false,
+      };
+    }
+
+    return {
+      isAuthenticated: true,
+      doctor,
+      activeClinic: stored.activeClinic ? clinics.find(c => c.id === stored.activeClinic?.id) ?? null : null,
+      clinicSelected: Boolean(stored.activeClinic),
+    };
   });
 
   const doctorClinics = state.doctor
@@ -55,6 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState(prev => ({ ...prev, activeClinic: clinic }));
     }
   }, []);
+
+  useEffect(() => {
+    writeStorage(AUTH_STORAGE_KEY, state);
+  }, [state]);
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout, selectClinic, switchClinic, doctorClinics }}>

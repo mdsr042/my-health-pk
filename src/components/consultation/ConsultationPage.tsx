@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import { useData } from '@/contexts/DataContext';
-import { getPatientNotes, sampleVitals, type Diagnosis, type Medication, type LabOrder } from '@/data/mockData';
+import { useAuth } from '@/contexts/AuthContext';
+import { sampleVitals, type Diagnosis, type Medication, type LabOrder } from '@/data/mockData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,18 +22,31 @@ import ReferralModal from '@/components/consultation/ReferralModal';
 import PrescriptionPreview from '@/components/consultation/PrescriptionPreview';
 import NotesTimeline from '@/components/consultation/NotesTimeline';
 import OrdersPanel from '@/components/consultation/OrdersPanel';
+import { readStorage } from '@/lib/storage';
 
 interface ConsultationPageProps {
   patientId: string;
 }
 
 type TabView = 'consultation' | 'notes' | 'orders' | 'documents' | 'prescription';
+const SETTINGS_STORAGE_KEY = 'my-health/settings';
 
 export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const { markUnsaved } = usePatientTabs();
-  const { getPatient, appointments, updateAppointmentStatus } = useData();
+  const { activeClinic } = useAuth();
+  const {
+    getPatient,
+    appointments,
+    updateAppointmentStatus,
+    getPatientNotes,
+    getConsultationDraft,
+    saveConsultationDraft,
+    completeConsultation,
+  } = useData();
   const patient = getPatient(patientId);
   const patientNotes = getPatientNotes(patientId);
+  const draft = getConsultationDraft(patientId);
+  const activeAppointment = appointments.find(a => a.patientId === patientId && a.status !== 'completed' && a.status !== 'cancelled');
 
   const [activeView, setActiveView] = useState<TabView>('consultation');
   const [diagnosisOpen, setDiagnosisOpen] = useState(false);
@@ -43,19 +57,19 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [referralType, setReferralType] = useState<'referral' | 'admission' | 'followup'>('referral');
 
   // Consultation form state
-  const [chiefComplaint, setChiefComplaint] = useState('');
-  const [hpi, setHpi] = useState('');
-  const [pastHistory, setPastHistory] = useState('');
-  const [allergies, setAllergies] = useState('');
-  const [examination, setExamination] = useState('');
-  const [assessment, setAssessment] = useState('');
-  const [plan, setPlan] = useState('');
-  const [instructions, setInstructions] = useState('');
-  const [followUp, setFollowUp] = useState('');
-  const [vitals, setVitals] = useState(sampleVitals);
-  const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
-  const [medications, setMedications] = useState<Medication[]>([]);
-  const [labOrders, setLabOrders] = useState<LabOrder[]>([]);
+  const [chiefComplaint, setChiefComplaint] = useState(draft?.chiefComplaint || activeAppointment?.chiefComplaint || '');
+  const [hpi, setHpi] = useState(draft?.hpi || '');
+  const [pastHistory, setPastHistory] = useState(draft?.pastHistory || '');
+  const [allergies, setAllergies] = useState(draft?.allergies || '');
+  const [examination, setExamination] = useState(draft?.examination || '');
+  const [assessment, setAssessment] = useState(draft?.assessment || '');
+  const [plan, setPlan] = useState(draft?.plan || '');
+  const [instructions, setInstructions] = useState(draft?.instructions || '');
+  const [followUp, setFollowUp] = useState(draft?.followUp || '');
+  const [vitals, setVitals] = useState(draft?.vitals || sampleVitals);
+  const [diagnoses, setDiagnoses] = useState<Diagnosis[]>(draft?.diagnoses || []);
+  const [medications, setMedications] = useState<Medication[]>(draft?.medications || []);
+  const [labOrders, setLabOrders] = useState<LabOrder[]>(draft?.labOrders || []);
 
   const handleFieldChange = useCallback((setter: Function) => (value: string) => {
     setter(value);
@@ -75,22 +89,107 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const openLabModal = (type: 'lab' | 'radiology') => { setLabOrderType(type); setLabOrderOpen(true); };
   const openReferralModal = (type: 'referral' | 'admission' | 'followup') => { setReferralType(type); setReferralOpen(true); };
 
+  const buildConsultationPayload = useCallback(() => ({
+    patientId,
+    clinicId: activeClinic?.id || activeAppointment?.clinicId || 'clinic-1',
+    chiefComplaint,
+    hpi,
+    pastHistory,
+    allergies,
+    examination,
+    assessment,
+    plan,
+    instructions,
+    followUp,
+    vitals,
+    diagnoses,
+    medications,
+    labOrders,
+  }), [
+    activeAppointment?.clinicId,
+    activeClinic?.id,
+    allergies,
+    assessment,
+    chiefComplaint,
+    diagnoses,
+    examination,
+    followUp,
+    hpi,
+    instructions,
+    labOrders,
+    medications,
+    pastHistory,
+    patientId,
+    plan,
+    vitals,
+  ]);
+
   const handleSaveDraft = () => {
+    saveConsultationDraft(buildConsultationPayload());
     markUnsaved(patientId, false);
     toast.success('Draft saved', { description: `${patient?.name} consultation saved as draft` });
   };
 
   const handleHold = () => {
+    saveConsultationDraft(buildConsultationPayload());
+    markUnsaved(patientId, false);
     toast.info('Consultation on hold', { description: `${patient?.name} — will appear in your pending list` });
   };
 
   const handleComplete = () => {
+    completeConsultation(buildConsultationPayload());
     markUnsaved(patientId, false);
     // Find and update the appointment for this patient
     const apt = appointments.find(a => a.patientId === patientId && a.status !== 'completed');
     if (apt) updateAppointmentStatus(apt.id, 'completed');
     toast.success('Visit completed', { description: `${patient?.name} consultation finalized`, icon: <CheckCircle2 className="w-4 h-4 text-success" /> });
   };
+
+  useEffect(() => {
+    const settings = readStorage(SETTINGS_STORAGE_KEY, { autoSave: true });
+    if (!settings.autoSave) return;
+
+    const hasDraftableContent = Boolean(
+      chiefComplaint ||
+      hpi ||
+      pastHistory ||
+      allergies ||
+      examination ||
+      assessment ||
+      plan ||
+      instructions ||
+      followUp ||
+      diagnoses.length ||
+      medications.length ||
+      labOrders.length
+    );
+
+    if (!hasDraftableContent) return;
+
+    const timer = window.setTimeout(() => {
+      saveConsultationDraft(buildConsultationPayload());
+      markUnsaved(patientId, false);
+    }, 30000);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    allergies,
+    assessment,
+    buildConsultationPayload,
+    chiefComplaint,
+    diagnoses.length,
+    examination,
+    followUp,
+    hpi,
+    instructions,
+    labOrders.length,
+    markUnsaved,
+    medications.length,
+    pastHistory,
+    patientId,
+    plan,
+    saveConsultationDraft,
+  ]);
 
   if (!patient) return <div className="p-6 text-muted-foreground">Patient not found</div>;
 
@@ -191,7 +290,21 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                         <div className="flex items-baseline gap-1">
                           <Input
                             value={v.value}
-                            onChange={e => setVitals(prev => ({...prev, [v.label.toLowerCase().replace('₂', '2')]: e.target.value}))}
+                            onChange={e => {
+                              const keyMap = {
+                                BP: 'bp',
+                                Pulse: 'pulse',
+                                Temp: 'temp',
+                                'SpO₂': 'spo2',
+                                Weight: 'weight',
+                                Height: 'height',
+                                BMI: 'bmi',
+                                RR: 'respiratoryRate',
+                              } as const;
+
+                              setVitals(prev => ({ ...prev, [keyMap[v.label as keyof typeof keyMap]]: e.target.value }));
+                              markUnsaved(patientId, true);
+                            }}
                             className="h-7 bg-transparent border-0 p-0 text-lg font-semibold text-foreground focus-visible:ring-0 w-16"
                           />
                           <span className="text-xs text-muted-foreground">{v.unit}</span>
@@ -328,7 +441,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         )}
 
         {activeView === 'notes' && <NotesTimeline notes={patientNotes} />}
-        {activeView === 'orders' && <OrdersPanel />}
+        {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} previousNotes={patientNotes} />}
         {activeView === 'documents' && (
           <div className="p-6 text-center text-muted-foreground">
             <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />

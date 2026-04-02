@@ -3,15 +3,14 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useData } from '@/contexts/DataContext';
-import { previousNotes } from '@/data/mockData';
 import { Search, FileText, Calendar, User, ChevronRight } from 'lucide-react';
 
 export default function MedicalRecords() {
-  const { patients } = useData();
+  const { patients, getPatientNotes } = useData();
   const [search, setSearch] = useState('');
 
   const patientsWithNotes = patients.filter(p => {
-    const hasNotes = previousNotes.some(n => n.patientId === p.id);
+    const hasNotes = getPatientNotes(p.id).length > 0;
     if (!search) return hasNotes;
     return hasNotes && (
       p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -43,7 +42,7 @@ export default function MedicalRecords() {
           </Card>
         ) : (
           patientsWithNotes.map(patient => {
-            const notes = previousNotes.filter(n => n.patientId === patient.id);
+            const notes = getPatientNotes(patient.id);
             return (
               <Card key={patient.id} className="border-0 shadow-sm hover:shadow-md transition-shadow">
                 <CardContent className="p-4">

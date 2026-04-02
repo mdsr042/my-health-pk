@@ -1,23 +1,78 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { Settings2, Bell, Printer, Globe, Shield, Palette } from 'lucide-react';
+import { readStorage, writeStorage } from '@/lib/storage';
+import { defaultSettings } from '@/lib/app-defaults';
+import { fetchSettings, persistSettings } from '@/lib/api';
+import type { AppSettings } from '@/lib/app-types';
+
+const SETTINGS_STORAGE_KEY = 'my-health/settings';
 
 export default function SettingsPage() {
-  const [notifications, setNotifications] = useState(true);
-  const [soundAlerts, setSoundAlerts] = useState(true);
-  const [autoSave, setAutoSave] = useState(true);
-  const [language, setLanguage] = useState('en');
-  const [prescriptionLang, setPrescriptionLang] = useState('bilingual');
-  const [theme, setTheme] = useState('light');
-  const [compactMode, setCompactMode] = useState(false);
+  const saved = readStorage<AppSettings>(SETTINGS_STORAGE_KEY, defaultSettings);
 
-  const handleSave = () => toast.success('Settings saved successfully');
+  const [notifications, setNotifications] = useState(saved.notifications);
+  const [soundAlerts, setSoundAlerts] = useState(saved.soundAlerts);
+  const [autoSave, setAutoSave] = useState(saved.autoSave);
+  const [language, setLanguage] = useState(saved.language);
+  const [prescriptionLang, setPrescriptionLang] = useState(saved.prescriptionLang);
+  const [theme, setTheme] = useState(saved.theme);
+  const [compactMode, setCompactMode] = useState(saved.compactMode);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrate = async () => {
+      try {
+        const remoteSettings = await fetchSettings();
+        if (!remoteSettings || cancelled) return;
+
+        setNotifications(remoteSettings.notifications);
+        setSoundAlerts(remoteSettings.soundAlerts);
+        setAutoSave(remoteSettings.autoSave);
+        setLanguage(remoteSettings.language);
+        setPrescriptionLang(remoteSettings.prescriptionLang);
+        setTheme(remoteSettings.theme);
+        setCompactMode(remoteSettings.compactMode);
+        writeStorage(SETTINGS_STORAGE_KEY, remoteSettings);
+      } catch {
+        // Keep local settings when the API is unavailable.
+      }
+    };
+
+    void hydrate();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    const nextSettings: AppSettings = {
+      notifications,
+      soundAlerts,
+      autoSave,
+      language,
+      prescriptionLang,
+      theme,
+      compactMode,
+    };
+
+    writeStorage(SETTINGS_STORAGE_KEY, nextSettings);
+
+    try {
+      await persistSettings(nextSettings);
+    } catch {
+      // Save locally even when the API is offline.
+    }
+
+    toast.success('Settings saved successfully');
+  };
 
   const sections = [
     {
