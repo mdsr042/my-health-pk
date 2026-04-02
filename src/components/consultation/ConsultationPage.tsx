@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
-import { getPatient, getPatientNotes, sampleVitals, type Diagnosis, type Medication, type LabOrder } from '@/data/mockData';
+import { useData } from '@/contexts/DataContext';
+import { getPatientNotes, sampleVitals, type Diagnosis, type Medication, type LabOrder } from '@/data/mockData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,7 @@ type TabView = 'consultation' | 'notes' | 'orders' | 'documents' | 'prescription
 
 export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const { markUnsaved } = usePatientTabs();
+  const { getPatient, appointments, updateAppointmentStatus } = useData();
   const patient = getPatient(patientId);
   const patientNotes = getPatientNotes(patientId);
 
@@ -84,6 +86,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
   const handleComplete = () => {
     markUnsaved(patientId, false);
+    // Find and update the appointment for this patient
+    const apt = appointments.find(a => a.patientId === patientId && a.status !== 'completed');
+    if (apt) updateAppointmentStatus(apt.id, 'completed');
     toast.success('Visit completed', { description: `${patient?.name} consultation finalized`, icon: <CheckCircle2 className="w-4 h-4 text-success" /> });
   };
 

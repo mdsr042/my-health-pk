@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { PatientTabsProvider, usePatientTabs } from '@/contexts/PatientTabsContext';
-import { getPatient } from '@/data/mockData';
+import { DataProvider, useData } from '@/contexts/DataContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { Toaster } from '@/components/ui/toaster';
@@ -22,6 +22,7 @@ const queryClient = new QueryClient();
 function AppContent() {
   const { isAuthenticated, clinicSelected } = useAuth();
   const { openTab } = usePatientTabs();
+  const { getPatient } = useData();
   const [currentPage, setCurrentPage] = useState('dashboard');
 
   const handleOpenPatient = (patientId: string) => {
@@ -54,9 +55,11 @@ const App = () => (
       <Toaster />
       <Sonner />
       <AuthProvider>
-        <PatientTabsProvider>
-          <AppContent />
-        </PatientTabsProvider>
+        <DataProvider>
+          <PatientTabsProvider>
+            <AppContent />
+          </PatientTabsProvider>
+        </DataProvider>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
