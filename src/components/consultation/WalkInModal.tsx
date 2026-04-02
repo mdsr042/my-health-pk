@@ -7,6 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
+import { addWalkInPatient } from '@/data/mockData';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface WalkInModalProps {
   open: boolean;
@@ -15,6 +17,7 @@ interface WalkInModalProps {
 }
 
 export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInModalProps) {
+  const { activeClinic } = useAuth();
   const [form, setForm] = useState({
     name: '',
     phone: '',
@@ -35,9 +38,8 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
       return;
     }
 
-    // Generate a mock patient ID and MRN
-    const patientId = `p-walkin-${Date.now()}`;
-    toast.success(`Walk-in patient "${form.name}" registered successfully`);
+    const patientId = addWalkInPatient(form, activeClinic?.id || 'clinic-1');
+    toast.success(`Walk-in patient "${form.name}" added to queue`);
     onPatientCreated(patientId);
     setForm({ name: '', phone: '', age: '', gender: '', cnic: '', address: '', bloodGroup: '', emergencyContact: '', chiefComplaint: '' });
     onClose();

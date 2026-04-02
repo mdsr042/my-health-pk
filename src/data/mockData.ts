@@ -379,3 +379,47 @@ export function getAppointmentsForClinic(clinicId: string) {
 export function getPatientNotes(patientId: string) {
   return previousNotes.filter(n => n.patientId === patientId);
 }
+
+export function addWalkInPatient(
+  data: { name: string; phone: string; age: string; gender: string; cnic: string; address: string; bloodGroup: string; emergencyContact: string; chiefComplaint: string },
+  clinicId: string
+): string {
+  const patientId = `p-walkin-${Date.now()}`;
+  const mrn = `MRN-${Date.now().toString().slice(-8)}`;
+  const today = new Date().toISOString().split('T')[0];
+
+  const newPatient: Patient = {
+    id: patientId,
+    mrn,
+    name: data.name,
+    phone: data.phone,
+    age: parseInt(data.age) || 0,
+    gender: data.gender as 'Male' | 'Female',
+    cnic: data.cnic || '',
+    address: data.address || '',
+    bloodGroup: data.bloodGroup || '',
+    emergencyContact: data.emergencyContact || '',
+  };
+  patients.push(newPatient);
+
+  const clinicApts = appointments.filter(a => a.clinicId === clinicId);
+  const nextToken = clinicApts.length > 0 ? Math.max(...clinicApts.map(a => a.tokenNumber)) + 1 : 1;
+  const now = new Date();
+  const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+  const newAppointment: Appointment = {
+    id: `apt-walkin-${Date.now()}`,
+    patientId,
+    clinicId,
+    doctorId: 'doc-1',
+    date: today,
+    time: timeStr,
+    status: 'waiting',
+    type: 'new',
+    chiefComplaint: data.chiefComplaint || 'Walk-in',
+    tokenNumber: nextToken,
+  };
+  appointments.push(newAppointment);
+
+  return patientId;
+}
