@@ -86,6 +86,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
   const handleComplete = () => {
     markUnsaved(patientId, false);
+    // Find and update the appointment for this patient
+    const apt = appointments.find(a => a.patientId === patientId && a.status !== 'completed');
+    if (apt) updateAppointmentStatus(apt.id, 'completed');
     toast.success('Visit completed', { description: `${patient?.name} consultation finalized`, icon: <CheckCircle2 className="w-4 h-4 text-success" /> });
   };
 
