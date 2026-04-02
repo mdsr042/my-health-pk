@@ -7,6 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
+import { addWalkInPatient } from '@/data/mockData';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface WalkInModalProps {
   open: boolean;
