@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { getAppointmentsForClinic, getPatient } from '@/data/mockData';
 import { Card, CardContent } from '@/components/ui/card';
@@ -7,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Search, Filter, UserPlus, Play, CheckCircle2 } from 'lucide-react';
+import WalkInModal from '@/components/consultation/WalkInModal';
 
 interface PatientQueueProps {
   onOpenPatient: (patientId: string) => void;
@@ -16,6 +18,7 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
   const { activeClinic } = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [walkInOpen, setWalkInOpen] = useState(false);
 
   const clinicAppointments = getAppointmentsForClinic(activeClinic?.id || '');
 
@@ -62,7 +65,7 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
           <h1 className="text-2xl font-bold text-foreground">Patient Queue</h1>
           <p className="text-muted-foreground text-sm">{filtered.length} patients • {activeClinic?.name}</p>
         </div>
-        <Button className="gap-2"><UserPlus className="w-4 h-4" /> Walk-in</Button>
+        <Button className="gap-2" onClick={() => setWalkInOpen(true)}><UserPlus className="w-4 h-4" /> Walk-in</Button>
       </div>
 
       {/* Filters */}
@@ -168,6 +171,13 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
           </div>
         </CardContent>
       </Card>
+      <WalkInModal
+        open={walkInOpen}
+        onClose={() => setWalkInOpen(false)}
+        onPatientCreated={(id) => {
+          toast.success('Patient added to queue');
+        }}
+      />
     </div>
   );
 }
