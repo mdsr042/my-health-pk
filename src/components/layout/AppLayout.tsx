@@ -39,7 +39,7 @@ export default function AppLayout({ children, currentPage, onNavigate }: AppLayo
           <div className="w-9 h-9 rounded-lg bg-sidebar-primary/20 flex items-center justify-center">
             <Stethoscope className="w-5 h-5 text-sidebar-primary" />
           </div>
-          <span className="text-lg font-bold text-sidebar-foreground tracking-tight">MedFlow</span>
+          <span className="text-lg font-bold text-sidebar-foreground tracking-tight">My Health</span>
           <button className="lg:hidden ml-auto text-sidebar-foreground" onClick={() => setSidebarOpen(false)}>
             <X className="w-5 h-5" />
           </button>

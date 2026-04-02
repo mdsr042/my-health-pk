@@ -28,7 +28,7 @@ export default function LoginPage() {
           <div className="w-12 h-12 rounded-xl bg-primary-foreground/10 backdrop-blur flex items-center justify-center">
             <Stethoscope className="w-7 h-7 text-primary-foreground" />
           </div>
-          <span className="text-2xl font-bold tracking-tight">MedFlow</span>
+          <span className="text-2xl font-bold tracking-tight">My Health</span>
         </div>
         <h1 className="text-5xl font-extrabold leading-tight mb-4">
           Doctor Patient<br />Management System
@@ -49,7 +49,7 @@ export default function LoginPage() {
           <CardContent className="p-8">
             <div className="lg:hidden flex items-center gap-2 mb-6">
               <Stethoscope className="w-6 h-6 text-primary" />
-              <span className="text-xl font-bold text-foreground">MedFlow</span>
+              <span className="text-xl font-bold text-foreground">My Health</span>
             </div>
             <h2 className="text-2xl font-bold text-foreground mb-1">Welcome back</h2>
             <p className="text-muted-foreground mb-8">Sign in to your doctor portal</p>
