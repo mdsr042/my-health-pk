@@ -31,6 +31,18 @@ interface ConsultationPageProps {
 type TabView = 'consultation' | 'notes' | 'orders' | 'documents' | 'prescription';
 const SETTINGS_STORAGE_KEY = 'my-health/settings';
 
+const clinicalFieldConfigs = [
+  { label: 'Chief Complaint', key: 'chiefComplaint', rows: 2, suggestions: ['Fever for 3 days', 'Follow-up visit', 'General weakness'] },
+  { label: 'History of Present Illness', key: 'hpi', rows: 3, suggestions: ['Symptoms started gradually', 'No shortness of breath', 'No vomiting or diarrhea'] },
+  { label: 'Past Medical History', key: 'pastHistory', rows: 2, suggestions: ['Known case of hypertension', 'Known case of diabetes mellitus', 'No significant surgical history'] },
+  { label: 'Allergies', key: 'allergies', rows: 1, suggestions: ['NKDA', 'Allergic to penicillin', 'Food allergy reported'] },
+  { label: 'Examination', key: 'examination', rows: 3, suggestions: ['Patient is conscious and oriented', 'Chest clear bilaterally', 'Abdomen soft and non-tender'] },
+  { label: 'Assessment', key: 'assessment', rows: 2, suggestions: ['Likely viral illness', 'Condition clinically stable', 'Symptoms improving since last visit'] },
+  { label: 'Treatment Plan', key: 'plan', rows: 2, suggestions: ['Symptomatic treatment advised', 'Continue current medications', 'Relevant labs ordered'] },
+  { label: 'Instructions', key: 'instructions', rows: 2, suggestions: ['Increase oral fluids', 'Return if symptoms worsen', 'Medication compliance explained'] },
+  { label: 'Follow-up', key: 'followUp', rows: 1, suggestions: ['Follow up in 3 days', 'Follow up in 1 week', 'PRN review'] },
+] as const;
+
 export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const { markUnsaved } = usePatientTabs();
   const { activeClinic } = useAuth();
@@ -76,7 +88,19 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     markUnsaved(patientId, true);
   }, [patientId, markUnsaved]);
 
-  const addDiagnosis = (dx: Diagnosis) => { setDiagnoses(prev => [...prev, dx]); markUnsaved(patientId, true); };
+  const appendSnippet = useCallback((setter: Function, currentValue: string, snippet: string) => {
+    const nextValue = currentValue.trim() ? `${currentValue.trim()}\n${snippet}` : snippet;
+    setter(nextValue);
+    markUnsaved(patientId, true);
+  }, [patientId, markUnsaved]);
+
+  const addDiagnosis = (dx: Diagnosis) => {
+    setDiagnoses(prev => {
+      const exists = prev.some(item => item.id === dx.id);
+      return exists ? prev.map(item => item.id === dx.id ? dx : item) : [...prev, dx];
+    });
+    markUnsaved(patientId, true);
+  };
   const removeDiagnosis = (id: string) => { setDiagnoses(prev => prev.filter(d => d.id !== id)); markUnsaved(patientId, true); };
   const addMedication = (med: Medication) => {
     setMedications(prev => {
@@ -322,28 +346,51 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
               </Card>
 
               {/* Clinical form */}
-              {[
-                { label: 'Chief Complaint', value: chiefComplaint, setter: setChiefComplaint, rows: 2 },
-                { label: 'History of Present Illness', value: hpi, setter: setHpi, rows: 3 },
-                { label: 'Past Medical History', value: pastHistory, setter: setPastHistory, rows: 2 },
-                { label: 'Allergies', value: allergies, setter: setAllergies, rows: 1 },
-                { label: 'Examination', value: examination, setter: setExamination, rows: 3 },
-                { label: 'Assessment', value: assessment, setter: setAssessment, rows: 2 },
-                { label: 'Treatment Plan', value: plan, setter: setPlan, rows: 2 },
-                { label: 'Instructions', value: instructions, setter: setInstructions, rows: 2 },
-                { label: 'Follow-up', value: followUp, setter: setFollowUp, rows: 1 },
-              ].map(field => (
+              {clinicalFieldConfigs.map(field => {
+                const fieldState = {
+                  chiefComplaint: { value: chiefComplaint, setter: setChiefComplaint },
+                  hpi: { value: hpi, setter: setHpi },
+                  pastHistory: { value: pastHistory, setter: setPastHistory },
+                  allergies: { value: allergies, setter: setAllergies },
+                  examination: { value: examination, setter: setExamination },
+                  assessment: { value: assessment, setter: setAssessment },
+                  plan: { value: plan, setter: setPlan },
+                  instructions: { value: instructions, setter: setInstructions },
+                  followUp: { value: followUp, setter: setFollowUp },
+                }[field.key];
+
+                return (
                 <div key={field.label} className="space-y-1.5">
-                  <label className="text-sm font-medium text-foreground">{field.label}</label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-sm font-medium text-foreground">{field.label}</label>
+                    <span className="text-[11px] text-muted-foreground">Tap a quick note to insert</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {field.suggestions.map(suggestion => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => appendSnippet(fieldState.setter, fieldState.value, suggestion)}
+                        className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
                   <Textarea
-                    value={field.value}
-                    onChange={e => handleFieldChange(field.setter)(e.target.value)}
+                    value={fieldState.value}
+                    onChange={e => handleFieldChange(fieldState.setter)(e.target.value)}
+                    onInput={e => {
+                      const target = e.currentTarget;
+                      target.style.height = 'auto';
+                      target.style.height = `${Math.max(target.scrollHeight, 56)}px`;
+                    }}
                     placeholder={`Enter ${field.label.toLowerCase()}...`}
                     rows={field.rows}
-                    className="resize-none"
+                    className="min-h-[56px] resize-none"
                   />
                 </div>
-              ))}
+              )})}
 
               {/* Diagnoses */}
               <div>
@@ -427,7 +474,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
             </div>
 
             {/* Right quick action rail */}
-            <div className="hidden lg:flex flex-col gap-1 p-3 border-l border-border bg-card w-[140px] shrink-0">
+            <div className="hidden lg:flex flex-col gap-1 p-3 border-l border-border bg-card w-[172px] shrink-0 sticky top-0 self-start max-h-[calc(100vh-12rem)]">
               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-2">Quick Actions</p>
               {quickActions.map(action => {
                 const Icon = action.icon;
@@ -435,7 +482,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                   <button
                     key={action.label}
                     onClick={action.action}
-                    className="flex items-center gap-2 px-2 py-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors text-left"
+                    className="flex items-center gap-2.5 px-2.5 py-2.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors text-left"
                   >
                     <Icon className={`w-3.5 h-3.5 ${action.color}`} />
                     {action.label}
@@ -488,7 +535,13 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       </div>
 
       {/* Modals */}
-      <DiagnosisModal open={diagnosisOpen} onOpenChange={setDiagnosisOpen} onAdd={addDiagnosis} existingIds={diagnoses.map(d => d.id)} />
+      <DiagnosisModal
+        open={diagnosisOpen}
+        onOpenChange={setDiagnosisOpen}
+        onAdd={addDiagnosis}
+        onRemove={removeDiagnosis}
+        diagnoses={diagnoses}
+      />
       <MedicationModal
         open={medicationOpen}
         onOpenChange={setMedicationOpen}

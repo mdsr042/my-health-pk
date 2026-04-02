@@ -8,9 +8,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
-    allowedHosts: [
-      'constitutes-perception-realized-icq.trycloudflare.com',
-    ],
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://localhost:4001',

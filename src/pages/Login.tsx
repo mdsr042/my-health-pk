@@ -24,22 +24,24 @@ export default function LoginPage() {
     <div className="min-h-screen flex" style={{ background: 'var(--gradient-hero)' }}>
       {/* Left branding panel */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-center px-16 text-primary-foreground">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-12 h-12 rounded-xl bg-primary-foreground/10 backdrop-blur flex items-center justify-center">
-            <Stethoscope className="w-7 h-7 text-primary-foreground" />
+        <div className="w-full max-w-xl mx-auto">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-12 h-12 rounded-xl bg-primary-foreground/10 backdrop-blur flex items-center justify-center">
+              <Stethoscope className="w-7 h-7 text-primary-foreground" />
+            </div>
+            <span className="text-2xl font-bold tracking-tight">My Health</span>
           </div>
-          <span className="text-2xl font-bold tracking-tight">My Health</span>
-        </div>
-        <h1 className="text-5xl font-extrabold leading-tight mb-4">
-          Doctor Patient<br />Management System
-        </h1>
-        <p className="text-lg text-primary-foreground/70 max-w-md">
-          Streamline your OPD workflow. Manage consultations, prescriptions, and patient records across multiple clinics — all in one platform.
-        </p>
-        <div className="mt-12 flex gap-8 text-primary-foreground/50 text-sm">
-          <div><span className="block text-2xl font-bold text-primary-foreground">500+</span>Doctors</div>
-          <div><span className="block text-2xl font-bold text-primary-foreground">1M+</span>Patients</div>
-          <div><span className="block text-2xl font-bold text-primary-foreground">50+</span>Hospitals</div>
+          <h1 className="text-5xl font-extrabold leading-tight mb-4">
+            Doctor Patient<br />Management System
+          </h1>
+          <p className="text-lg text-primary-foreground/70 max-w-md">
+            Streamline your OPD workflow. Manage consultations, prescriptions, and patient records across multiple clinics — all in one platform.
+          </p>
+          <div className="mt-12 flex gap-8 text-primary-foreground/50 text-sm">
+            <div><span className="block text-2xl font-bold text-primary-foreground">500+</span>Doctors</div>
+            <div><span className="block text-2xl font-bold text-primary-foreground">1M+</span>Patients</div>
+            <div><span className="block text-2xl font-bold text-primary-foreground">50+</span>Hospitals</div>
+          </div>
         </div>
       </div>
 
