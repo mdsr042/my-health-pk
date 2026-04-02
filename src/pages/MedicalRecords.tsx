@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { patients, previousNotes } from '@/data/mockData';
+import { useData } from '@/contexts/DataContext';
+import { previousNotes } from '@/data/mockData';
 import { Search, FileText, Calendar, User, ChevronRight } from 'lucide-react';
 
 export default function MedicalRecords() {
+  const { patients } = useData();
   const [search, setSearch] = useState('');
 
   const patientsWithNotes = patients.filter(p => {
@@ -29,12 +30,7 @@ export default function MedicalRecords() {
 
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          placeholder="Search by patient name or MRN..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="pl-9"
-        />
+        <Input placeholder="Search by patient name or MRN..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
       </div>
 
       <div className="grid gap-4">

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { getAppointmentsForClinic, getPatient } from '@/data/mockData';
+import { useData } from '@/contexts/DataContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ interface PatientQueueProps {
 
 export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
   const { activeClinic } = useAuth();
+  const { getAppointmentsForClinic, getPatient, updateAppointmentStatus } = useData();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [walkInOpen, setWalkInOpen] = useState(false);
@@ -58,6 +59,18 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
     return diff > 0 ? `${diff} min` : '-';
   };
 
+  const handleMarkDone = (aptId: string, patientName: string) => {
+    updateAppointmentStatus(aptId, 'completed');
+    toast.success(`${patientName} marked as completed`);
+  };
+
+  const handleStartConsultation = (aptId: string, patientId: string, status: string) => {
+    if (status === 'scheduled' || status === 'waiting') {
+      updateAppointmentStatus(aptId, 'in-consultation');
+    }
+    onOpenPatient(patientId);
+  };
+
   return (
     <div className="p-4 lg:p-6 space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -68,17 +81,11 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
         <Button className="gap-2" onClick={() => setWalkInOpen(true)}><UserPlus className="w-4 h-4" /> Walk-in</Button>
       </div>
 
-      {/* Filters */}
       <Card className="border-0 shadow-sm">
         <CardContent className="p-4 flex flex-wrap gap-3">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by name, MRN, phone..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="pl-9"
-            />
+            <Input placeholder="Search by name, MRN, phone..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-[160px]">
@@ -96,7 +103,6 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
         </CardContent>
       </Card>
 
-      {/* Table */}
       <Card className="border-0 shadow-sm">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -122,7 +128,7 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
                     <tr key={apt.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                       <td className="px-4 py-3 text-muted-foreground font-medium">{apt.tokenNumber}</td>
                       <td className="px-4 py-3">
-                        <button onClick={() => onOpenPatient(apt.patientId)} className="text-left hover:text-primary">
+                        <button onClick={() => handleStartConsultation(apt.id, apt.patientId, apt.status)} className="text-left hover:text-primary">
                           <p className="font-medium text-foreground">{pat?.name}</p>
                           <p className="text-xs text-muted-foreground truncate max-w-[200px]">{apt.chiefComplaint}</p>
                         </button>
@@ -146,11 +152,11 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => onOpenPatient(apt.patientId)}>
+                          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => handleStartConsultation(apt.id, apt.patientId, apt.status)}>
                             <Play className="w-3 h-3" /> Open
                           </Button>
                           {apt.status !== 'completed' && (
-                            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-success">
+                            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-success" onClick={() => handleMarkDone(apt.id, pat?.name || '')}>
                               <CheckCircle2 className="w-3 h-3" /> Done
                             </Button>
                           )}

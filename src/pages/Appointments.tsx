@@ -2,15 +2,16 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { appointments, patients } from '@/data/mockData';
+import { useData } from '@/contexts/DataContext';
 import { CalendarDays, Clock, Plus, ChevronLeft, ChevronRight, User } from 'lucide-react';
 
 export default function Appointments() {
   const { activeClinic } = useAuth();
+  const { getAppointmentsForClinic, getPatient } = useData();
   const today = new Date();
   const formattedDate = today.toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-  const clinicAppointments = appointments.filter(a => a.clinicId === activeClinic?.id);
+  const clinicAppointments = getAppointmentsForClinic(activeClinic?.id || '');
 
   const timeSlots = Array.from({ length: 10 }, (_, i) => {
     const hour = 9 + i;
@@ -27,7 +28,6 @@ export default function Appointments() {
 
   return (
     <div className="p-4 lg:p-6 space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-foreground">Appointments</h1>
@@ -41,7 +41,6 @@ export default function Appointments() {
         </div>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: 'Total', value: clinicAppointments.length, color: 'text-foreground' },
@@ -58,7 +57,6 @@ export default function Appointments() {
         ))}
       </div>
 
-      {/* Timeline view */}
       <Card className="border-0 shadow-sm">
         <CardContent className="p-0">
           <div className="divide-y divide-border">
@@ -77,7 +75,7 @@ export default function Appointments() {
                   </div>
                   <div className="flex-1 p-2 flex flex-wrap gap-2">
                     {slotAppointments.map(apt => {
-                      const patient = patients.find(p => p.id === apt.patientId);
+                      const patient = getPatient(apt.patientId);
                       return (
                         <div key={apt.id} className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2 min-w-[200px]">
                           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">

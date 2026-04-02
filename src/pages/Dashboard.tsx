@@ -1,7 +1,7 @@
 import { useAuth } from '@/contexts/AuthContext';
+import { useData } from '@/contexts/DataContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { getAppointmentsForClinic, patients, getPatient } from '@/data/mockData';
 import {
   Users, Clock, Stethoscope, CheckCircle2, AlertTriangle,
   TrendingUp, ArrowRight
@@ -15,6 +15,7 @@ interface DashboardProps {
 
 export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps) {
   const { activeClinic } = useAuth();
+  const { getAppointmentsForClinic, getPatient } = useData();
   const clinicAppointments = getAppointmentsForClinic(activeClinic?.id || '');
 
   const stats = {
@@ -60,21 +61,16 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
 
   return (
     <div className="p-4 lg:p-6 space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
           <p className="text-muted-foreground text-sm">{activeClinic?.name} • {new Date().toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
         </div>
-        <button
-          onClick={() => onNavigate('queue')}
-          className="text-sm text-primary hover:underline flex items-center gap-1"
-        >
+        <button onClick={() => onNavigate('queue')} className="text-sm text-primary hover:underline flex items-center gap-1">
           View Queue <ArrowRight className="w-4 h-4" />
         </button>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {kpis.map(kpi => {
           const Icon = kpi.icon;
@@ -94,9 +90,7 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
         })}
       </div>
 
-      {/* Charts & Queue */}
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Bar chart */}
         <Card className="lg:col-span-1 border-0 shadow-sm">
           <CardContent className="p-4">
             <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
@@ -114,7 +108,6 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
           </CardContent>
         </Card>
 
-        {/* Pie chart */}
         <Card className="border-0 shadow-sm">
           <CardContent className="p-4">
             <h3 className="font-semibold text-foreground mb-4">Status Breakdown</h3>
@@ -137,7 +130,6 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
           </CardContent>
         </Card>
 
-        {/* Active Queue */}
         <Card className="border-0 shadow-sm">
           <CardContent className="p-4">
             <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
@@ -173,7 +165,6 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
         </Card>
       </div>
 
-      {/* Recent Patients */}
       <Card className="border-0 shadow-sm">
         <CardContent className="p-4">
           <h3 className="font-semibold text-foreground mb-4">Today's Appointments</h3>
@@ -212,10 +203,7 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
                         </Badge>
                       </td>
                       <td className="py-3">
-                        <button
-                          onClick={() => onOpenPatient(apt.patientId)}
-                          className="text-xs text-primary hover:underline"
-                        >
+                        <button onClick={() => onOpenPatient(apt.patientId)} className="text-xs text-primary hover:underline">
                           Open
                         </button>
                       </td>
