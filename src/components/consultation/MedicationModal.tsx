@@ -65,7 +65,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Add Medication</DialogTitle>
         </DialogHeader>
@@ -83,7 +83,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
               />
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button variant={showFavorites ? 'default' : 'outline'} size="sm" className="gap-1.5 h-7 text-xs" onClick={() => { setShowFavorites(true); setSearch(''); }}>
                 <Star className="w-3 h-3" /> Favorites
               </Button>
@@ -131,7 +131,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                   {prescribedMedications.length}
                 </Badge>
               </div>
-              <div className="max-h-[180px] overflow-y-auto space-y-2 p-3 scrollbar-thin">
+              <div className="max-h-[220px] sm:max-h-[180px] overflow-y-auto space-y-2 p-3 scrollbar-thin">
                 {prescribedMedications.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">No medications added yet</p>
                 ) : (
@@ -145,7 +145,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                             {med.frequency} • {med.duration} • {med.route}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-1 shrink-0 self-center">
                           <Button
                             type="button"
                             variant="ghost"
@@ -191,7 +191,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                       <p className="text-xs text-muted-foreground mt-1" dir="rtl">{selected.nameUrdu}</p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label className="text-xs">Route</Label>
                         <Input value={selected.route} readOnly className="h-8 text-sm bg-muted/30" />
@@ -230,7 +230,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                       <Textarea value={selected.instructionsUrdu} dir="rtl" rows={2} className="text-sm resize-none" readOnly />
                     </div>
 
-                    <div className="flex gap-2 justify-end">
+                    <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end">
                       <Button variant="outline" size="sm" onClick={() => setSelected(null)}>Clear</Button>
                       <Button size="sm" className="gap-1.5" onClick={handleAdd}>
                         <Plus className="w-4 h-4" />
@@ -240,7 +240,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                   </div>
                 </div>
               ) : (
-                <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                <div className="rounded-lg border border-dashed border-border p-6 sm:p-8 text-center text-sm text-muted-foreground">
                   Select a medicine from the list to set dose, frequency, duration, and instructions.
                 </div>
               )}
