@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Search, Filter, UserPlus, Play, CheckCircle2 } from 'lucide-react';
+import WalkInModal from '@/components/consultation/WalkInModal';
 
 interface PatientQueueProps {
   onOpenPatient: (patientId: string) => void;
@@ -16,6 +17,7 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
   const { activeClinic } = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [walkInOpen, setWalkInOpen] = useState(false);
 
   const clinicAppointments = getAppointmentsForClinic(activeClinic?.id || '');
 
