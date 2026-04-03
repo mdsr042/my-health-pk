@@ -15,7 +15,7 @@ export default function NotesTimeline({ notes }: NotesTimelineProps) {
     return (
       <div className="p-6 text-center text-muted-foreground">
         <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-        <p className="font-medium">No Previous Notes</p>
+        <p className="font-medium">No Previous Visits</p>
         <p className="text-sm">This patient has no previous consultation records</p>
       </div>
     );

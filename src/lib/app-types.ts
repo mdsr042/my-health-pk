@@ -1,6 +1,7 @@
 import type {
   Appointment,
   ClinicalNote,
+  Clinic,
   Diagnosis,
   LabOrder,
   Medication,
@@ -34,6 +35,16 @@ export interface AppStateSnapshot {
   drafts: Record<string, ConsultationDraft>;
 }
 
+export interface ClinicOverride {
+  name: string;
+  location: string;
+  city: string;
+  phone: string;
+  timings: string;
+  specialties: Clinic['specialties'];
+  logo: string;
+}
+
 export interface AppSettings {
   notifications: boolean;
   soundAlerts: boolean;
@@ -42,5 +53,6 @@ export interface AppSettings {
   prescriptionLang: string;
   theme: string;
   compactMode: boolean;
+  clinicOverrides: Record<Clinic['id'], ClinicOverride>;
+  managedClinics: Clinic[];
 }
-

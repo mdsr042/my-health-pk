@@ -43,6 +43,34 @@ const clinicalFieldConfigs = [
   { label: 'Follow-up', key: 'followUp', rows: 1, suggestions: ['Follow up in 3 days', 'Follow up in 1 week', 'PRN review'] },
 ] as const;
 
+function buildPayloadShape(payload: {
+  chiefComplaint: string;
+  hpi: string;
+  pastHistory: string;
+  allergies: string;
+  examination: string;
+  assessment: string;
+  plan: string;
+  instructions: string;
+  followUp: string;
+  diagnoses: Diagnosis[];
+  medications: Medication[];
+  labOrders: LabOrder[];
+}) {
+  return {
+    ...payload,
+    chiefComplaint: payload.chiefComplaint.trim(),
+    hpi: payload.hpi.trim(),
+    pastHistory: payload.pastHistory.trim(),
+    allergies: payload.allergies.trim(),
+    examination: payload.examination.trim(),
+    assessment: payload.assessment.trim(),
+    plan: payload.plan.trim(),
+    instructions: payload.instructions.trim(),
+    followUp: payload.followUp.trim(),
+  };
+}
+
 export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const { markUnsaved } = usePatientTabs();
   const { activeClinic } = useAuth();
@@ -120,21 +148,23 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const openReferralModal = (type: 'referral' | 'admission' | 'followup') => { setReferralType(type); setReferralOpen(true); };
 
   const buildConsultationPayload = useCallback(() => ({
+    ...buildPayloadShape({
+      chiefComplaint,
+      hpi,
+      pastHistory,
+      allergies,
+      examination,
+      assessment,
+      plan,
+      instructions,
+      followUp,
+      diagnoses,
+      medications,
+      labOrders,
+    }),
     patientId,
     clinicId: activeClinic?.id || activeAppointment?.clinicId || 'clinic-1',
-    chiefComplaint,
-    hpi,
-    pastHistory,
-    allergies,
-    examination,
-    assessment,
-    plan,
-    instructions,
-    followUp,
     vitals,
-    diagnoses,
-    medications,
-    labOrders,
   }), [
     activeAppointment?.clinicId,
     activeClinic?.id,
@@ -169,9 +199,6 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const handleComplete = () => {
     completeConsultation(buildConsultationPayload());
     markUnsaved(patientId, false);
-    // Find and update the appointment for this patient
-    const apt = appointments.find(a => a.patientId === patientId && a.status !== 'completed');
-    if (apt) updateAppointmentStatus(apt.id, 'completed');
     toast.success('Visit completed', { description: `${patient?.name} consultation finalized`, icon: <CheckCircle2 className="w-4 h-4 text-success" /> });
   };
 
@@ -225,7 +252,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
   const views: { id: TabView; label: string; icon: React.ElementType }[] = [
     { id: 'consultation', label: 'Consultation', icon: Stethoscope },
-    { id: 'notes', label: 'Previous Notes', icon: FileText },
+    { id: 'notes', label: `Previous Visits (${patientNotes.length})`, icon: FileText },
     { id: 'orders', label: 'Orders', icon: FlaskConical },
     { id: 'documents', label: 'Documents', icon: FileText },
     { id: 'prescription', label: 'Prescription', icon: Printer },

@@ -1,3 +1,5 @@
+import { getLocalDateKey } from '@/lib/date';
+
 export interface Clinic {
   id: string;
   name: string;
@@ -184,7 +186,7 @@ export const patients: Patient[] = [
 ];
 
 // ── Today's Appointments ──
-const today = new Date().toISOString().split('T')[0];
+const today = getLocalDateKey();
 export const appointments: Appointment[] = [
   { id: 'apt-1', patientId: 'p-1', clinicId: 'clinic-1', doctorId: 'doc-1', date: today, time: '09:15', status: 'completed', type: 'follow-up', chiefComplaint: 'Diabetes follow-up', tokenNumber: 1 },
   { id: 'apt-2', patientId: 'p-2', clinicId: 'clinic-1', doctorId: 'doc-1', date: today, time: '09:30', status: 'completed', type: 'new', chiefComplaint: 'Chronic headache', tokenNumber: 2 },
@@ -386,7 +388,7 @@ export function addWalkInPatient(
 ): string {
   const patientId = `p-walkin-${Date.now()}`;
   const mrn = `MRN-${Date.now().toString().slice(-8)}`;
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalDateKey();
 
   const newPatient: Patient = {
     id: patientId,

@@ -1,0 +1,11 @@
+export function getLocalDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function parseDateKey(dateValue: string) {
+  const [year, month, day] = dateValue.split('-').map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+}

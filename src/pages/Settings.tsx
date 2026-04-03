@@ -5,16 +5,14 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Settings2, Bell, Printer, Globe, Shield, Palette } from 'lucide-react';
+import { Settings2, Bell, Globe, Shield, Palette } from 'lucide-react';
 import { readStorage, writeStorage } from '@/lib/storage';
-import { defaultSettings } from '@/lib/app-defaults';
+import { mergeAppSettings, SETTINGS_STORAGE_KEY, SETTINGS_UPDATED_EVENT } from '@/lib/app-defaults';
 import { fetchSettings, persistSettings } from '@/lib/api';
 import type { AppSettings } from '@/lib/app-types';
 
-const SETTINGS_STORAGE_KEY = 'my-health/settings';
-
 export default function SettingsPage() {
-  const saved = readStorage<AppSettings>(SETTINGS_STORAGE_KEY, defaultSettings);
+  const saved = mergeAppSettings(readStorage<Partial<AppSettings>>(SETTINGS_STORAGE_KEY, {}));
 
   const [notifications, setNotifications] = useState(saved.notifications);
   const [soundAlerts, setSoundAlerts] = useState(saved.soundAlerts);
@@ -23,6 +21,8 @@ export default function SettingsPage() {
   const [prescriptionLang, setPrescriptionLang] = useState(saved.prescriptionLang);
   const [theme, setTheme] = useState(saved.theme);
   const [compactMode, setCompactMode] = useState(saved.compactMode);
+  const [clinicOverrides] = useState(saved.clinicOverrides);
+  const [managedClinics] = useState(saved.managedClinics);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,14 +32,16 @@ export default function SettingsPage() {
         const remoteSettings = await fetchSettings();
         if (!remoteSettings || cancelled) return;
 
-        setNotifications(remoteSettings.notifications);
-        setSoundAlerts(remoteSettings.soundAlerts);
-        setAutoSave(remoteSettings.autoSave);
-        setLanguage(remoteSettings.language);
-        setPrescriptionLang(remoteSettings.prescriptionLang);
-        setTheme(remoteSettings.theme);
-        setCompactMode(remoteSettings.compactMode);
-        writeStorage(SETTINGS_STORAGE_KEY, remoteSettings);
+        const mergedRemoteSettings = mergeAppSettings(remoteSettings);
+
+        setNotifications(mergedRemoteSettings.notifications);
+        setSoundAlerts(mergedRemoteSettings.soundAlerts);
+        setAutoSave(mergedRemoteSettings.autoSave);
+        setLanguage(mergedRemoteSettings.language);
+        setPrescriptionLang(mergedRemoteSettings.prescriptionLang);
+        setTheme(mergedRemoteSettings.theme);
+        setCompactMode(mergedRemoteSettings.compactMode);
+        writeStorage(SETTINGS_STORAGE_KEY, mergedRemoteSettings);
       } catch {
         // Keep local settings when the API is unavailable.
       }
@@ -53,7 +55,7 @@ export default function SettingsPage() {
   }, []);
 
   const handleSave = async () => {
-    const nextSettings: AppSettings = {
+    const nextSettings = mergeAppSettings({
       notifications,
       soundAlerts,
       autoSave,
@@ -61,9 +63,12 @@ export default function SettingsPage() {
       prescriptionLang,
       theme,
       compactMode,
-    };
+      clinicOverrides,
+      managedClinics,
+    });
 
     writeStorage(SETTINGS_STORAGE_KEY, nextSettings);
+    window.dispatchEvent(new Event(SETTINGS_UPDATED_EVENT));
 
     try {
       await persistSettings(nextSettings);

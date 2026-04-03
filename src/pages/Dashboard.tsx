@@ -1,7 +1,10 @@
+import { useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useData } from '@/contexts/DataContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { getLocalDateKey, parseDateKey } from '@/lib/date';
 import {
   Users, Clock, Stethoscope, CheckCircle2, AlertTriangle,
   TrendingUp, ArrowRight
@@ -13,10 +16,74 @@ interface DashboardProps {
   onNavigate: (page: string) => void;
 }
 
+type DashboardRange = 'today' | 'last7' | 'month';
+
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function isDateWithinRange(dateValue: string, range: DashboardRange, today: Date) {
+  const current = startOfDay(parseDateKey(dateValue));
+  const end = startOfDay(today);
+
+  if (range === 'today') {
+    return current.getTime() === end.getTime();
+  }
+
+  if (range === 'last7') {
+    const start = new Date(end);
+    start.setDate(end.getDate() - 6);
+    return current >= start && current <= end;
+  }
+
+  const monthStart = new Date(end.getFullYear(), end.getMonth(), 1);
+  return current >= monthStart && current <= end;
+}
+
 export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps) {
   const { activeClinic } = useAuth();
   const { getAppointmentsForClinic, getPatient } = useData();
-  const clinicAppointments = getAppointmentsForClinic(activeClinic?.id || '');
+  const [range, setRange] = useState<DashboardRange>('today');
+  const today = new Date();
+  const todayKey = getLocalDateKey(today);
+  const allClinicAppointments = getAppointmentsForClinic(activeClinic?.id || '');
+  const availableDates = [...new Set(allClinicAppointments.map(appointment => appointment.date))].sort((a, b) => b.localeCompare(a));
+  const fallbackDate = availableDates.includes(todayKey) ? todayKey : availableDates[0];
+  const clinicAppointments = useMemo(() => {
+    const filtered = allClinicAppointments.filter(appointment => {
+      if (range === 'today' && fallbackDate && !availableDates.includes(todayKey)) {
+        return appointment.date === fallbackDate;
+      }
+
+      return isDateWithinRange(appointment.date, range, today);
+    });
+
+    return filtered.sort((a, b) => {
+      const dateCompare = a.date.localeCompare(b.date);
+      if (dateCompare !== 0) return dateCompare;
+      const timeCompare = a.time.localeCompare(b.time);
+      if (timeCompare !== 0) return timeCompare;
+      return a.tokenNumber - b.tokenNumber;
+    });
+  }, [allClinicAppointments, availableDates, fallbackDate, range, today, todayKey]);
+
+  const headingDateLabel = useMemo(() => {
+    if (range === 'today') {
+      const selected = fallbackDate ?? todayKey;
+      return parseDateKey(selected).toLocaleDateString('en-PK', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    }
+
+    if (range === 'last7') {
+      return 'Last 7 days';
+    }
+
+    return 'Current month';
+  }, [fallbackDate, range, todayKey]);
 
   const stats = {
     total: clinicAppointments.length,
@@ -27,17 +94,30 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
   };
 
   const kpis = [
-    { label: 'Total Today', value: stats.total, icon: Users, color: 'text-primary', bg: 'bg-primary/10' },
+    { label: range === 'today' ? 'Total Today' : 'Total Visits', value: stats.total, icon: Users, color: 'text-primary', bg: 'bg-primary/10' },
     { label: 'Waiting', value: stats.waiting, icon: Clock, color: 'text-warning', bg: 'bg-warning/10' },
     { label: 'In Consultation', value: stats.inConsultation, icon: Stethoscope, color: 'text-info', bg: 'bg-info/10' },
     { label: 'Completed', value: stats.completed, icon: CheckCircle2, color: 'text-success', bg: 'bg-success/10' },
     { label: 'Pending', value: stats.scheduled, icon: AlertTriangle, color: 'text-muted-foreground', bg: 'bg-muted' },
   ];
 
-  const hourlyData = [
-    { hour: '9AM', patients: 3 }, { hour: '10AM', patients: 5 }, { hour: '11AM', patients: 4 },
-    { hour: '12PM', patients: 2 }, { hour: '1PM', patients: 3 }, { hour: '2PM', patients: 1 },
-  ];
+  const hourBuckets = new Map<string, { patients: number; sortKey: number }>();
+  clinicAppointments.forEach(appointment => {
+    const [hours] = appointment.time.split(':').map(Number);
+    const label = new Date(2026, 0, 1, hours).toLocaleTimeString('en-PK', {
+      hour: 'numeric',
+      hour12: true,
+    });
+    const existing = hourBuckets.get(label);
+    hourBuckets.set(label, {
+      patients: (existing?.patients ?? 0) + 1,
+      sortKey: hours,
+    });
+  });
+
+  const hourlyData = [...hourBuckets.entries()]
+    .map(([hour, value]) => ({ hour, patients: value.patients, sortKey: value.sortKey }))
+    .sort((a, b) => a.sortKey - b.sortKey);
 
   const statusData = [
     { name: 'Completed', value: stats.completed, color: 'hsl(152, 60%, 40%)' },
@@ -64,11 +144,41 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground text-sm">{activeClinic?.name} • {new Date().toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+          <p className="text-muted-foreground text-sm">
+            {activeClinic?.name} • {headingDateLabel}
+          </p>
         </div>
-        <button onClick={() => onNavigate('queue')} className="text-sm text-primary hover:underline flex items-center gap-1">
-          View Queue <ArrowRight className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+            <Button
+              variant={range === 'today' ? 'secondary' : 'ghost'}
+              size="sm"
+              className={range === 'today' ? 'h-8 text-xs bg-success/10 text-success hover:bg-success/20' : 'h-8 text-xs'}
+              onClick={() => setRange('today')}
+            >
+              Today
+            </Button>
+            <Button
+              variant={range === 'last7' ? 'secondary' : 'ghost'}
+              size="sm"
+              className={range === 'last7' ? 'h-8 text-xs bg-success/10 text-success hover:bg-success/20' : 'h-8 text-xs'}
+              onClick={() => setRange('last7')}
+            >
+              Last 7 Days
+            </Button>
+            <Button
+              variant={range === 'month' ? 'secondary' : 'ghost'}
+              size="sm"
+              className={range === 'month' ? 'h-8 text-xs bg-success/10 text-success hover:bg-success/20' : 'h-8 text-xs'}
+              onClick={() => setRange('month')}
+            >
+              This Month
+            </Button>
+          </div>
+          <button onClick={() => onNavigate('queue')} className="text-sm text-primary hover:underline flex items-center gap-1">
+            View Queue <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -93,7 +203,7 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
       <div className="grid lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-1 border-0 shadow-sm">
           <CardContent className="p-4">
-            <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+          <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-primary" /> Hourly Flow
             </h3>
             <ResponsiveContainer width="100%" height={200}>
@@ -167,7 +277,9 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
 
       <Card className="border-0 shadow-sm">
         <CardContent className="p-4">
-          <h3 className="font-semibold text-foreground mb-4">Today's Appointments</h3>
+          <h3 className="font-semibold text-foreground mb-4">
+            {range === 'today' ? "Today's Appointments" : range === 'last7' ? 'Appointments in Last 7 Days' : 'Appointments This Month'}
+          </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

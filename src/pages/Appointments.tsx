@@ -1,17 +1,37 @@
+import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useData } from '@/contexts/DataContext';
+import { getLocalDateKey, parseDateKey } from '@/lib/date';
 import { CalendarDays, Clock, Plus, ChevronLeft, ChevronRight, User } from 'lucide-react';
 
 export default function Appointments() {
   const { activeClinic } = useAuth();
-  const { getAppointmentsForClinic, getPatient } = useData();
+  const { getAppointmentsForClinic, getAppointmentsForClinicOnDate, getPatient } = useData();
   const today = new Date();
-  const formattedDate = today.toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const allClinicAppointments = useMemo(
+    () => getAppointmentsForClinic(activeClinic?.id || ''),
+    [activeClinic?.id, getAppointmentsForClinic]
+  );
+  const availableDates = useMemo(
+    () => [...new Set(allClinicAppointments.map(appointment => appointment.date))].sort((a, b) => b.localeCompare(a)),
+    [allClinicAppointments]
+  );
+  const initialDate = availableDates.includes(getLocalDateKey(today))
+    ? today
+    : availableDates[0]
+      ? parseDateKey(availableDates[0])
+      : today;
+  const [selectedDate, setSelectedDate] = useState(initialDate);
+  const selectedDateKey = getLocalDateKey(selectedDate);
+  const formattedDate = selectedDate.toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-  const clinicAppointments = getAppointmentsForClinic(activeClinic?.id || '');
+  const clinicAppointments = useMemo(
+    () => getAppointmentsForClinicOnDate(activeClinic?.id || '', selectedDateKey),
+    [activeClinic?.id, getAppointmentsForClinicOnDate, selectedDateKey]
+  );
 
   const timeSlots = Array.from({ length: 10 }, (_, i) => {
     const hour = 9 + i;
@@ -34,9 +54,13 @@ export default function Appointments() {
           <p className="text-sm text-muted-foreground">{formattedDate}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" className="h-8 w-8"><ChevronLeft className="w-4 h-4" /></Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs">Today</Button>
-          <Button variant="outline" size="icon" className="h-8 w-8"><ChevronRight className="w-4 h-4" /></Button>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setSelectedDate(prev => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 1))}>
+            <ChevronLeft className="w-4 h-4" />
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setSelectedDate(new Date())}>Today</Button>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setSelectedDate(prev => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 1))}>
+            <ChevronRight className="w-4 h-4" />
+          </Button>
           <Button size="sm" className="gap-1.5 ml-2"><Plus className="w-4 h-4" /> New Appointment</Button>
         </div>
       </div>
