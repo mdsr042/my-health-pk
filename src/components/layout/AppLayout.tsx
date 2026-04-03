@@ -158,6 +158,7 @@ export default function AppLayout({ children, currentPage, onNavigate }: AppLayo
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => onNavigate('profile')}>Profile</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onNavigate('clinics')}>Clinic Management</DropdownMenuItem>
               <DropdownMenuItem onClick={() => onNavigate('settings')}>Settings</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={logout} className="text-destructive">
@@ -169,27 +170,42 @@ export default function AppLayout({ children, currentPage, onNavigate }: AppLayo
 
         {/* Patient tabs bar */}
         {tabs.length > 0 && currentPage === 'workspace' && (
-          <div className="bg-card border-b border-border px-4 flex items-center gap-0.5 overflow-x-auto scrollbar-thin">
+          <div className="bg-card border-b border-border px-4 py-2 flex items-center gap-2 overflow-x-auto scrollbar-thin">
             {tabs.map(tab => (
-              <button
+              <div
                 key={tab.patientId}
+                role="button"
+                tabIndex={0}
                 onClick={() => setActiveTab(tab.patientId)}
-                className={`group flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors whitespace-nowrap ${
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setActiveTab(tab.patientId);
+                  }
+                }}
+                className={`group flex items-center gap-2 px-4 py-2.5 text-sm rounded-lg border transition-colors whitespace-nowrap ${
                   activeTabId === tab.patientId
-                    ? 'border-primary text-primary font-medium'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                    ? 'border-primary/30 bg-primary/10 text-primary font-semibold shadow-sm'
+                    : 'border-border/60 bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40'
                 }`}
               >
-                {tab.hasUnsavedChanges && <span className="w-1.5 h-1.5 rounded-full bg-warning" />}
+                {tab.hasUnsavedChanges && (
+                  <span className={`w-1.5 h-1.5 rounded-full ${activeTabId === tab.patientId ? 'bg-primary' : 'bg-warning'}`} />
+                )}
                 {tab.patientName}
-                <span className="text-xs text-muted-foreground">({tab.mrn})</span>
+                <span className={`text-xs ${activeTabId === tab.patientId ? 'text-primary/80' : 'text-muted-foreground'}`}>({tab.mrn})</span>
                 <button
                   onClick={e => { e.stopPropagation(); closeTab(tab.patientId); }}
-                  className="ml-1 opacity-0 group-hover:opacity-100 hover:bg-muted rounded p-0.5"
+                  type="button"
+                  className={`ml-1 rounded p-0.5 transition-opacity ${
+                    activeTabId === tab.patientId
+                      ? 'opacity-80 hover:bg-primary/10'
+                      : 'opacity-0 group-hover:opacity-100 hover:bg-muted'
+                  }`}
                 >
                   <X className="w-3 h-3" />
                 </button>
-              </button>
+              </div>
             ))}
           </div>
         )}
