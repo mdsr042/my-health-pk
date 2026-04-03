@@ -56,7 +56,11 @@ app.put('/api/settings', (req, res) => {
 
 app.use(express.static(distDir));
 
-app.get('*', (_req, res) => {
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+
   res.sendFile(path.join(distDir, 'index.html'));
 });
 
