@@ -138,7 +138,7 @@ export async function seedDemoWorkspace({ query }) {
       'Lahore',
       '042-35431200',
       '9:00 AM - 2:00 PM',
-      ['General Medicine', 'Cardiology', 'Dermatology'],
+      JSON.stringify(['General Medicine', 'Cardiology', 'Dermatology']),
       '🏥',
       DEMO_CLINIC_2_ID,
       'Demo Family Clinic',
@@ -146,7 +146,7 @@ export async function seedDemoWorkspace({ query }) {
       'Lahore',
       '042-35762100',
       '4:00 PM - 9:00 PM',
-      ['Family Medicine', 'Pediatrics'],
+      JSON.stringify(['Family Medicine', 'Pediatrics']),
       '🏨',
     ]
   );
