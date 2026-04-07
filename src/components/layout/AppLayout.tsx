@@ -1,6 +1,7 @@
 import React, { ReactNode, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
+import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
 import {
   LayoutDashboard, Users, CalendarDays, FileText, Settings, LogOut,
@@ -14,6 +15,7 @@ interface AppLayoutProps {
   children: ReactNode;
   currentPage: string;
   onNavigate: (page: string) => void;
+  onOpenPatient: (patientId: string) => void;
 }
 
 const navItems = [
@@ -23,10 +25,29 @@ const navItems = [
   { id: 'records', label: 'Records', icon: FileText },
 ];
 
-export default function AppLayout({ children, currentPage, onNavigate }: AppLayoutProps) {
+export default function AppLayout({ children, currentPage, onNavigate, onOpenPatient }: AppLayoutProps) {
   const { doctor, activeClinic, doctorClinics, switchClinic, logout } = useAuth();
   const { tabs, activeTabId, setActiveTab, closeTab } = usePatientTabs();
+  const { patients } = useData();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  const searchResults = search.trim()
+    ? patients
+        .filter(patient =>
+          patient.name.toLowerCase().includes(search.toLowerCase()) ||
+          patient.mrn.toLowerCase().includes(search.toLowerCase()) ||
+          patient.phone.includes(search)
+        )
+        .slice(0, 6)
+    : [];
+
+  const handleSelectPatient = (patientId: string) => {
+    onOpenPatient(patientId);
+    setSearch('');
+    setSearchOpen(false);
+  };
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -141,8 +162,34 @@ export default function AppLayout({ children, currentPage, onNavigate }: AppLayo
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               placeholder="Search patients, records..."
+              value={search}
+              onFocus={() => setSearchOpen(true)}
+              onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
+              onChange={event => setSearch(event.target.value)}
               className="w-64 h-9 pl-9 pr-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
+            {searchOpen && search.trim() && (
+              <div className="absolute top-11 left-0 w-80 rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+                {searchResults.length > 0 ? (
+                  <div className="py-1">
+                    {searchResults.map(patient => (
+                      <button
+                        key={patient.id}
+                        type="button"
+                        onMouseDown={event => event.preventDefault()}
+                        onClick={() => handleSelectPatient(patient.id)}
+                        className="w-full px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+                      >
+                        <p className="text-sm font-medium text-foreground">{patient.name}</p>
+                        <p className="text-xs text-muted-foreground">{patient.mrn} • {patient.phone}</p>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-3 py-3 text-sm text-muted-foreground">No patients found</div>
+                )}
+              </div>
+            )}
           </div>
 
           <Button variant="ghost" size="icon" className="relative">

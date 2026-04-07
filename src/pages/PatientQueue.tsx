@@ -5,9 +5,10 @@ import { useData } from '@/contexts/DataContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Filter, UserPlus, Play, CheckCircle2 } from 'lucide-react';
+import { Search, Filter, UserPlus, Play, MoreHorizontal } from 'lucide-react';
 import WalkInModal from '@/components/consultation/WalkInModal';
 
 interface PatientQueueProps {
@@ -16,7 +17,7 @@ interface PatientQueueProps {
 
 export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
   const { activeClinic } = useAuth();
-  const { getAppointmentsForClinic, getPatient, updateAppointmentStatus } = useData();
+  const { getAppointmentsForClinic, getPatient, applyQueueAction } = useData();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [walkInOpen, setWalkInOpen] = useState(false);
@@ -36,6 +37,8 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
       case 'in-consultation': return 'bg-info/10 text-info border-info/20';
       case 'completed': return 'bg-success/10 text-success border-success/20';
       case 'scheduled': return 'bg-muted text-muted-foreground border-border';
+      case 'cancelled': return 'bg-destructive/10 text-destructive border-destructive/20';
+      case 'no-show': return 'bg-destructive/10 text-destructive border-destructive/20';
       default: return 'bg-muted text-muted-foreground';
     }
   };
@@ -46,6 +49,8 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
       case 'waiting': return 'Waiting';
       case 'completed': return 'Completed';
       case 'scheduled': return 'Scheduled';
+      case 'cancelled': return 'Cancelled';
+      case 'no-show': return 'No-show';
       default: return s;
     }
   };
@@ -59,14 +64,29 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
     return diff > 0 ? `${diff} min` : '-';
   };
 
-  const handleMarkDone = (aptId: string, patientName: string) => {
-    updateAppointmentStatus(aptId, 'completed');
-    toast.success(`${patientName} marked as completed`);
+  const handleQueueAction = async (
+    aptId: string,
+    patientName: string,
+    action: 'arrived' | 'start' | 'return-to-waiting' | 'restore-to-waiting' | 'complete' | 'cancel' | 'no-show'
+  ) => {
+    await applyQueueAction(aptId, action);
+
+    const messages = {
+      arrived: `${patientName} marked as arrived`,
+      start: `${patientName} moved to consultation`,
+      'return-to-waiting': `${patientName} returned to waiting`,
+      'restore-to-waiting': `${patientName} restored to waiting`,
+      complete: `${patientName} marked as completed`,
+      cancel: `${patientName} cancelled`,
+      'no-show': `${patientName} marked as no-show`,
+    };
+
+    toast.success(messages[action]);
   };
 
-  const handleStartConsultation = (aptId: string, patientId: string, status: string) => {
+  const handleStartConsultation = async (aptId: string, patientId: string, status: string) => {
     if (status === 'scheduled' || status === 'waiting') {
-      updateAppointmentStatus(aptId, 'in-consultation');
+      await applyQueueAction(aptId, 'start');
     }
     onOpenPatient(patientId);
   };
@@ -98,6 +118,8 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
               <SelectItem value="waiting">Waiting</SelectItem>
               <SelectItem value="in-consultation">In Consultation</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
+              <SelectItem value="no-show">No-show</SelectItem>
             </SelectContent>
           </Select>
         </CardContent>
@@ -124,11 +146,21 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
               <tbody>
                 {filtered.map(apt => {
                   const pat = getPatient(apt.patientId);
+                  const hasSecondaryActions =
+                    apt.status === 'scheduled' ||
+                    apt.status === 'waiting' ||
+                    apt.status === 'in-consultation' ||
+                    apt.status === 'completed' ||
+                    apt.status === 'cancelled' ||
+                    apt.status === 'no-show';
+                  const isStartable = apt.status === 'scheduled' || apt.status === 'waiting';
+                  const primaryActionLabel = isStartable ? 'Start' : 'Open';
+
                   return (
                     <tr key={apt.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                       <td className="px-4 py-3 text-muted-foreground font-medium">{apt.tokenNumber}</td>
                       <td className="px-4 py-3">
-                        <button onClick={() => handleStartConsultation(apt.id, apt.patientId, apt.status)} className="text-left hover:text-primary">
+                        <button type="button" onClick={() => void handleStartConsultation(apt.id, apt.patientId, apt.status)} className="text-left hover:text-primary">
                           <p className="font-medium text-foreground">{pat?.name}</p>
                           <p className="text-xs text-muted-foreground truncate max-w-[200px]">{apt.chiefComplaint}</p>
                         </button>
@@ -152,13 +184,59 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <Button size="sm" className="h-7 text-xs gap-1" onClick={() => handleStartConsultation(apt.id, apt.patientId, apt.status)}>
-                            <Play className="w-3 h-3" /> Open
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs gap-1"
+                            onClick={() => void handleStartConsultation(apt.id, apt.patientId, apt.status)}
+                          >
+                            <Play className="w-3 h-3" />
+                            {primaryActionLabel}
                           </Button>
-                          {apt.status !== 'completed' && (
-                            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-success" onClick={() => handleMarkDone(apt.id, pat?.name || '')}>
-                              <CheckCircle2 className="w-3 h-3" /> Done
-                            </Button>
+                          {hasSecondaryActions && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-7 w-7">
+                                  <MoreHorizontal className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {apt.status === 'scheduled' && (
+                                  <DropdownMenuItem onClick={() => void handleQueueAction(apt.id, pat?.name || '', 'arrived')}>
+                                    Mark Arrived
+                                  </DropdownMenuItem>
+                                )}
+                                {(apt.status === 'scheduled' || apt.status === 'waiting') && (
+                                  <DropdownMenuItem onClick={() => void handleQueueAction(apt.id, pat?.name || '', 'start')}>
+                                    Start Consultation
+                                  </DropdownMenuItem>
+                                )}
+                                {apt.status === 'in-consultation' && (
+                                  <DropdownMenuItem onClick={() => void handleQueueAction(apt.id, pat?.name || '', 'return-to-waiting')}>
+                                    Return to Waiting
+                                  </DropdownMenuItem>
+                                )}
+                                {(apt.status === 'completed' || apt.status === 'cancelled' || apt.status === 'no-show') && (
+                                  <DropdownMenuItem onClick={() => void handleQueueAction(apt.id, pat?.name || '', 'restore-to-waiting')}>
+                                    Restore to Waiting
+                                  </DropdownMenuItem>
+                                )}
+                                {apt.status !== 'completed' && apt.status !== 'cancelled' && apt.status !== 'no-show' && (
+                                  <DropdownMenuItem onClick={() => void handleQueueAction(apt.id, pat?.name || '', 'complete')}>
+                                    Complete
+                                  </DropdownMenuItem>
+                                )}
+                                {apt.status !== 'completed' && apt.status !== 'cancelled' && (
+                                  <DropdownMenuItem onClick={() => void handleQueueAction(apt.id, pat?.name || '', 'no-show')}>
+                                    Mark No-show
+                                  </DropdownMenuItem>
+                                )}
+                                {apt.status !== 'completed' && apt.status !== 'cancelled' && (
+                                  <DropdownMenuItem onClick={() => void handleQueueAction(apt.id, pat?.name || '', 'cancel')}>
+                                    Cancel Visit
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           )}
                         </div>
                       </td>

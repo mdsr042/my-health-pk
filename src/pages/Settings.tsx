@@ -187,7 +187,6 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground">Password change, two-factor authentication, and session management will be available after backend integration.</p>
         </CardContent>
       </Card>
-
       <div className="flex justify-end">
         <Button onClick={handleSave}>Save Settings</Button>
       </div>

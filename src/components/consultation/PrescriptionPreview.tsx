@@ -1,6 +1,5 @@
-import { type Patient, type Diagnosis, type Medication, doctor } from '@/data/mockData';
+import { type Patient, type Diagnosis, type Medication, type Vitals, doctor } from '@/data/mockData';
 import { useAuth } from '@/contexts/AuthContext';
-import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { Printer } from 'lucide-react';
 
@@ -9,13 +8,38 @@ interface PrescriptionPreviewProps {
   diagnoses: Diagnosis[];
   medications: Medication[];
   chiefComplaint: string;
+  pastHistory: string;
+  allergies: string;
+  vitals: Vitals;
   followUp: string;
   instructions: string;
 }
 
-export default function PrescriptionPreview({ patient, diagnoses, medications, chiefComplaint, followUp, instructions }: PrescriptionPreviewProps) {
+export default function PrescriptionPreview({
+  patient,
+  diagnoses,
+  medications,
+  chiefComplaint,
+  pastHistory,
+  allergies,
+  vitals,
+  followUp,
+  instructions,
+}: PrescriptionPreviewProps) {
   const { activeClinic } = useAuth();
-  const today = new Date().toLocaleDateString('en-PK', { year: 'numeric', month: 'long', day: 'numeric' });
+  const now = new Date();
+  const today = now.toLocaleDateString('en-PK', { year: 'numeric', month: 'long', day: 'numeric' });
+  const printedAt = now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+  const vitalsList = [
+    { label: 'BP', value: vitals.bp },
+    { label: 'Pulse', value: vitals.pulse ? `${vitals.pulse} bpm` : '' },
+    { label: 'Temp', value: vitals.temp ? `${vitals.temp} °F` : '' },
+    { label: 'SpO2', value: vitals.spo2 ? `${vitals.spo2}%` : '' },
+    { label: 'Weight', value: vitals.weight ? `${vitals.weight} kg` : '' },
+    { label: 'Height', value: vitals.height ? `${vitals.height} cm` : '' },
+    { label: 'BMI', value: vitals.bmi },
+    { label: 'RR', value: vitals.respiratoryRate ? `${vitals.respiratoryRate}/min` : '' },
+  ].filter(item => item.value);
 
   return (
     <div className="p-4 lg:p-6">
@@ -25,11 +49,16 @@ export default function PrescriptionPreview({ patient, diagnoses, medications, c
         </Button>
       </div>
 
-      {/* A4 preview */}
-      <div className="bg-card mx-auto max-w-[210mm] shadow-lg rounded-lg overflow-hidden border border-border flex flex-col" style={{ minHeight: '297mm' }}>
-        {/* Letterhead */}
+      <div
+        className="bg-card mx-auto max-w-[210mm] shadow-lg rounded-lg overflow-hidden border border-border flex flex-col"
+        style={{ minHeight: '297mm' }}
+      >
         <div className="bg-primary px-8 py-4 text-primary-foreground">
-          <div className="flex items-start justify-between">
+          <div className="flex items-center justify-between text-[11px] text-primary-foreground/80 mb-3">
+            <p>{printedAt}</p>
+            <p className="font-medium">Prescription</p>
+          </div>
+          <div className="flex items-start justify-between gap-6">
             <div>
               <h1 className="text-lg font-bold">{activeClinic?.logo} {activeClinic?.name}</h1>
               <p className="text-xs text-primary-foreground/80">{activeClinic?.location}, {activeClinic?.city}</p>
@@ -37,137 +66,179 @@ export default function PrescriptionPreview({ patient, diagnoses, medications, c
             </div>
             <div className="text-right">
               <p className="text-base font-bold">{doctor.name}</p>
-              <p className="text-xs text-primary-foreground/80">{doctor.qualifications}</p>
               <p className="text-xs text-primary-foreground/80">{doctor.specialization}</p>
+              <p className="text-xs text-primary-foreground/80">{doctor.qualifications}</p>
               <p className="text-[11px] text-primary-foreground/60">PMC Reg: {doctor.pmcNumber}</p>
             </div>
           </div>
         </div>
 
         <div className="px-8 py-5 flex-1 flex flex-col">
-          {/* Patient info */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <div className="grid grid-cols-3 gap-x-4 gap-y-2 text-sm border-b border-border pb-3">
             <div>
-              <p className="text-muted-foreground text-xs">Patient Name</p>
+              <p className="text-muted-foreground text-xs">Patient</p>
               <p className="font-medium text-foreground">{patient.name}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-muted-foreground text-xs">Date</p>
-              <p className="font-medium text-foreground">{today}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">MRN</p>
               <p className="font-medium text-foreground">{patient.mrn}</p>
             </div>
             <div className="text-right">
+              <p className="text-muted-foreground text-xs">Date</p>
+              <p className="font-medium text-foreground">{today}</p>
+            </div>
+            <div>
               <p className="text-muted-foreground text-xs">Age / Gender</p>
-              <p className="font-medium text-foreground">{patient.age} years / {patient.gender}</p>
+              <p className="font-medium text-foreground">{patient.age}y / {patient.gender}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Phone</p>
+              <p className="font-medium text-foreground">{patient.phone}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-muted-foreground text-xs">Blood Group</p>
+              <p className="font-medium text-foreground">{patient.bloodGroup || '-'}</p>
             </div>
           </div>
 
-          <Separator className="my-3" />
+          <div className="mt-3 grid grid-cols-[240px_1fr] flex-1 border border-border">
+            <div className="border-r border-border px-4 py-4 space-y-4">
+              {chiefComplaint && (
+                <section>
+                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Chief Complaint</h3>
+                  <p className="text-sm leading-5 text-foreground whitespace-pre-line">{chiefComplaint}</p>
+                </section>
+              )}
 
-          {/* Chief Complaint */}
-          {chiefComplaint && (
-            <div className="mb-3">
-              <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Chief Complaint</h3>
-              <p className="text-sm leading-5 text-foreground">{chiefComplaint}</p>
+              {pastHistory && (
+                <section>
+                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Past Medical History</h3>
+                  <p className="text-sm leading-5 text-foreground whitespace-pre-line">{pastHistory}</p>
+                </section>
+              )}
+
+              {vitalsList.length > 0 && (
+                <section>
+                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Vitals</h3>
+                  <div className="space-y-1">
+                    {vitalsList.map(item => (
+                      <div key={item.label} className="flex items-start justify-between gap-3 text-sm">
+                        <span className="text-muted-foreground">{item.label}</span>
+                        <span className="text-right text-foreground">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {allergies && (
+                <section>
+                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Allergies</h3>
+                  <p className="text-sm leading-5 text-foreground whitespace-pre-line">{allergies}</p>
+                </section>
+              )}
+
+              {diagnoses.length > 0 && (
+                <section>
+                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Diagnosis</h3>
+                  <div className="space-y-1.5">
+                    {diagnoses.map(dx => (
+                      <p key={dx.id} className="text-sm leading-5 text-foreground">
+                        {dx.name}
+                        {dx.code && <span className="text-muted-foreground"> ({dx.code})</span>}
+                        {dx.isPrimary && <span className="text-xs text-primary font-medium"> Primary</span>}
+                      </p>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
-          )}
 
-          {/* Diagnoses */}
-          {diagnoses.length > 0 && (
-            <div className="mb-3">
-              <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Diagnosis</h3>
-              <ol className="list-decimal list-inside space-y-0.5">
-                {diagnoses.map(dx => (
-                  <li key={dx.id} className="text-sm leading-5 text-foreground">
-                    {dx.name} <span className="text-muted-foreground">({dx.code})</span>
-                    {dx.isPrimary && <span className="ml-2 text-xs text-primary font-medium">— Primary</span>}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
+            <div className="px-5 py-4 flex flex-col">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-2xl font-serif font-bold text-primary">℞</span>
+                <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Prescription</h3>
+              </div>
 
-          <Separator className="my-3" />
-
-          {/* Prescription symbol */}
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xl font-serif font-bold text-primary">℞</span>
-            <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Prescription</h3>
-          </div>
-
-          {medications.length === 0 ? (
-            <p className="text-sm text-muted-foreground italic">No medications prescribed</p>
-          ) : (
-            <div className="space-y-2.5">
-              {medications.map((med, i) => (
-                <div key={med.id} className="border-b border-border/40 pb-2 last:border-0">
-                  <div className="flex items-start gap-2">
-                    <span className="text-xs font-semibold text-muted-foreground pt-0.5">{i + 1}.</span>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold leading-5 text-foreground">{med.name}</p>
+              {medications.length === 0 ? (
+                <p className="text-sm text-muted-foreground italic">No medications prescribed</p>
+              ) : (
+                <div className="space-y-2">
+                  {medications.map((med, index) => (
+                    <div key={med.id} className="pb-2 border-b border-dashed border-border/80 last:border-b-0">
+                      <p className="text-sm font-semibold leading-5 text-foreground">
+                        {index + 1}. {med.name}
+                        {med.strength && <span className="font-medium"> - {med.strength}</span>}
+                        {med.form && <span className="font-medium"> {med.form}</span>}
+                      </p>
                       <p className="text-xs leading-4 text-muted-foreground">
-                        {med.generic} • {med.strength} • {med.form} • {med.route}
+                        {med.generic}
+                        {med.route && ` • ${med.route}`}
+                        {med.duration && ` • ${med.duration}`}
                       </p>
                       <p className="text-sm leading-5 text-foreground">
-                        <span className="text-muted-foreground">Freq:</span> {med.frequency}
-                        <span className="text-muted-foreground"> • Dur:</span> {med.duration}
+                        {med.frequency}
+                        {med.instructions && <span className="text-muted-foreground"> • {med.instructions}</span>}
                       </p>
-                      {med.instructions && (
-                        <p className="text-xs leading-4 text-foreground">{med.instructions}</p>
-                      )}
                       {med.instructionsUrdu && (
-                        <p className="text-xs leading-5 text-foreground" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}>
+                        <p
+                          className="text-xs leading-5 text-foreground text-right"
+                          dir="rtl"
+                          style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
+                        >
                           {med.instructionsUrdu}
                         </p>
                       )}
                     </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
 
-          <Separator className="my-3" />
-
-          {/* Instructions */}
-          {instructions && (
-            <div className="mb-3">
-              <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Instructions</h3>
-              <p className="text-sm leading-5 text-foreground">{instructions}</p>
+              {(instructions || followUp) && (
+                <div className="mt-4 space-y-2">
+                  {instructions && (
+                    <section>
+                      <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Instructions</h3>
+                      <p className="text-sm leading-5 text-foreground whitespace-pre-line">{instructions}</p>
+                    </section>
+                  )}
+                  {followUp && (
+                    <section>
+                      <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Follow-up</h3>
+                      <p className="text-sm leading-5 text-foreground whitespace-pre-line">{followUp}</p>
+                    </section>
+                  )}
+                </div>
+              )}
             </div>
-          )}
-
-          {/* Follow-up */}
-          {followUp && (
-            <div className="mb-3">
-              <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Follow-up</h3>
-              <p className="text-sm leading-5 text-foreground">{followUp}</p>
-            </div>
-          )}
+          </div>
 
           <div className="mt-auto pt-8">
-            <div className="flex items-end justify-between">
-              <div className="text-center">
-                <div className="w-16 h-16 border border-dashed border-border rounded-lg flex items-center justify-center text-[10px] text-muted-foreground">
-                  QR Code
-                </div>
-              </div>
+            <div className="flex items-end justify-end">
               <div className="text-center">
                 <div className="w-44 border-t border-foreground pt-2">
-                  <p className="text-sm font-medium text-foreground">{doctor.name}</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Signature</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-8 py-2.5 bg-muted/50 text-center border-t border-border">
-          <p className="text-xs text-muted-foreground">
-            This prescription is computer-generated. • {activeClinic?.name} • {activeClinic?.phone}
+        <div className="px-8 py-3 bg-muted/50 border-t border-border">
+          <div className="grid grid-cols-2 gap-6 text-xs">
+            <div>
+              <p className="font-semibold text-foreground">{doctor.name}</p>
+              <p className="text-muted-foreground">{doctor.qualifications}</p>
+              <p className="text-muted-foreground">{doctor.specialization}</p>
+            </div>
+            <div className="text-right">
+              <p className="font-semibold text-foreground">{activeClinic?.name}</p>
+              <p className="text-muted-foreground">{activeClinic?.location}, {activeClinic?.city}</p>
+              <p className="text-muted-foreground">Phone: {activeClinic?.phone}</p>
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] text-center text-muted-foreground">
+            This prescription is computer-generated.
           </p>
         </div>
       </div>

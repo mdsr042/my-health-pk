@@ -42,7 +42,7 @@ export interface Appointment {
   doctorId: string;
   date: string;
   time: string;
-  status: 'scheduled' | 'waiting' | 'in-consultation' | 'completed' | 'cancelled';
+  status: 'scheduled' | 'waiting' | 'in-consultation' | 'completed' | 'cancelled' | 'no-show';
   type: 'new' | 'follow-up';
   chiefComplaint?: string;
   tokenNumber: number;

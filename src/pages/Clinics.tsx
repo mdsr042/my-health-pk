@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
-import { clinics as baseClinics, type Clinic } from '@/data/mockData';
+import { useState } from 'react';
+import type { Clinic } from '@/data/mockData';
 import { useAuth } from '@/contexts/AuthContext';
+import { createClinic, updateClinic } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,10 +11,6 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Plus, Building2, MapPin, Phone, Clock, Pencil, CheckCircle2 } from 'lucide-react';
-import { readStorage, writeStorage } from '@/lib/storage';
-import { mergeAppSettings, SETTINGS_STORAGE_KEY, SETTINGS_UPDATED_EVENT } from '@/lib/app-defaults';
-import { persistSettings } from '@/lib/api';
-import type { AppSettings, ClinicOverride } from '@/lib/app-types';
 import { toast } from 'sonner';
 
 const defaultClinicForm = {
@@ -30,28 +27,23 @@ const defaultClinicForm = {
 const clinicIconOptions = ['🏥', '🏨', '🏩', '🩺', '🏪', '🏬', '🏢', '❤️', '🧑‍⚕️'];
 
 export default function ClinicsPage() {
-  const { activeClinic, doctorClinics, switchClinic } = useAuth();
-  const saved = mergeAppSettings(readStorage<Partial<AppSettings>>(SETTINGS_STORAGE_KEY, {}));
-  const [clinicOverrides, setClinicOverrides] = useState(saved.clinicOverrides);
-  const [managedClinics, setManagedClinics] = useState(saved.managedClinics);
+  const { activeClinic, doctorClinics, switchClinic, refreshSession } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingClinicId, setEditingClinicId] = useState<string | null>(null);
+  const [editingClinic, setEditingClinic] = useState<Clinic | null>(null);
   const [clinicForm, setClinicForm] = useState(defaultClinicForm);
-
-  const baseClinicIds = useMemo(() => new Set(baseClinics.map(clinic => clinic.id)), []);
 
   const updateField = (field: keyof typeof defaultClinicForm, value: string) => {
     setClinicForm(prev => ({ ...prev, [field]: value }));
   };
 
   const openAddModal = () => {
-    setEditingClinicId(null);
+    setEditingClinic(null);
     setClinicForm(defaultClinicForm);
     setModalOpen(true);
   };
 
   const openEditModal = (clinic: Clinic) => {
-    setEditingClinicId(clinic.id);
+    setEditingClinic(clinic);
     setClinicForm({
       id: clinic.id,
       name: clinic.name,
@@ -65,76 +57,37 @@ export default function ClinicsPage() {
     setModalOpen(true);
   };
 
-  const persistClinicSettings = async (nextOverrides: Record<string, ClinicOverride>, nextManagedClinics: Clinic[]) => {
-    const currentSettings = mergeAppSettings(readStorage<Partial<AppSettings>>(SETTINGS_STORAGE_KEY, {}));
-    const nextSettings = mergeAppSettings({
-      ...currentSettings,
-      clinicOverrides: nextOverrides,
-      managedClinics: nextManagedClinics,
-    });
-
-    writeStorage(SETTINGS_STORAGE_KEY, nextSettings);
-    window.dispatchEvent(new Event(SETTINGS_UPDATED_EVENT));
-
-    try {
-      await persistSettings(nextSettings);
-    } catch {
-      // Local storage remains the fallback for prototype mode.
-    }
-  };
-
   const handleSaveClinic = async () => {
-    if (!clinicForm.name.trim() || !clinicForm.location.trim() || !clinicForm.city.trim()) {
-      toast.error('Please add clinic name, location, and city');
+    if (!clinicForm.name.trim() || !clinicForm.city.trim()) {
+      toast.error('Please add clinic name and city');
       return;
     }
 
-    const specialties = clinicForm.specialties
-      .split(',')
-      .map(item => item.trim())
-      .filter(Boolean);
+    const payload = {
+      name: clinicForm.name.trim(),
+      location: clinicForm.location.trim(),
+      city: clinicForm.city.trim(),
+      phone: clinicForm.phone.trim(),
+      timings: clinicForm.timings.trim() || 'By appointment',
+      specialties: clinicForm.specialties
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean),
+      logo: clinicForm.logo.trim() || '🏥',
+    };
 
-    if (editingClinicId && baseClinicIds.has(editingClinicId)) {
-      const nextOverrides = {
-        ...clinicOverrides,
-        [editingClinicId]: {
-          name: clinicForm.name.trim(),
-          location: clinicForm.location.trim(),
-          city: clinicForm.city.trim(),
-          phone: clinicForm.phone.trim(),
-          timings: clinicForm.timings.trim(),
-          specialties,
-          logo: clinicForm.logo.trim() || '🏥',
-        },
-      };
-
-      setClinicOverrides(nextOverrides);
-      await persistClinicSettings(nextOverrides, managedClinics);
+    if (editingClinic) {
+      await updateClinic(editingClinic.id, payload);
       toast.success('Clinic details updated');
     } else {
-      const nextClinic: Clinic = {
-        id: editingClinicId ?? `clinic-custom-${Date.now()}`,
-        name: clinicForm.name.trim(),
-        location: clinicForm.location.trim(),
-        city: clinicForm.city.trim(),
-        phone: clinicForm.phone.trim(),
-        timings: clinicForm.timings.trim() || 'By appointment',
-        specialties,
-        logo: clinicForm.logo.trim() || '🏥',
-      };
-
-      const nextManagedClinics = editingClinicId
-        ? managedClinics.map(clinic => (clinic.id === editingClinicId ? nextClinic : clinic))
-        : [...managedClinics, nextClinic];
-
-      setManagedClinics(nextManagedClinics);
-      await persistClinicSettings(clinicOverrides, nextManagedClinics);
-      toast.success(editingClinicId ? 'Clinic details updated' : 'Clinic added successfully');
+      await createClinic(payload);
+      toast.success('Clinic added successfully');
     }
 
+    await refreshSession();
     setModalOpen(false);
+    setEditingClinic(null);
     setClinicForm(defaultClinicForm);
-    setEditingClinicId(null);
   };
 
   return (
@@ -142,7 +95,7 @@ export default function ClinicsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-foreground">Clinic Management</h1>
-          <p className="text-sm text-muted-foreground">Manage existing clinics and add new practice locations for the prototype.</p>
+          <p className="text-sm text-muted-foreground">Manage existing clinics and add new practice locations.</p>
         </div>
         <Button onClick={openAddModal} className="gap-2">
           <Plus className="w-4 h-4" /> Add Clinic
@@ -163,11 +116,6 @@ export default function ClinicsPage() {
                     <Badge variant="outline" className="text-[10px] bg-success/10 text-success border-success/20">
                       Active
                     </Badge>
-                  )}
-                  {baseClinicIds.has(clinic.id) ? (
-                    <Badge variant="outline" className="text-[10px]">Existing</Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[10px]">Custom</Badge>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-muted-foreground">
@@ -205,7 +153,7 @@ export default function ClinicsPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="w-5 h-5 text-primary" />
-              {editingClinicId ? 'Update Clinic' : 'Add Clinic'}
+              {editingClinic ? 'Update Clinic' : 'Add Clinic'}
             </DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
@@ -256,7 +204,7 @@ export default function ClinicsPage() {
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveClinic}>{editingClinicId ? 'Save Changes' : 'Add Clinic'}</Button>
+            <Button onClick={() => void handleSaveClinic()}>{editingClinic ? 'Save Changes' : 'Add Clinic'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

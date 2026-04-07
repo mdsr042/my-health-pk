@@ -91,6 +91,7 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
     inConsultation: clinicAppointments.filter(a => a.status === 'in-consultation').length,
     completed: clinicAppointments.filter(a => a.status === 'completed').length,
     scheduled: clinicAppointments.filter(a => a.status === 'scheduled').length,
+    noShow: clinicAppointments.filter(a => a.status === 'no-show').length,
   };
 
   const kpis = [
@@ -124,7 +125,8 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
     { name: 'Waiting', value: stats.waiting, color: 'hsl(38, 92%, 50%)' },
     { name: 'In Consult', value: stats.inConsultation, color: 'hsl(210, 75%, 55%)' },
     { name: 'Scheduled', value: stats.scheduled, color: 'hsl(210, 15%, 75%)' },
-  ];
+    { name: 'No-show', value: stats.noShow, color: 'hsl(0, 72%, 58%)' },
+  ].filter(item => item.value > 0 || item.name !== 'No-show');
 
   const waitingPatients = clinicAppointments
     .filter(a => a.status === 'waiting' || a.status === 'in-consultation')
@@ -135,6 +137,8 @@ export default function Dashboard({ onOpenPatient, onNavigate }: DashboardProps)
       case 'waiting': return 'bg-warning/10 text-warning border-warning/20';
       case 'in-consultation': return 'bg-info/10 text-info border-info/20';
       case 'completed': return 'bg-success/10 text-success border-success/20';
+      case 'no-show': return 'bg-destructive/10 text-destructive border-destructive/20';
+      case 'cancelled': return 'bg-destructive/10 text-destructive border-destructive/20';
       default: return 'bg-muted text-muted-foreground';
     }
   };

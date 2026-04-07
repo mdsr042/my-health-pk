@@ -184,20 +184,20 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     vitals,
   ]);
 
-  const handleSaveDraft = () => {
-    saveConsultationDraft(buildConsultationPayload());
+  const handleSaveDraft = async () => {
+    await saveConsultationDraft(buildConsultationPayload());
     markUnsaved(patientId, false);
     toast.success('Draft saved', { description: `${patient?.name} consultation saved as draft` });
   };
 
-  const handleHold = () => {
-    saveConsultationDraft(buildConsultationPayload());
+  const handleHold = async () => {
+    await saveConsultationDraft(buildConsultationPayload());
     markUnsaved(patientId, false);
     toast.info('Consultation on hold', { description: `${patient?.name} — will appear in your pending list` });
   };
 
-  const handleComplete = () => {
-    completeConsultation(buildConsultationPayload());
+  const handleComplete = async () => {
+    await completeConsultation(buildConsultationPayload());
     markUnsaved(patientId, false);
     toast.success('Visit completed', { description: `${patient?.name} consultation finalized`, icon: <CheckCircle2 className="w-4 h-4 text-success" /> });
   };
@@ -224,7 +224,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     if (!hasDraftableContent) return;
 
     const timer = window.setTimeout(() => {
-      saveConsultationDraft(buildConsultationPayload());
+      void saveConsultationDraft(buildConsultationPayload());
       markUnsaved(patientId, false);
     }, 30000);
 
@@ -321,10 +321,10 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
-        {activeView === 'consultation' && (
-          <div className="flex">
-            {/* Main consultation form */}
-            <div className="flex-1 p-4 lg:p-6 space-y-5 overflow-auto">
+        <div className="flex min-h-full">
+          <div className="flex-1">
+            {activeView === 'consultation' && (
+              <div className="p-4 lg:p-6 space-y-5">
               {/* Vitals */}
               <Card className="border-0 shadow-sm">
                 <CardContent className="p-4">
@@ -498,65 +498,68 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                   </div>
                 </div>
               )}
-            </div>
+              </div>
+            )}
 
-            {/* Right quick action rail */}
-            <div className="hidden lg:flex flex-col gap-1 p-3 border-l border-border bg-card w-[172px] shrink-0 sticky top-0 self-start max-h-[calc(100vh-12rem)]">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-2">Quick Actions</p>
-              {quickActions.map(action => {
-                const Icon = action.icon;
-                return (
-                  <button
-                    key={action.label}
-                    onClick={action.action}
-                    className="flex items-center gap-2.5 px-2.5 py-2.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors text-left"
-                  >
-                    <Icon className={`w-3.5 h-3.5 ${action.color}`} />
-                    {action.label}
-                  </button>
-                );
-              })}
-            </div>
+            {activeView === 'notes' && <NotesTimeline notes={patientNotes} />}
+            {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} previousNotes={patientNotes} />}
+            {activeView === 'documents' && (
+              <div className="p-6 text-center text-muted-foreground">
+                <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
+                <p className="font-medium">Documents</p>
+                <p className="text-sm">Upload and manage patient documents (PDF, JPG, PNG)</p>
+                <Button variant="outline" className="mt-4 gap-2">
+                  <Plus className="w-4 h-4" /> Upload Document
+                </Button>
+              </div>
+            )}
+            {activeView === 'prescription' && (
+              <PrescriptionPreview
+                patient={patient}
+                diagnoses={diagnoses}
+                medications={medications}
+                chiefComplaint={chiefComplaint}
+                pastHistory={pastHistory}
+                allergies={allergies}
+                vitals={vitals}
+                followUp={followUp}
+                instructions={instructions}
+              />
+            )}
           </div>
-        )}
 
-        {activeView === 'notes' && <NotesTimeline notes={patientNotes} />}
-        {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} previousNotes={patientNotes} />}
-        {activeView === 'documents' && (
-          <div className="p-6 text-center text-muted-foreground">
-            <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-            <p className="font-medium">Documents</p>
-            <p className="text-sm">Upload and manage patient documents (PDF, JPG, PNG)</p>
-            <Button variant="outline" className="mt-4 gap-2">
-              <Plus className="w-4 h-4" /> Upload Document
-            </Button>
+          <div className="hidden lg:flex flex-col gap-1 p-3 border-l border-border bg-card w-[172px] shrink-0 sticky top-0 self-start max-h-[calc(100vh-12rem)]">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-2">Quick Actions</p>
+            {quickActions.map(action => {
+              const Icon = action.icon;
+              return (
+                <button
+                  key={action.label}
+                  onClick={action.action}
+                  className="flex items-center gap-2.5 px-2.5 py-2.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors text-left"
+                >
+                  <Icon className={`w-3.5 h-3.5 ${action.color}`} />
+                  {action.label}
+                </button>
+              );
+            })}
           </div>
-        )}
-        {activeView === 'prescription' && (
-          <PrescriptionPreview
-            patient={patient}
-            diagnoses={diagnoses}
-            medications={medications}
-            chiefComplaint={chiefComplaint}
-            followUp={followUp}
-            instructions={instructions}
-          />
-        )}
+        </div>
       </div>
 
       {/* Bottom action bar */}
       <div className="bg-card border-t border-border px-4 lg:px-6 py-3 flex items-center gap-3 no-print">
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={handleSaveDraft}>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void handleSaveDraft()}>
           <Save className="w-4 h-4" /> Save Draft
         </Button>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={handleHold}>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void handleHold()}>
           <Pause className="w-4 h-4" /> Hold
         </Button>
         <div className="flex-1" />
         <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setActiveView('prescription')}>
           <Printer className="w-4 h-4" /> Print Rx
         </Button>
-        <Button size="sm" className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground" onClick={handleComplete}>
+        <Button size="sm" className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground" onClick={() => void handleComplete()}>
           <CheckCircle2 className="w-4 h-4" /> Complete Visit
         </Button>
       </div>

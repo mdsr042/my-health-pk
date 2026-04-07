@@ -26,12 +26,12 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
 
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.name.trim() || !form.phone.trim() || !form.age || !form.gender) {
       toast.error('Please fill required fields: Name, Phone, Age, Gender');
       return;
     }
-    const patientId = addWalkIn(form, activeClinic?.id || 'clinic-1');
+    const patientId = await addWalkIn(form, activeClinic?.id || 'clinic-1');
     toast.success(`Walk-in patient "${form.name}" added to queue`);
     onPatientCreated(patientId);
     setForm({ name: '', phone: '', age: '', gender: '', cnic: '', address: '', bloodGroup: '', emergencyContact: '', chiefComplaint: '' });
@@ -103,7 +103,7 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSubmit} className="gap-2">
+          <Button onClick={() => void handleSubmit()} className="gap-2">
             <UserPlus className="w-4 h-4" /> Register & Add to Queue
           </Button>
         </DialogFooter>
