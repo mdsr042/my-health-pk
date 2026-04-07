@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import pg from 'pg';
+import { seedDemoWorkspace } from './demoSeed.js';
 
 const { Pool } = pg;
 
@@ -46,6 +47,7 @@ export async function initDb() {
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL CHECK (role IN ('platform_admin', 'doctor_owner')),
       status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'rejected', 'suspended')),
+      is_demo BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -66,6 +68,7 @@ export async function initDb() {
       name TEXT NOT NULL,
       city TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'rejected', 'suspended')),
+      is_demo BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -221,6 +224,9 @@ export async function initDb() {
     );
   `);
 
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+  await query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@myhealth.pk';
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
   const existingAdmin = await query('SELECT id FROM users WHERE email = $1 LIMIT 1', [adminEmail]);
@@ -234,4 +240,6 @@ export async function initDb() {
       [`user_${crypto.randomUUID()}`, adminEmail, await bcrypt.hash(adminPassword, 10)]
     );
   }
+
+  await seedDemoWorkspace({ query });
 }

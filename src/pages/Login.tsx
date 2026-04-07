@@ -20,6 +20,11 @@ const defaultSignup = {
   notes: '',
 };
 
+const DEMO_CREDENTIALS = {
+  email: 'demo@myhealth.pk',
+  password: 'demo123',
+};
+
 export default function LoginPage() {
   const { login, signup } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
@@ -70,6 +75,26 @@ export default function LoginPage() {
         setError(error.message);
       } else {
         setError('Unable to submit signup request right now.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDemoLogin = async () => {
+    setError('');
+    setSuccess('');
+    setIsSubmitting(true);
+
+    try {
+      setEmail(DEMO_CREDENTIALS.email);
+      setPassword(DEMO_CREDENTIALS.password);
+      await login(DEMO_CREDENTIALS.email, DEMO_CREDENTIALS.password);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setError(error.message);
+      } else {
+        setError('Unable to open demo right now.');
       }
     } finally {
       setIsSubmitting(false);
@@ -197,6 +222,9 @@ export default function LoginPage() {
                 <Button type="submit" className="w-full h-11 text-base font-semibold" disabled={isSubmitting}>
                   {isSubmitting ? 'Signing In...' : 'Sign In'}
                 </Button>
+                <Button type="button" variant="outline" className="w-full h-11 text-base font-semibold" disabled={isSubmitting} onClick={() => void handleDemoLogin()}>
+                  Try Demo
+                </Button>
               </form>
             ) : (
               <form onSubmit={handleSignup} className="space-y-4">
@@ -278,6 +306,9 @@ export default function LoginPage() {
 
             <p className="text-center text-xs text-muted-foreground mt-6">
               Admin demo: admin@myhealth.pk / admin123
+            </p>
+            <p className="text-center text-xs text-muted-foreground mt-2">
+              Product demo: {DEMO_CREDENTIALS.email} / {DEMO_CREDENTIALS.password}
             </p>
           </CardContent>
         </Card>

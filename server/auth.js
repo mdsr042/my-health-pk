@@ -43,6 +43,7 @@ export async function loadAuthContext(userId) {
         u.email,
         u.role,
         u.status,
+        u.is_demo,
         dp.full_name,
         dp.phone,
         dp.pmc_number,
@@ -70,6 +71,7 @@ export async function loadAuthContext(userId) {
       email: row.email,
       role: row.role,
       status: row.status,
+      isDemo: row.is_demo,
     },
     doctor: row.role === 'doctor_owner'
       ? {

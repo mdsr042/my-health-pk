@@ -446,13 +446,13 @@ app.post('/api/auth/logout', requireAuth, (_req, res) => {
 
 app.get('/api/admin/overview', requireAuth, requireRole('platform_admin'), asyncHandler(async (_req, res) => {
   const [pendingApprovals, activeDoctors, suspendedDoctors, workspaceCount, clinicCount, patientCount, visitCount] = await Promise.all([
-    query(`SELECT COUNT(*)::int AS count FROM approval_requests WHERE status = 'pending'`),
-    query(`SELECT COUNT(*)::int AS count FROM users WHERE role = 'doctor_owner' AND status = 'active'`),
-    query(`SELECT COUNT(*)::int AS count FROM users WHERE role = 'doctor_owner' AND status = 'suspended'`),
-    query(`SELECT COUNT(*)::int AS count FROM workspaces`),
-    query(`SELECT COUNT(*)::int AS count FROM clinics`),
-    query(`SELECT COUNT(*)::int AS count FROM patients`),
-    query(`SELECT COUNT(*)::int AS count FROM appointments`),
+    query(`SELECT COUNT(*)::int AS count FROM approval_requests ar JOIN users u ON u.id = ar.user_id WHERE ar.status = 'pending' AND u.is_demo = FALSE`),
+    query(`SELECT COUNT(*)::int AS count FROM users WHERE role = 'doctor_owner' AND status = 'active' AND is_demo = FALSE`),
+    query(`SELECT COUNT(*)::int AS count FROM users WHERE role = 'doctor_owner' AND status = 'suspended' AND is_demo = FALSE`),
+    query(`SELECT COUNT(*)::int AS count FROM workspaces WHERE is_demo = FALSE`),
+    query(`SELECT COUNT(*)::int AS count FROM clinics c JOIN workspaces w ON w.id = c.workspace_id WHERE w.is_demo = FALSE`),
+    query(`SELECT COUNT(*)::int AS count FROM patients p JOIN workspaces w ON w.id = p.workspace_id WHERE w.is_demo = FALSE`),
+    query(`SELECT COUNT(*)::int AS count FROM appointments a JOIN workspaces w ON w.id = a.workspace_id WHERE w.is_demo = FALSE`),
   ]);
 
   res.json({
@@ -492,6 +492,7 @@ app.get('/api/admin/approval-requests', requireAuth, requireRole('platform_admin
       JOIN users u ON u.id = ar.user_id
       JOIN doctor_profiles dp ON dp.user_id = u.id
       JOIN workspaces w ON w.id = ar.workspace_id
+      WHERE u.is_demo = FALSE
       ORDER BY ar.created_at DESC
     `
   );
@@ -531,6 +532,7 @@ app.get('/api/admin/doctors', requireAuth, requireRole('platform_admin'), asyncH
         u.id,
         u.email,
         u.status,
+        u.is_demo,
         dp.full_name,
         dp.phone,
         dp.pmc_number,
@@ -565,6 +567,7 @@ app.get('/api/admin/doctors', requireAuth, requireRole('platform_admin'), asyncH
         GROUP BY workspace_id
       ) appointment_counts ON appointment_counts.workspace_id = w.id
       WHERE u.role = 'doctor_owner'
+        AND u.is_demo = FALSE
       ORDER BY u.created_at DESC
     `
   );
