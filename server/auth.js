@@ -1,13 +1,11 @@
-import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query } from './db.js';
+import { createId } from './id.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'my-health-dev-secret';
 
-export function createId(prefix) {
-  return `${prefix}_${crypto.randomUUID()}`;
-}
+export { createId };
 
 export async function hashPassword(password) {
   return bcrypt.hash(password, 10);

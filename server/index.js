@@ -282,16 +282,17 @@ async function getWorkspaceDrafts(workspaceId) {
 async function upsertDraft(workspaceId, doctorUserId, patientId, payload) {
   await query(
     `
-      INSERT INTO consultation_drafts (patient_id, workspace_id, clinic_id, doctor_user_id, payload, saved_at)
-      VALUES ($1, $2, $3, $4, $5, NOW())
+      INSERT INTO consultation_drafts (id, patient_id, workspace_id, clinic_id, doctor_user_id, payload, saved_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
       ON CONFLICT (patient_id) DO UPDATE SET
         workspace_id = EXCLUDED.workspace_id,
         clinic_id = EXCLUDED.clinic_id,
         doctor_user_id = EXCLUDED.doctor_user_id,
         payload = EXCLUDED.payload,
-        saved_at = NOW()
+        saved_at = NOW(),
+        updated_at = NOW()
     `,
-    [patientId, workspaceId, payload.clinicId, doctorUserId, payload]
+    [createId('consultation_draft'), patientId, workspaceId, payload.clinicId, doctorUserId, payload]
   );
 }
 
@@ -324,10 +325,12 @@ app.post('/api/auth/signup', asyncHandler(async (req, res) => {
 
   await withTransaction(async client => {
     const userId = createId('user');
+    const doctorProfileId = createId('doctor_profile');
     const workspaceId = createId('workspace');
     const approvalId = createId('approval');
     const memberId = createId('member');
     const subscriptionId = createId('subscription');
+    const settingsId = createId('workspace_setting');
     const passwordHash = await hashPassword(password);
 
     await client.query(
@@ -340,10 +343,10 @@ app.post('/api/auth/signup', asyncHandler(async (req, res) => {
 
     await client.query(
       `
-        INSERT INTO doctor_profiles (user_id, full_name, phone, pmc_number, specialization, qualifications, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO doctor_profiles (id, user_id, full_name, phone, pmc_number, specialization, qualifications, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `,
-      [userId, fullName.trim(), phone.trim(), pmcNumber.trim(), specialization.trim(), '', (notes ?? '').trim()]
+      [doctorProfileId, userId, fullName.trim(), phone.trim(), pmcNumber.trim(), specialization.trim(), '', (notes ?? '').trim()]
     );
 
     await client.query(
@@ -380,10 +383,10 @@ app.post('/api/auth/signup', asyncHandler(async (req, res) => {
 
     await client.query(
       `
-        INSERT INTO workspace_settings (workspace_id, data)
-        VALUES ($1, $2)
+        INSERT INTO workspace_settings (id, workspace_id, data)
+        VALUES ($1, $2, $3)
       `,
-      [workspaceId, {}]
+      [settingsId, workspaceId, {}]
     );
   });
 
@@ -628,7 +631,7 @@ app.post('/api/admin/approval-requests/:id/approve', requireAuth, requireRole('p
     await client.query(
       `
         UPDATE approval_requests
-        SET status = 'approved', reviewed_by = $2, reviewed_at = NOW(), rejection_reason = ''
+        SET status = 'approved', reviewed_by = $2, reviewed_at = NOW(), rejection_reason = '', updated_at = NOW()
         WHERE id = $1
       `,
       [id, req.auth.user.id]
@@ -671,7 +674,7 @@ app.post('/api/admin/approval-requests/:id/reject', requireAuth, requireRole('pl
     await client.query(
       `
         UPDATE approval_requests
-        SET status = 'rejected', rejection_reason = $2, reviewed_by = $3, reviewed_at = NOW()
+        SET status = 'rejected', rejection_reason = $2, reviewed_by = $3, reviewed_at = NOW(), updated_at = NOW()
         WHERE id = $1
       `,
       [id, reason, req.auth.user.id]
@@ -1139,13 +1142,13 @@ app.get('/api/settings', requireAuth, requireRole('doctor_owner'), asyncHandler(
 app.put('/api/settings', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   await query(
     `
-      INSERT INTO workspace_settings (workspace_id, data, updated_at)
-      VALUES ($1, $2, NOW())
+      INSERT INTO workspace_settings (id, workspace_id, data, updated_at)
+      VALUES ($1, $2, $3, NOW())
       ON CONFLICT (workspace_id) DO UPDATE SET
         data = EXCLUDED.data,
         updated_at = NOW()
     `,
-    [req.auth.workspace.id, req.body ?? {}]
+    [createId('workspace_setting'), req.auth.workspace.id, req.body ?? {}]
   );
 
   res.json({ ok: true });

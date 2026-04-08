@@ -1,11 +1,5 @@
 import bcrypt from 'bcryptjs';
-
-const DEMO_USER_ID = 'demo_user';
-const DEMO_WORKSPACE_ID = 'demo_workspace';
-const DEMO_CLINIC_1_ID = 'demo_clinic_1';
-const DEMO_CLINIC_2_ID = 'demo_clinic_2';
-const DEMO_SUBSCRIPTION_ID = 'demo_subscription';
-const DEMO_MEMBER_ID = 'demo_member';
+import { createId } from './id.js';
 
 const DEMO_EMAIL = process.env.DEMO_EMAIL || 'demo@myhealth.pk';
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD || 'demo123';
@@ -56,22 +50,36 @@ export async function seedDemoWorkspace({ query }) {
 
   const today = getLocalDateKey();
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+  const demoUserId = createId('user');
+  const demoDoctorProfileId = createId('doctor_profile');
+  const demoWorkspaceId = createId('workspace');
+  const demoClinic1Id = createId('clinic');
+  const demoClinic2Id = createId('clinic');
+  const demoSubscriptionId = createId('subscription');
+  const demoMemberId = createId('workspace_member');
+  const demoSettingsId = createId('workspace_setting');
+  const demoPatient1Id = createId('patient');
+  const demoPatient2Id = createId('patient');
+  const demoPatient3Id = createId('patient');
+  const demoPatient4Id = createId('patient');
+  const demoPatient5Id = createId('patient');
 
   await query(
     `
       INSERT INTO users (id, email, password_hash, role, status, is_demo)
       VALUES ($1, $2, $3, 'doctor_owner', 'active', TRUE)
     `,
-    [DEMO_USER_ID, DEMO_EMAIL, passwordHash]
+    [demoUserId, DEMO_EMAIL, passwordHash]
   );
 
   await query(
     `
-      INSERT INTO doctor_profiles (user_id, full_name, phone, pmc_number, specialization, qualifications, notes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO doctor_profiles (id, user_id, full_name, phone, pmc_number, specialization, qualifications, notes)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     `,
     [
-      DEMO_USER_ID,
+      demoDoctorProfileId,
+      demoUserId,
       'Dr. Demo User',
       '0300-0000000',
       'PMC-DEMO-001',
@@ -86,7 +94,7 @@ export async function seedDemoWorkspace({ query }) {
       INSERT INTO workspaces (id, owner_user_id, name, city, status, is_demo)
       VALUES ($1, $2, $3, $4, 'active', TRUE)
     `,
-    [DEMO_WORKSPACE_ID, DEMO_USER_ID, 'My Health Demo Practice', 'Lahore']
+    [demoWorkspaceId, demoUserId, 'My Health Demo Practice', 'Lahore']
   );
 
   await query(
@@ -94,7 +102,7 @@ export async function seedDemoWorkspace({ query }) {
       INSERT INTO workspace_members (id, workspace_id, user_id, role)
       VALUES ($1, $2, $3, 'owner')
     `,
-    [DEMO_MEMBER_ID, DEMO_WORKSPACE_ID, DEMO_USER_ID]
+    [demoMemberId, demoWorkspaceId, demoUserId]
   );
 
   await query(
@@ -102,15 +110,15 @@ export async function seedDemoWorkspace({ query }) {
       INSERT INTO subscriptions (id, workspace_id, plan_name, status, trial_ends_at)
       VALUES ($1, $2, 'Demo', 'active', NULL)
     `,
-    [DEMO_SUBSCRIPTION_ID, DEMO_WORKSPACE_ID]
+    [demoSubscriptionId, demoWorkspaceId]
   );
 
   await query(
     `
-      INSERT INTO workspace_settings (workspace_id, data)
-      VALUES ($1, $2)
+      INSERT INTO workspace_settings (id, workspace_id, data)
+      VALUES ($1, $2, $3)
     `,
-    [DEMO_WORKSPACE_ID, {
+    [demoSettingsId, demoWorkspaceId, {
       notifications: true,
       soundAlerts: true,
       autoSave: true,
@@ -131,8 +139,8 @@ export async function seedDemoWorkspace({ query }) {
         ($10, $2, $11, $12, $13, $14, $15, $16, $17)
     `,
     [
-      DEMO_CLINIC_1_ID,
-      DEMO_WORKSPACE_ID,
+      demoClinic1Id,
+      demoWorkspaceId,
       'Demo Medical Center',
       'Johar Town',
       'Lahore',
@@ -140,7 +148,7 @@ export async function seedDemoWorkspace({ query }) {
       '9:00 AM - 2:00 PM',
       JSON.stringify(['General Medicine', 'Cardiology', 'Dermatology']),
       '🏥',
-      DEMO_CLINIC_2_ID,
+      demoClinic2Id,
       'Demo Family Clinic',
       'Gulberg III',
       'Lahore',
@@ -153,7 +161,7 @@ export async function seedDemoWorkspace({ query }) {
 
   const patients = [
     {
-      id: 'demo_patient_1',
+      id: demoPatient1Id,
       mrn: 'MRN-DEMO-001',
       name: 'Muhammad Asif Ali',
       phone: '0300-1234567',
@@ -165,7 +173,7 @@ export async function seedDemoWorkspace({ query }) {
       emergencyContact: '0301-9876543',
     },
     {
-      id: 'demo_patient_2',
+      id: demoPatient2Id,
       mrn: 'MRN-DEMO-002',
       name: 'Fatima Bibi',
       phone: '0321-2345678',
@@ -177,7 +185,7 @@ export async function seedDemoWorkspace({ query }) {
       emergencyContact: '0322-8765432',
     },
     {
-      id: 'demo_patient_3',
+      id: demoPatient3Id,
       mrn: 'MRN-DEMO-003',
       name: 'Imran Hussain',
       phone: '0333-3456789',
@@ -189,7 +197,7 @@ export async function seedDemoWorkspace({ query }) {
       emergencyContact: '0334-7654321',
     },
     {
-      id: 'demo_patient_4',
+      id: demoPatient4Id,
       mrn: 'MRN-DEMO-004',
       name: 'Ayesha Siddiqui',
       phone: '0345-4567890',
@@ -201,7 +209,7 @@ export async function seedDemoWorkspace({ query }) {
       emergencyContact: '0346-6543210',
     },
     {
-      id: 'demo_patient_5',
+      id: demoPatient5Id,
       mrn: 'MRN-DEMO-005',
       name: 'Rizwan Ahmed',
       phone: '0312-5678901',
@@ -224,7 +232,7 @@ export async function seedDemoWorkspace({ query }) {
       `,
       [
         patient.id,
-        DEMO_WORKSPACE_ID,
+        demoWorkspaceId,
         patient.mrn,
         patient.name,
         patient.phone,
@@ -239,12 +247,12 @@ export async function seedDemoWorkspace({ query }) {
   }
 
   const appointments = [
-    ['demo_apt_1', DEMO_CLINIC_1_ID, 'demo_patient_1', '09:15', 'completed', 'follow-up', 'Diabetes follow-up', 1],
-    ['demo_apt_2', DEMO_CLINIC_1_ID, 'demo_patient_2', '09:30', 'completed', 'new', 'Chronic headache', 2],
-    ['demo_apt_3', DEMO_CLINIC_1_ID, 'demo_patient_3', '09:45', 'in-consultation', 'new', 'Chest pain and shortness of breath', 3],
-    ['demo_apt_4', DEMO_CLINIC_1_ID, 'demo_patient_4', '10:00', 'waiting', 'follow-up', 'Hypertension review', 4],
-    ['demo_apt_5', DEMO_CLINIC_1_ID, 'demo_patient_5', '10:15', 'scheduled', 'new', 'Joint pain and stiffness', 5],
-    ['demo_apt_6', DEMO_CLINIC_2_ID, 'demo_patient_2', '16:00', 'waiting', 'follow-up', 'Gastritis review', 1],
+    [createId('appointment'), demoClinic1Id, demoPatient1Id, '09:15', 'completed', 'follow-up', 'Diabetes follow-up', 1],
+    [createId('appointment'), demoClinic1Id, demoPatient2Id, '09:30', 'completed', 'new', 'Chronic headache', 2],
+    [createId('appointment'), demoClinic1Id, demoPatient3Id, '09:45', 'in-consultation', 'new', 'Chest pain and shortness of breath', 3],
+    [createId('appointment'), demoClinic1Id, demoPatient4Id, '10:00', 'waiting', 'follow-up', 'Hypertension review', 4],
+    [createId('appointment'), demoClinic1Id, demoPatient5Id, '10:15', 'scheduled', 'new', 'Joint pain and stiffness', 5],
+    [createId('appointment'), demoClinic2Id, demoPatient2Id, '16:00', 'waiting', 'follow-up', 'Gastritis review', 1],
   ];
 
   for (const [id, clinicId, patientId, time, status, type, chiefComplaint, tokenNumber] of appointments) {
@@ -255,15 +263,17 @@ export async function seedDemoWorkspace({ query }) {
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       `,
-      [id, DEMO_WORKSPACE_ID, clinicId, patientId, DEMO_USER_ID, today, time, status, type, chiefComplaint, tokenNumber]
+      [id, demoWorkspaceId, clinicId, patientId, demoUserId, today, time, status, type, chiefComplaint, tokenNumber]
     );
   }
 
+  const demoDx1Id = createId('diagnosis');
+  const demoDx2Id = createId('diagnosis');
   const notes = [
     {
-      id: 'demo_note_1',
-      patientId: 'demo_patient_1',
-      clinicId: DEMO_CLINIC_1_ID,
+      id: createId('clinical_note'),
+      patientId: demoPatient1Id,
+      clinicId: demoClinic1Id,
       chiefComplaint: 'Diabetes follow-up',
       pastHistory: 'Known case of diabetes mellitus and hypertension',
       allergies: 'NKDA',
@@ -271,9 +281,9 @@ export async function seedDemoWorkspace({ query }) {
       plan: 'Continue current medications and review HbA1c next visit',
       instructions: 'Medication compliance explained',
       followUp: 'Follow up in 2 weeks',
-      diagnoses: [{ id: 'demo_dx_1', code: 'E11', name: 'Type 2 diabetes mellitus', isPrimary: true }],
+      diagnoses: [{ id: demoDx1Id, code: 'E11', name: 'Type 2 diabetes mellitus', isPrimary: true }],
       medications: [{
-        id: 'demo_med_1',
+        id: createId('medication'),
         name: 'Metformin',
         nameUrdu: '',
         generic: 'Metformin',
@@ -286,13 +296,13 @@ export async function seedDemoWorkspace({ query }) {
         durationUrdu: '',
         instructions: 'After meals',
         instructionsUrdu: '',
-        diagnosisId: 'demo_dx_1',
+        diagnosisId: demoDx1Id,
       }],
     },
     {
-      id: 'demo_note_2',
-      patientId: 'demo_patient_2',
-      clinicId: DEMO_CLINIC_1_ID,
+      id: createId('clinical_note'),
+      patientId: demoPatient2Id,
+      clinicId: demoClinic1Id,
       chiefComplaint: 'Chronic headache',
       pastHistory: 'No significant comorbidity',
       allergies: 'NKDA',
@@ -300,9 +310,9 @@ export async function seedDemoWorkspace({ query }) {
       plan: 'Symptomatic treatment and hydration advice',
       instructions: 'Return if worsening symptoms',
       followUp: 'PRN review',
-      diagnoses: [{ id: 'demo_dx_2', code: 'G44.2', name: 'Tension headache', isPrimary: true }],
+      diagnoses: [{ id: demoDx2Id, code: 'G44.2', name: 'Tension headache', isPrimary: true }],
       medications: [{
-        id: 'demo_med_2',
+        id: createId('medication'),
         name: 'Paracetamol',
         nameUrdu: '',
         generic: 'Acetaminophen',
@@ -315,7 +325,7 @@ export async function seedDemoWorkspace({ query }) {
         durationUrdu: '',
         instructions: 'After food if needed',
         instructionsUrdu: '',
-        diagnosisId: 'demo_dx_2',
+        diagnosisId: demoDx2Id,
       }],
     },
   ];
@@ -336,10 +346,10 @@ export async function seedDemoWorkspace({ query }) {
       `,
       [
         note.id,
-        DEMO_WORKSPACE_ID,
+        demoWorkspaceId,
         note.patientId,
         note.clinicId,
-        DEMO_USER_ID,
+        demoUserId,
         note.chiefComplaint,
         note.pastHistory,
         note.allergies,
@@ -403,17 +413,18 @@ export async function seedDemoWorkspace({ query }) {
 
   await query(
     `
-      INSERT INTO consultation_drafts (patient_id, workspace_id, clinic_id, doctor_user_id, payload, saved_at)
-      VALUES ($1, $2, $3, $4, $5, NOW())
+      INSERT INTO consultation_drafts (id, patient_id, workspace_id, clinic_id, doctor_user_id, payload, saved_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
     `,
     [
-      'demo_patient_4',
-      DEMO_WORKSPACE_ID,
-      DEMO_CLINIC_1_ID,
-      DEMO_USER_ID,
+      createId('consultation_draft'),
+      demoPatient4Id,
+      demoWorkspaceId,
+      demoClinic1Id,
+      demoUserId,
       consultationPayload({
-        patientId: 'demo_patient_4',
-        clinicId: DEMO_CLINIC_1_ID,
+        patientId: demoPatient4Id,
+        clinicId: demoClinic1Id,
         chiefComplaint: 'Hypertension review',
         pastHistory: 'Known case of hypertension',
         allergies: 'NKDA',

@@ -1,7 +1,7 @@
-import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import pg from 'pg';
 import { seedDemoWorkspace } from './demoSeed.js';
+import { createId, hasExpectedPrefix } from './id.js';
 
 const { Pool } = pg;
 
@@ -39,8 +39,8 @@ export async function withTransaction(callback) {
   }
 }
 
-export async function initDb() {
-  await query(`
+async function createBaseSchema(client) {
+  await client.query(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
@@ -53,13 +53,16 @@ export async function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS doctor_profiles (
-      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
       full_name TEXT NOT NULL,
       phone TEXT NOT NULL DEFAULT '',
       pmc_number TEXT NOT NULL DEFAULT '',
       specialization TEXT NOT NULL DEFAULT '',
       qualifications TEXT NOT NULL DEFAULT '',
-      notes TEXT NOT NULL DEFAULT ''
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS workspaces (
@@ -79,6 +82,7 @@ export async function initDb() {
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       role TEXT NOT NULL CHECK (role IN ('owner')),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (workspace_id, user_id)
     );
 
@@ -103,7 +107,8 @@ export async function initDb() {
       rejection_reason TEXT NOT NULL DEFAULT '',
       reviewed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
       reviewed_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS clinics (
@@ -121,8 +126,10 @@ export async function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS workspace_settings (
-      workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces(id) ON DELETE CASCADE,
       data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
@@ -138,7 +145,8 @@ export async function initDb() {
       address TEXT NOT NULL DEFAULT '',
       blood_group TEXT NOT NULL DEFAULT '',
       emergency_contact TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS appointments (
@@ -158,12 +166,15 @@ export async function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS consultation_drafts (
-      patient_id TEXT PRIMARY KEY REFERENCES patients(id) ON DELETE CASCADE,
+      id TEXT PRIMARY KEY,
+      patient_id TEXT NOT NULL UNIQUE REFERENCES patients(id) ON DELETE CASCADE,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       clinic_id TEXT NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
       doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       payload JSONB NOT NULL,
-      saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS clinical_notes (
@@ -183,7 +194,9 @@ export async function initDb() {
       instructions TEXT NOT NULL DEFAULT '',
       follow_up TEXT NOT NULL DEFAULT '',
       vitals JSONB NOT NULL DEFAULT '{}'::jsonb,
-      status TEXT NOT NULL DEFAULT 'completed'
+      status TEXT NOT NULL DEFAULT 'completed',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS diagnoses (
@@ -191,7 +204,9 @@ export async function initDb() {
       note_id TEXT NOT NULL REFERENCES clinical_notes(id) ON DELETE CASCADE,
       code TEXT NOT NULL DEFAULT '',
       name TEXT NOT NULL,
-      is_primary BOOLEAN NOT NULL DEFAULT FALSE
+      is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS medications (
@@ -209,7 +224,9 @@ export async function initDb() {
       duration_urdu TEXT NOT NULL DEFAULT '',
       instructions TEXT NOT NULL DEFAULT '',
       instructions_urdu TEXT NOT NULL DEFAULT '',
-      diagnosis_id TEXT NOT NULL DEFAULT ''
+      diagnosis_id TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS lab_orders (
@@ -220,12 +237,384 @@ export async function initDb() {
       priority TEXT NOT NULL CHECK (priority IN ('routine', 'urgent', 'stat')),
       status TEXT NOT NULL CHECK (status IN ('ordered', 'collected', 'resulted')),
       result TEXT NOT NULL DEFAULT '',
-      date TEXT NOT NULL
+      date TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+}
 
-  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
-  await query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+async function ensureMigrationsTable(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function hasColumn(client, tableName, columnName) {
+  const { rows } = await client.query(
+    `
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = $1
+        AND column_name = $2
+      LIMIT 1
+    `,
+    [tableName, columnName]
+  );
+
+  return rows.length > 0;
+}
+
+async function getPrimaryKeyInfo(client, tableName) {
+  const { rows } = await client.query(
+    `
+      SELECT
+        con.conname,
+        array_agg(attr.attname ORDER BY attr.attnum) AS columns
+      FROM pg_constraint con
+      JOIN pg_class rel ON rel.oid = con.conrelid
+      JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+      JOIN unnest(con.conkey) AS keynum(attnum) ON TRUE
+      JOIN pg_attribute attr ON attr.attrelid = rel.oid AND attr.attnum = keynum.attnum
+      WHERE nsp.nspname = 'public'
+        AND rel.relname = $1
+        AND con.contype = 'p'
+      GROUP BY con.conname
+      LIMIT 1
+    `,
+    [tableName]
+  );
+
+  return rows[0] ?? null;
+}
+
+async function ensurePrimaryKeyOnId(client, tableName) {
+  const primaryKey = await getPrimaryKeyInfo(client, tableName);
+  if (primaryKey && !(primaryKey.columns.length === 1 && primaryKey.columns[0] === 'id')) {
+    await client.query(`ALTER TABLE ${tableName} DROP CONSTRAINT IF EXISTS ${primaryKey.conname}`);
+  }
+
+  const refreshedPrimaryKey = await getPrimaryKeyInfo(client, tableName);
+  if (!refreshedPrimaryKey) {
+    await client.query(`ALTER TABLE ${tableName} ADD PRIMARY KEY (id)`);
+  }
+}
+
+async function ensureUniqueConstraint(client, tableName, constraintName, columnsSql) {
+  await client.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        WHERE nsp.nspname = 'public'
+          AND rel.relname = '${tableName}'
+          AND con.conname = '${constraintName}'
+      ) THEN
+        ALTER TABLE ${tableName}
+        ADD CONSTRAINT ${constraintName} UNIQUE ${columnsSql};
+      END IF;
+    END $$;
+  `);
+}
+
+async function ensureForeignKey(client, tableName, constraintName, columnName, refTable, refColumn, onDeleteClause) {
+  await client.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        WHERE nsp.nspname = 'public'
+          AND rel.relname = '${tableName}'
+          AND con.conname = '${constraintName}'
+      ) THEN
+        ALTER TABLE ${tableName}
+        ADD CONSTRAINT ${constraintName}
+        FOREIGN KEY (${columnName}) REFERENCES ${refTable}(${refColumn}) ON DELETE ${onDeleteClause};
+      END IF;
+    END $$;
+  `);
+}
+
+async function ensureIndex(client, indexName, tableName, expression) {
+  await client.query(`CREATE INDEX IF NOT EXISTS ${indexName} ON ${tableName} ${expression}`);
+}
+
+async function dropForeignKeysForColumns(client, tableName, columnNames) {
+  const { rows } = await client.query(
+    `
+      SELECT DISTINCT con.conname
+      FROM pg_constraint con
+      JOIN pg_class rel ON rel.oid = con.conrelid
+      JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+      JOIN unnest(con.conkey) AS keynum(attnum) ON TRUE
+      JOIN pg_attribute attr ON attr.attrelid = rel.oid AND attr.attnum = keynum.attnum
+      WHERE nsp.nspname = 'public'
+        AND rel.relname = $1
+        AND con.contype = 'f'
+        AND attr.attname = ANY($2::text[])
+    `,
+    [tableName, columnNames]
+  );
+
+  for (const row of rows) {
+    await client.query(`ALTER TABLE ${tableName} DROP CONSTRAINT IF EXISTS ${row.conname}`);
+  }
+}
+
+async function ensureAuditColumns(client, tableName, options = {}) {
+  const { createdSource = null, updatedSource = null } = options;
+
+  await client.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`);
+  await client.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`);
+
+  if (createdSource) {
+    await client.query(`UPDATE ${tableName} SET created_at = COALESCE(created_at, ${createdSource}, NOW())`);
+  } else {
+    await client.query(`UPDATE ${tableName} SET created_at = COALESCE(created_at, NOW())`);
+  }
+
+  if (updatedSource) {
+    await client.query(`UPDATE ${tableName} SET updated_at = COALESCE(updated_at, ${updatedSource}, NOW())`);
+  } else {
+    await client.query(`UPDATE ${tableName} SET updated_at = COALESCE(updated_at, created_at, NOW())`);
+  }
+
+  await client.query(`ALTER TABLE ${tableName} ALTER COLUMN created_at SET DEFAULT NOW()`);
+  await client.query(`ALTER TABLE ${tableName} ALTER COLUMN updated_at SET DEFAULT NOW()`);
+  await client.query(`ALTER TABLE ${tableName} ALTER COLUMN created_at SET NOT NULL`);
+  await client.query(`ALTER TABLE ${tableName} ALTER COLUMN updated_at SET NOT NULL`);
+}
+
+async function ensureOwnedIdTable(client, config) {
+  const {
+    tableName,
+    entity,
+    uniqueColumn,
+    createdSource = null,
+    updatedSource = null,
+  } = config;
+
+  await client.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS id TEXT`);
+  await ensureAuditColumns(client, tableName, { createdSource, updatedSource });
+
+  const { rows } = await client.query(`SELECT ${uniqueColumn}, id FROM ${tableName}`);
+  for (const row of rows) {
+    if (!hasExpectedPrefix(row.id, entity)) {
+      await client.query(
+        `
+          UPDATE ${tableName}
+          SET id = $2, updated_at = NOW()
+          WHERE ${uniqueColumn} = $1
+        `,
+        [row[uniqueColumn], createId(entity)]
+      );
+    }
+  }
+
+  await client.query(`ALTER TABLE ${tableName} ALTER COLUMN id SET NOT NULL`);
+  await ensurePrimaryKeyOnId(client, tableName);
+  await ensureUniqueConstraint(client, tableName, `${tableName}_${uniqueColumn}_key`, `(${uniqueColumn})`);
+}
+
+async function updateColumnValue(client, tableName, columnName, oldId, newId) {
+  const hasUpdated = await hasColumn(client, tableName, 'updated_at');
+  if (hasUpdated) {
+    await client.query(
+      `UPDATE ${tableName} SET ${columnName} = $1, updated_at = NOW() WHERE ${columnName} = $2`,
+      [newId, oldId]
+    );
+    return;
+  }
+
+  await client.query(`UPDATE ${tableName} SET ${columnName} = $1 WHERE ${columnName} = $2`, [newId, oldId]);
+}
+
+async function remapPrimaryIds(client, config) {
+  const { tableName, entity, references = [] } = config;
+  const { rows } = await client.query(`SELECT id FROM ${tableName}`);
+  const mappings = rows
+    .filter(row => !hasExpectedPrefix(row.id, entity))
+    .map(row => ({ oldId: row.id, newId: createId(entity) }));
+
+  if (mappings.length === 0) {
+    return;
+  }
+
+  for (const reference of references) {
+    await dropForeignKeysForColumns(client, reference.tableName, [reference.columnName]);
+  }
+
+  for (const mapping of mappings) {
+    for (const reference of references) {
+      await updateColumnValue(client, reference.tableName, reference.columnName, mapping.oldId, mapping.newId);
+    }
+
+    await updateColumnValue(client, tableName, 'id', mapping.oldId, mapping.newId);
+  }
+
+  for (const reference of references) {
+    await ensureForeignKey(
+      client,
+      reference.tableName,
+      reference.constraintName,
+      reference.columnName,
+      tableName,
+      'id',
+      reference.onDelete
+    );
+  }
+}
+
+async function runMigration(client, id, handler) {
+  const existing = await client.query(`SELECT 1 FROM schema_migrations WHERE id = $1 LIMIT 1`, [id]);
+  if (existing.rowCount > 0) {
+    return;
+  }
+
+  await handler();
+  await client.query(`INSERT INTO schema_migrations (id) VALUES ($1)`, [id]);
+}
+
+async function runSchemaMigrations(client) {
+  await runMigration(client, '001_owned_ids_and_audit_fields', async () => {
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+    await client.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+
+    await ensureAuditColumns(client, 'doctor_profiles');
+    await ensureAuditColumns(client, 'workspace_members');
+    await ensureAuditColumns(client, 'approval_requests');
+    await ensureAuditColumns(client, 'patients');
+    await ensureAuditColumns(client, 'clinical_notes', { createdSource: 'date', updatedSource: 'date' });
+    await ensureAuditColumns(client, 'diagnoses');
+    await ensureAuditColumns(client, 'medications');
+    await ensureAuditColumns(client, 'lab_orders');
+
+    await ensureOwnedIdTable(client, {
+      tableName: 'doctor_profiles',
+      entity: 'doctor_profile',
+      uniqueColumn: 'user_id',
+    });
+
+    await ensureOwnedIdTable(client, {
+      tableName: 'workspace_settings',
+      entity: 'workspace_setting',
+      uniqueColumn: 'workspace_id',
+    });
+
+    await ensureOwnedIdTable(client, {
+      tableName: 'consultation_drafts',
+      entity: 'consultation_draft',
+      uniqueColumn: 'patient_id',
+      createdSource: 'saved_at',
+      updatedSource: 'saved_at',
+    });
+  });
+
+  await runMigration(client, '002_standardize_prefixed_ids', async () => {
+    await remapPrimaryIds(client, {
+      tableName: 'users',
+      entity: 'user',
+      references: [
+        { tableName: 'doctor_profiles', columnName: 'user_id', constraintName: 'doctor_profiles_user_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'workspaces', columnName: 'owner_user_id', constraintName: 'workspaces_owner_user_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'workspace_members', columnName: 'user_id', constraintName: 'workspace_members_user_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'approval_requests', columnName: 'user_id', constraintName: 'approval_requests_user_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'approval_requests', columnName: 'reviewed_by', constraintName: 'approval_requests_reviewed_by_fkey', onDelete: 'SET NULL' },
+        { tableName: 'appointments', columnName: 'doctor_user_id', constraintName: 'appointments_doctor_user_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'consultation_drafts', columnName: 'doctor_user_id', constraintName: 'consultation_drafts_doctor_user_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'clinical_notes', columnName: 'doctor_user_id', constraintName: 'clinical_notes_doctor_user_id_fkey', onDelete: 'CASCADE' },
+      ],
+    });
+
+    await remapPrimaryIds(client, {
+      tableName: 'workspaces',
+      entity: 'workspace',
+      references: [
+        { tableName: 'workspace_members', columnName: 'workspace_id', constraintName: 'workspace_members_workspace_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'subscriptions', columnName: 'workspace_id', constraintName: 'subscriptions_workspace_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'approval_requests', columnName: 'workspace_id', constraintName: 'approval_requests_workspace_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'clinics', columnName: 'workspace_id', constraintName: 'clinics_workspace_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'workspace_settings', columnName: 'workspace_id', constraintName: 'workspace_settings_workspace_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'patients', columnName: 'workspace_id', constraintName: 'patients_workspace_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'appointments', columnName: 'workspace_id', constraintName: 'appointments_workspace_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'consultation_drafts', columnName: 'workspace_id', constraintName: 'consultation_drafts_workspace_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'clinical_notes', columnName: 'workspace_id', constraintName: 'clinical_notes_workspace_id_fkey', onDelete: 'CASCADE' },
+      ],
+    });
+
+    await remapPrimaryIds(client, {
+      tableName: 'clinics',
+      entity: 'clinic',
+      references: [
+        { tableName: 'appointments', columnName: 'clinic_id', constraintName: 'appointments_clinic_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'consultation_drafts', columnName: 'clinic_id', constraintName: 'consultation_drafts_clinic_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'clinical_notes', columnName: 'clinic_id', constraintName: 'clinical_notes_clinic_id_fkey', onDelete: 'CASCADE' },
+      ],
+    });
+
+    await remapPrimaryIds(client, {
+      tableName: 'patients',
+      entity: 'patient',
+      references: [
+        { tableName: 'appointments', columnName: 'patient_id', constraintName: 'appointments_patient_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'consultation_drafts', columnName: 'patient_id', constraintName: 'consultation_drafts_patient_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'clinical_notes', columnName: 'patient_id', constraintName: 'clinical_notes_patient_id_fkey', onDelete: 'CASCADE' },
+      ],
+    });
+
+    await remapPrimaryIds(client, {
+      tableName: 'clinical_notes',
+      entity: 'clinical_note',
+      references: [
+        { tableName: 'diagnoses', columnName: 'note_id', constraintName: 'diagnoses_note_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'medications', columnName: 'note_id', constraintName: 'medications_note_id_fkey', onDelete: 'CASCADE' },
+        { tableName: 'lab_orders', columnName: 'note_id', constraintName: 'lab_orders_note_id_fkey', onDelete: 'CASCADE' },
+      ],
+    });
+
+    await remapPrimaryIds(client, { tableName: 'workspace_members', entity: 'workspace_member' });
+    await remapPrimaryIds(client, { tableName: 'subscriptions', entity: 'subscription' });
+    await remapPrimaryIds(client, { tableName: 'approval_requests', entity: 'approval_request' });
+    await remapPrimaryIds(client, { tableName: 'appointments', entity: 'appointment' });
+    await remapPrimaryIds(client, { tableName: 'doctor_profiles', entity: 'doctor_profile' });
+    await remapPrimaryIds(client, { tableName: 'workspace_settings', entity: 'workspace_setting' });
+    await remapPrimaryIds(client, { tableName: 'consultation_drafts', entity: 'consultation_draft' });
+    await remapPrimaryIds(client, { tableName: 'diagnoses', entity: 'diagnosis' });
+    await remapPrimaryIds(client, { tableName: 'medications', entity: 'medication' });
+    await remapPrimaryIds(client, { tableName: 'lab_orders', entity: 'lab_order' });
+  });
+
+  await runMigration(client, '003_constraints_and_indexes', async () => {
+    await ensureUniqueConstraint(client, 'workspace_members', 'workspace_members_workspace_id_user_id_key', '(workspace_id, user_id)');
+    await ensureUniqueConstraint(client, 'patients', 'patients_workspace_id_mrn_key', '(workspace_id, mrn)');
+    await ensureUniqueConstraint(client, 'doctor_profiles', 'doctor_profiles_user_id_key', '(user_id)');
+    await ensureUniqueConstraint(client, 'workspace_settings', 'workspace_settings_workspace_id_key', '(workspace_id)');
+    await ensureUniqueConstraint(client, 'consultation_drafts', 'consultation_drafts_patient_id_key', '(patient_id)');
+
+    await ensureIndex(client, 'idx_clinics_workspace_id', 'clinics', '(workspace_id)');
+    await ensureIndex(client, 'idx_patients_workspace_created', 'patients', '(workspace_id, created_at DESC)');
+    await ensureIndex(client, 'idx_appointments_workspace_date_time', 'appointments', '(workspace_id, date, time)');
+    await ensureIndex(client, 'idx_notes_workspace_patient_date', 'clinical_notes', '(workspace_id, patient_id, date DESC)');
+    await ensureIndex(client, 'idx_approval_requests_status_created', 'approval_requests', '(status, created_at DESC)');
+  });
+}
+
+export async function initDb() {
+  await withTransaction(async client => {
+    await createBaseSchema(client);
+    await ensureMigrationsTable(client);
+    await runSchemaMigrations(client);
+  });
 
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@myhealth.pk';
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
@@ -237,7 +626,7 @@ export async function initDb() {
         INSERT INTO users (id, email, password_hash, role, status)
         VALUES ($1, $2, $3, 'platform_admin', 'active')
       `,
-      [`user_${crypto.randomUUID()}`, adminEmail, await bcrypt.hash(adminPassword, 10)]
+      [createId('user'), adminEmail, await bcrypt.hash(adminPassword, 10)]
     );
   }
 
