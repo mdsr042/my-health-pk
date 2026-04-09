@@ -12,6 +12,7 @@ import {
   verifyPassword,
 } from './auth.js';
 import { initDb, query, withTransaction } from './db.js';
+import { cleanupExpiredDemoSessions, createEphemeralDemoSession } from './demoSeed.js';
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 4001);
@@ -210,6 +211,7 @@ async function getWorkspaceNotes(workspaceId, patientId = null) {
       strength: row.strength,
       form: row.form,
       route: row.route,
+      dosePattern: row.dose_pattern || '',
       frequency: row.frequency,
       frequencyUrdu: row.frequency_urdu,
       duration: row.duration,
@@ -436,6 +438,24 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
   const token = issueToken(user);
   const session = await getSessionPayload(user.id);
   res.json({ token, session });
+}));
+
+app.post('/api/auth/demo', asyncHandler(async (_req, res) => {
+  await cleanupExpiredDemoSessions({ query });
+
+  const { userId } = await withTransaction(async client => {
+    await cleanupExpiredDemoSessions({ query: client.query.bind(client) });
+    return createEphemeralDemoSession(client);
+  });
+
+  const session = await getSessionPayload(userId);
+  const token = issueToken({
+    id: userId,
+    role: 'doctor_owner',
+    status: 'active',
+  });
+
+  res.status(201).json({ token, session });
 }));
 
 app.get('/api/auth/me', requireAuth, asyncHandler(async (req, res) => {
@@ -1044,10 +1064,10 @@ app.post('/api/consultations/complete', requireAuth, requireRole('doctor_owner')
       await client.query(
         `
           INSERT INTO medications (
-            id, note_id, name, name_urdu, generic_name, strength, form, route,
+            id, note_id, name, name_urdu, generic_name, strength, form, route, dose_pattern,
             frequency, frequency_urdu, duration, duration_urdu, instructions, instructions_urdu, diagnosis_id
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         `,
         [
           medication.id || createId('medication'),
@@ -1058,6 +1078,7 @@ app.post('/api/consultations/complete', requireAuth, requireRole('doctor_owner')
           medication.strength || '',
           medication.form || '',
           medication.route || '',
+          medication.dosePattern || '',
           medication.frequency || '',
           medication.frequencyUrdu || '',
           medication.duration || '',

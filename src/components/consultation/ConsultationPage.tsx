@@ -463,6 +463,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                           <div>
                             <p className="font-medium text-foreground text-sm">{med.name}</p>
                             <p className="text-xs text-muted-foreground">{med.form} • {med.route} • {med.frequency} • {med.duration}</p>
+                            {med.frequencyUrdu && <p className="text-xs text-muted-foreground" dir="rtl">🕒 {med.frequencyUrdu}</p>}
                             {med.instructions && <p className="text-xs text-muted-foreground mt-1">📋 {med.instructions}</p>}
                             {med.instructionsUrdu && <p className="text-xs text-muted-foreground" dir="rtl">📋 {med.instructionsUrdu}</p>}
                           </div>

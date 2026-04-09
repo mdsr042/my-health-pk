@@ -180,6 +180,15 @@ export default function PrescriptionPreview({
                         {med.frequency}
                         {med.instructions && <span className="text-muted-foreground"> • {med.instructions}</span>}
                       </p>
+                      {med.frequencyUrdu && (
+                        <p
+                          className="text-xs leading-5 text-foreground text-right"
+                          dir="rtl"
+                          style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
+                        >
+                          {med.frequencyUrdu}
+                        </p>
+                      )}
                       {med.instructionsUrdu && (
                         <p
                           className="text-xs leading-5 text-foreground text-right"

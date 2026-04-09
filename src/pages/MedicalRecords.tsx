@@ -171,9 +171,12 @@ export default function MedicalRecords() {
                                       <p className="text-xs font-medium text-muted-foreground mb-1">Medications</p>
                                       <div className="space-y-1">
                                         {note.medications.map(med => (
-                                          <p key={med.id} className="text-sm text-foreground">
-                                            {med.name} — {med.frequency} × {med.duration}
-                                          </p>
+                                          <div key={med.id}>
+                                            <p className="text-sm text-foreground">
+                                              {med.name} — {med.frequency} × {med.duration}
+                                            </p>
+                                            {med.frequencyUrdu && <p className="text-xs text-muted-foreground text-right" dir="rtl">{med.frequencyUrdu}</p>}
+                                          </div>
                                         ))}
                                       </div>
                                     </div>

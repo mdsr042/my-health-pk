@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import pg from 'pg';
-import { seedDemoWorkspace } from './demoSeed.js';
+import { cleanupExpiredDemoSessions } from './demoSeed.js';
 import { createId, hasExpectedPrefix } from './id.js';
 
 const { Pool } = pg;
@@ -72,6 +72,7 @@ async function createBaseSchema(client) {
       city TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'rejected', 'suspended')),
       is_demo BOOLEAN NOT NULL DEFAULT FALSE,
+      demo_expires_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -218,6 +219,7 @@ async function createBaseSchema(client) {
       strength TEXT NOT NULL DEFAULT '',
       form TEXT NOT NULL DEFAULT '',
       route TEXT NOT NULL DEFAULT '',
+      dose_pattern TEXT NOT NULL DEFAULT '',
       frequency TEXT NOT NULL DEFAULT '',
       frequency_urdu TEXT NOT NULL DEFAULT '',
       duration TEXT NOT NULL DEFAULT '',
@@ -489,6 +491,7 @@ async function runSchemaMigrations(client) {
   await runMigration(client, '001_owned_ids_and_audit_fields', async () => {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
     await client.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+    await client.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS demo_expires_at TIMESTAMPTZ`);
 
     await ensureAuditColumns(client, 'doctor_profiles');
     await ensureAuditColumns(client, 'workspace_members');
@@ -606,6 +609,16 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_appointments_workspace_date_time', 'appointments', '(workspace_id, date, time)');
     await ensureIndex(client, 'idx_notes_workspace_patient_date', 'clinical_notes', '(workspace_id, patient_id, date DESC)');
     await ensureIndex(client, 'idx_approval_requests_status_created', 'approval_requests', '(status, created_at DESC)');
+    await ensureIndex(client, 'idx_workspaces_demo_expires_at', 'workspaces', '(demo_expires_at)');
+  });
+
+  await runMigration(client, '004_demo_workspace_expiry', async () => {
+    await client.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS demo_expires_at TIMESTAMPTZ`);
+    await ensureIndex(client, 'idx_workspaces_demo_expires_at', 'workspaces', '(demo_expires_at)');
+  });
+
+  await runMigration(client, '005_medication_dose_pattern', async () => {
+    await client.query(`ALTER TABLE medications ADD COLUMN IF NOT EXISTS dose_pattern TEXT NOT NULL DEFAULT ''`);
   });
 }
 
@@ -630,5 +643,5 @@ export async function initDb() {
     );
   }
 
-  await seedDemoWorkspace({ query });
+  await cleanupExpiredDemoSessions({ query });
 }

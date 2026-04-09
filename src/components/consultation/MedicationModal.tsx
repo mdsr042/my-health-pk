@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { medicationLibrary, favoriteMedications, type Medication } from '@/data/mockData';
 import { Badge } from '@/components/ui/badge';
+import { parseDosePattern } from '@/lib/medication-pattern';
 import { Search, Star, Plus, Pencil, Trash2 } from 'lucide-react';
 
 interface MedicationModalProps {
@@ -21,9 +22,12 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   const [search, setSearch] = useState('');
   const [showFavorites, setShowFavorites] = useState(true);
   const [selected, setSelected] = useState<Medication | null>(null);
+  const [dosePattern, setDosePattern] = useState('');
   const [customFrequency, setCustomFrequency] = useState('');
+  const [customFrequencyUrdu, setCustomFrequencyUrdu] = useState('');
   const [customDuration, setCustomDuration] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
+  const [customInstructionsUrdu, setCustomInstructionsUrdu] = useState('');
 
   const filtered = medicationLibrary.filter(m => {
     if (!search) return showFavorites ? favoriteMedications.includes(m.id) : true;
@@ -32,22 +36,58 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
 
   const handleSelect = (med: Medication) => {
     setSelected(med);
+    setDosePattern(med.dosePattern || '');
     setCustomFrequency(med.frequency);
+    setCustomFrequencyUrdu(med.frequencyUrdu || '');
     setCustomDuration(med.duration);
     setCustomInstructions(med.instructions);
+    setCustomInstructionsUrdu(med.instructionsUrdu || '');
+  };
+
+  const parsedPattern = useMemo(() => {
+    if (!selected || !dosePattern.trim()) return null;
+    return parseDosePattern(dosePattern, selected);
+  }, [dosePattern, selected]);
+
+  const patternError = useMemo(() => {
+    if (!dosePattern.trim() || parsedPattern) return '';
+    return 'Use 3-slot shorthand like 1+0+1, 1+1+1, 2+2+2, or special codes SOS / HS.';
+  }, [dosePattern, parsedPattern]);
+
+  const handleDosePatternChange = (value: string) => {
+    setDosePattern(value);
+    if (!selected) return;
+
+    const parsed = parseDosePattern(value, selected);
+    if (!parsed) return;
+
+    setCustomFrequency(parsed.frequency);
+    setCustomFrequencyUrdu(parsed.frequencyUrdu);
+
+    if (parsed.instructions && (!customInstructions || customInstructions === selected.instructions)) {
+      setCustomInstructions(parsed.instructions);
+    }
+
+    if (parsed.instructionsUrdu && (!customInstructionsUrdu || customInstructionsUrdu === selected.instructionsUrdu)) {
+      setCustomInstructionsUrdu(parsed.instructionsUrdu);
+    }
   };
 
   const handleAdd = () => {
     if (!selected) return;
+    if (dosePattern.trim() && !parsedPattern) return;
 
     const isEditingExisting = prescribedMedications.some(med => med.id === selected.id);
 
     onAdd({
       ...selected,
       id: isEditingExisting ? selected.id : `rx-${Date.now()}`,
+      dosePattern: parsedPattern?.normalizedPattern || dosePattern.trim() || selected.dosePattern,
       frequency: customFrequency || selected.frequency,
+      frequencyUrdu: customFrequencyUrdu || selected.frequencyUrdu,
       duration: customDuration || selected.duration,
       instructions: customInstructions || selected.instructions,
+      instructionsUrdu: customInstructionsUrdu || selected.instructionsUrdu,
     });
   };
 
@@ -56,9 +96,12 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       setSelected(null);
       setSearch('');
       setShowFavorites(true);
+      setDosePattern('');
       setCustomFrequency('');
+      setCustomFrequencyUrdu('');
       setCustomDuration('');
       setCustomInstructions('');
+      setCustomInstructionsUrdu('');
     }
     onOpenChange(o);
   };
@@ -144,6 +187,9 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                           <p className="text-xs text-muted-foreground">
                             {med.frequency} • {med.duration} • {med.route}
                           </p>
+                          {med.frequencyUrdu && (
+                            <p className="text-xs text-muted-foreground text-right" dir="rtl">{med.frequencyUrdu}</p>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0 self-center">
                           <Button
@@ -197,6 +243,17 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                         <Input value={selected.route} readOnly className="h-8 text-sm bg-muted/30" />
                       </div>
                       <div className="space-y-1.5">
+                        <Label className="text-xs">Dose Pattern</Label>
+                        <Input
+                          value={dosePattern}
+                          onChange={e => handleDosePatternChange(e.target.value)}
+                          placeholder="1+0+1 / SOS / HS"
+                          className="h-8 text-sm"
+                        />
+                        <p className="text-[11px] text-muted-foreground">Examples: 1+0+1, 1+1+1, 2+2+2, SOS, HS</p>
+                        {patternError && <p className="text-[11px] text-destructive">{patternError}</p>}
+                      </div>
+                      <div className="space-y-1.5">
                         <Label className="text-xs">Frequency</Label>
                         <Select value={customFrequency} onValueChange={setCustomFrequency}>
                           <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
@@ -209,6 +266,10 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                             <SelectItem value="At bedtime">At bedtime</SelectItem>
                           </SelectContent>
                         </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Frequency (Urdu)</Label>
+                        <Input value={customFrequencyUrdu} onChange={e => setCustomFrequencyUrdu(e.target.value)} dir="rtl" className="h-8 text-sm" />
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">Duration</Label>
@@ -227,7 +288,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
 
                     <div className="space-y-1.5">
                       <Label className="text-xs">Instructions (Urdu)</Label>
-                      <Textarea value={selected.instructionsUrdu} dir="rtl" rows={2} className="text-sm resize-none" readOnly />
+                      <Textarea value={customInstructionsUrdu} onChange={e => setCustomInstructionsUrdu(e.target.value)} dir="rtl" rows={2} className="text-sm resize-none" />
                     </div>
 
                     <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end">
