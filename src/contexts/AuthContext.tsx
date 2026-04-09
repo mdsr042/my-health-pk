@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import type { Clinic } from '@/data/mockData';
 import {
   clearStoredAuthToken,
+  createDemoSession,
   fetchCurrentSession,
   loginWithPassword,
   logoutSession,
@@ -20,6 +21,7 @@ interface AuthContextType {
   clinicSelected: boolean;
   doctorClinics: Clinic[];
   login: (email: string, password: string) => Promise<void>;
+  openDemo: () => Promise<void>;
   signup: (payload: SignupPayload) => Promise<string>;
   logout: () => Promise<void>;
   selectClinic: (clinicId: string) => void;
@@ -106,6 +108,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setActiveClinicId(result.session.clinics[0]?.id ?? '');
   }, []);
 
+  const openDemo = useCallback(async () => {
+    const result = await createDemoSession();
+    setStoredAuthToken(result.token, 'session');
+    setSession(result.session);
+    setActiveClinicId(result.session.clinics[0]?.id ?? '');
+  }, []);
+
   const signup = useCallback(async (payload: SignupPayload) => {
     const result = await signupDoctor(payload);
     return result.message;
@@ -143,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clinicSelected: Boolean(activeClinic),
         doctorClinics,
         login,
+        openDemo,
         signup,
         logout,
         selectClinic,

@@ -68,6 +68,7 @@ export interface AuthUser {
   email: string;
   role: PlatformRole;
   status: AccountStatus;
+  isDemo?: boolean;
 }
 
 export interface WorkspaceSummary {

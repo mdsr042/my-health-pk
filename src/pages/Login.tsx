@@ -20,13 +20,8 @@ const defaultSignup = {
   notes: '',
 };
 
-const DEMO_CREDENTIALS = {
-  email: 'demo@myhealth.pk',
-  password: 'demo123',
-};
-
 export default function LoginPage() {
-  const { login, signup } = useAuth();
+  const { login, openDemo, signup } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('dr.ahmed@medcare.pk');
   const [password, setPassword] = useState('password');
@@ -87,9 +82,7 @@ export default function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      setEmail(DEMO_CREDENTIALS.email);
-      setPassword(DEMO_CREDENTIALS.password);
-      await login(DEMO_CREDENTIALS.email, DEMO_CREDENTIALS.password);
+      await openDemo();
     } catch (error) {
       if (error instanceof ApiError) {
         setError(error.message);
@@ -308,7 +301,7 @@ export default function LoginPage() {
               Admin demo: admin@myhealth.pk / admin123
             </p>
             <p className="text-center text-xs text-muted-foreground mt-2">
-              Product demo: {DEMO_CREDENTIALS.email} / {DEMO_CREDENTIALS.password}
+              Try Demo opens a fresh sample workspace each time.
             </p>
           </CardContent>
         </Card>

@@ -11,6 +11,7 @@ import type { Appointment, Clinic, ClinicalNote, Patient } from '@/data/mockData
 
 const API_BASE = '/api';
 const AUTH_TOKEN_KEY = 'my-health/auth-token';
+const AUTH_SESSION_TOKEN_KEY = 'my-health/auth-token-session';
 
 export class ApiError extends Error {
   status: number;
@@ -25,17 +26,27 @@ export class ApiError extends Error {
 
 export function getStoredAuthToken() {
   if (typeof window === 'undefined') return '';
-  return window.localStorage.getItem(AUTH_TOKEN_KEY) ?? '';
+  return window.sessionStorage.getItem(AUTH_SESSION_TOKEN_KEY)
+    ?? window.localStorage.getItem(AUTH_TOKEN_KEY)
+    ?? '';
 }
 
-export function setStoredAuthToken(token: string) {
+export function setStoredAuthToken(token: string, mode: 'persistent' | 'session' = 'persistent') {
   if (typeof window === 'undefined') return;
+  if (mode === 'session') {
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.sessionStorage.setItem(AUTH_SESSION_TOKEN_KEY, token);
+    return;
+  }
+
+  window.sessionStorage.removeItem(AUTH_SESSION_TOKEN_KEY);
   window.localStorage.setItem(AUTH_TOKEN_KEY, token);
 }
 
 export function clearStoredAuthToken() {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  window.sessionStorage.removeItem(AUTH_SESSION_TOKEN_KEY);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -70,6 +81,12 @@ export async function loginWithPassword(email: string, password: string) {
   return request<{ token: string; session: SessionPayload }>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function createDemoSession() {
+  return request<{ token: string; session: SessionPayload }>('/auth/demo', {
+    method: 'POST',
   });
 }
 
