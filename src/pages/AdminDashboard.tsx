@@ -28,6 +28,43 @@ const emptyOverview: AdminOverview = {
   appointments: 0,
 };
 
+function formatStatusLabel(value: string) {
+  return value
+    .split('-')
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function getAccountStatusBadgeClass(status: AdminDoctorAccount['status'] | ApprovalRequest['status']) {
+  switch (status) {
+    case 'active':
+    case 'approved':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'pending':
+      return 'border-amber-200 bg-amber-50 text-amber-700';
+    case 'rejected':
+    case 'suspended':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    default:
+      return 'border-border bg-muted/40 text-muted-foreground';
+  }
+}
+
+function getSubscriptionStatusBadgeClass(status: AdminDoctorAccount['subscription']['status']) {
+  switch (status) {
+    case 'active':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'trial':
+      return 'border-sky-200 bg-sky-50 text-sky-700';
+    case 'suspended':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    case 'cancelled':
+      return 'border-slate-200 bg-slate-100 text-slate-700';
+    default:
+      return 'border-border bg-muted/40 text-muted-foreground';
+  }
+}
+
 export default function AdminDashboard() {
   const [overview, setOverview] = useState<AdminOverview>(emptyOverview);
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
@@ -151,7 +188,7 @@ export default function AdminDashboard() {
               <h2 className="text-sm font-semibold text-foreground">Pending Approvals</h2>
               <p className="text-xs text-muted-foreground">Review new doctor access requests before workspace activation.</p>
             </div>
-            <Badge variant="outline" className="text-xs">{pendingApprovals.length} pending</Badge>
+            <Badge variant="outline" className="text-xs border-amber-200 bg-amber-50 text-amber-700">{pendingApprovals.length} pending</Badge>
           </div>
 
           {loading ? (
@@ -164,7 +201,12 @@ export default function AdminDashboard() {
                 <div key={request.id} className="rounded-lg border border-border p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-foreground">{request.doctor.name}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-foreground">{request.doctor.name}</p>
+                        <Badge variant="outline" className={`text-[10px] ${getAccountStatusBadgeClass(request.status)}`}>
+                          {formatStatusLabel(request.status)}
+                        </Badge>
+                      </div>
                       <p className="text-xs text-muted-foreground">{request.user.email} • {request.doctor.phone}</p>
                       <p className="text-xs text-muted-foreground mt-1">{request.doctor.specialization} • PMC {request.doctor.pmcNumber}</p>
                       <p className="text-xs text-muted-foreground mt-1">{request.clinicName}, {request.city}</p>
@@ -198,8 +240,12 @@ export default function AdminDashboard() {
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-semibold text-foreground">{doctor.name}</p>
-                        <Badge variant="outline" className="text-[10px]">{doctor.status}</Badge>
-                        <Badge variant="outline" className="text-[10px]">{doctor.subscription.status}</Badge>
+                        <Badge variant="outline" className={`text-[10px] ${getAccountStatusBadgeClass(doctor.status)}`}>
+                          {formatStatusLabel(doctor.status)}
+                        </Badge>
+                        <Badge variant="outline" className={`text-[10px] ${getSubscriptionStatusBadgeClass(doctor.subscription.status)}`}>
+                          {formatStatusLabel(doctor.subscription.status)}
+                        </Badge>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">{doctor.email} • {doctor.phone}</p>
                       <p className="text-xs text-muted-foreground">{doctor.specialization} • PMC {doctor.pmcNumber}</p>
