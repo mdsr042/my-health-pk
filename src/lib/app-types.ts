@@ -100,6 +100,7 @@ export interface SignupPayload {
   password: string;
   pmcNumber: string;
   specialization: string;
+  qualifications: string;
   clinicName: string;
   city: string;
   notes: string;

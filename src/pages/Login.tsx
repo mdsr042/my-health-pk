@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { Stethoscope, Lock, Mail, Eye, EyeOff, Phone, BadgeCheck, Building2, MapPin, UserRound } from 'lucide-react';
+import { Stethoscope, Lock, Mail, Eye, EyeOff, Phone, BadgeCheck, Building2, MapPin, UserRound, GraduationCap } from 'lucide-react';
 
 const defaultSignup = {
   fullName: '',
@@ -15,6 +15,7 @@ const defaultSignup = {
   password: '',
   pmcNumber: '',
   specialization: '',
+  qualifications: '',
   clinicName: '',
   city: '',
   notes: '',
@@ -269,6 +270,18 @@ export default function LoginPage() {
                     <div className="relative">
                       <Stethoscope className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input value={signupForm.specialization} onChange={e => updateSignup('specialization', e.target.value)} className="pl-10" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Qualifications</Label>
+                    <div className="relative">
+                      <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        value={signupForm.qualifications}
+                        onChange={e => updateSignup('qualifications', e.target.value)}
+                        className="pl-10"
+                        placeholder="MBBS, FCPS, MRCP"
+                      />
                     </div>
                   </div>
                   <div className="space-y-2">

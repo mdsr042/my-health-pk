@@ -311,6 +311,7 @@ app.post('/api/auth/signup', asyncHandler(async (req, res) => {
     password,
     pmcNumber,
     specialization,
+    qualifications,
     clinicName,
     city,
     notes,
@@ -348,7 +349,16 @@ app.post('/api/auth/signup', asyncHandler(async (req, res) => {
         INSERT INTO doctor_profiles (id, user_id, full_name, phone, pmc_number, specialization, qualifications, notes)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `,
-      [doctorProfileId, userId, fullName.trim(), phone.trim(), pmcNumber.trim(), specialization.trim(), '', (notes ?? '').trim()]
+      [
+        doctorProfileId,
+        userId,
+        fullName.trim(),
+        phone.trim(),
+        pmcNumber.trim(),
+        specialization.trim(),
+        (qualifications ?? '').trim(),
+        (notes ?? '').trim(),
+      ]
     );
 
     await client.query(
