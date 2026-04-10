@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   approveDoctor,
+  fetchAdminAuditLogs,
   fetchAdminDoctors,
   fetchAdminOverview,
   fetchApprovalRequests,
@@ -15,7 +16,7 @@ import {
   updateDoctorAccountStatus,
   updateWorkspaceSubscription,
 } from '@/lib/api';
-import type { AdminDoctorAccount, AdminOverview, ApprovalRequest } from '@/lib/app-types';
+import type { AdminAuditLog, AdminDoctorAccount, AdminOverview, ApprovalRequest } from '@/lib/app-types';
 import { Users, ClipboardCheck, Building2, ActivitySquare } from 'lucide-react';
 
 const emptyOverview: AdminOverview = {
@@ -69,21 +70,24 @@ export default function AdminDashboard() {
   const [overview, setOverview] = useState<AdminOverview>(emptyOverview);
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const [doctors, setDoctors] = useState<AdminDoctorAccount[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [planDrafts, setPlanDrafts] = useState<Record<string, { planName: string; status: AdminDoctorAccount['subscription']['status']; trialEndsAt: string }>>({});
 
   const load = async () => {
     setLoading(true);
     try {
-      const [nextOverview, nextApprovals, nextDoctors] = await Promise.all([
+      const [nextOverview, nextApprovals, nextDoctors, nextAuditLogs] = await Promise.all([
         fetchAdminOverview(),
         fetchApprovalRequests(),
         fetchAdminDoctors(),
+        fetchAdminAuditLogs(),
       ]);
 
       setOverview(nextOverview);
       setApprovalRequests(nextApprovals);
       setDoctors(nextDoctors);
+      setAuditLogs(nextAuditLogs);
       setPlanDrafts(
         Object.fromEntries(
           nextDoctors.map(doctor => [
@@ -299,6 +303,33 @@ export default function AdminDashboard() {
               );
             })}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-0 shadow-sm">
+        <CardContent className="p-5 space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Admin Audit Trail</h2>
+            <p className="text-xs text-muted-foreground">Recent critical admin actions for onboarding and account management.</p>
+          </div>
+
+          {auditLogs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No recent audit entries.</p>
+          ) : (
+            <div className="space-y-2">
+              {auditLogs.map(log => (
+                <div key={log.id} className="rounded-lg border border-border px-4 py-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium text-foreground">{log.action.replaceAll('_', ' ')}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(log.createdAt).toLocaleString('en-PK')}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Actor: {log.actorUserId || 'system'} {log.targetUserId ? `• Target: ${log.targetUserId}` : ''} {log.workspaceId ? `• Workspace: ${log.workspaceId}` : ''}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -14,6 +14,7 @@ function getDateKey(offsetDays = 0) {
 }
 
 function buildDraftPayload({
+  appointmentId = '',
   patientId,
   clinicId,
   chiefComplaint,
@@ -31,6 +32,7 @@ function buildDraftPayload({
   vitals = {},
 }) {
   return {
+    appointmentId,
     patientId,
     clinicId,
     chiefComplaint,
@@ -238,6 +240,7 @@ function createDemoTemplate() {
   const notes = [
     {
       id: createId('clinical_note'),
+      appointmentId: appointments[0][0],
       patientId: patient1Id,
       clinicId: clinic1Id,
       date: today,
@@ -286,6 +289,7 @@ function createDemoTemplate() {
     },
     {
       id: createId('clinical_note'),
+      appointmentId: appointments[1][0],
       patientId: patient2Id,
       clinicId: clinic1Id,
       date: today,
@@ -324,6 +328,7 @@ function createDemoTemplate() {
     },
     {
       id: createId('clinical_note'),
+      appointmentId: appointments[8][0],
       patientId: patient4Id,
       clinicId: clinic1Id,
       date: yesterday,
@@ -362,6 +367,7 @@ function createDemoTemplate() {
     },
     {
       id: createId('clinical_note'),
+      appointmentId: appointments[9][0],
       patientId: patient6Id,
       clinicId: clinic2Id,
       date: twoDaysAgo,
@@ -410,6 +416,7 @@ function createDemoTemplate() {
     },
     {
       id: createId('clinical_note'),
+      appointmentId: appointments[10][0],
       patientId: patient8Id,
       clinicId: clinic3Id,
       date: fourDaysAgo,
@@ -492,9 +499,11 @@ function createDemoTemplate() {
   ];
 
   const draft = {
+    appointmentId: appointments[4][0],
     patientId: patient5Id,
     clinicId: clinic1Id,
     payload: buildDraftPayload({
+      appointmentId: appointments[4][0],
       patientId: patient5Id,
       clinicId: clinic1Id,
       chiefComplaint: 'Joint pain and stiffness',
@@ -665,17 +674,18 @@ async function insertDemoWorkspaceData(client, userId, workspaceId, doctorProfil
     await client.query(
       `
         INSERT INTO clinical_notes (
-          id, workspace_id, patient_id, clinic_id, doctor_user_id, date,
+          id, appointment_id, workspace_id, patient_id, clinic_id, doctor_user_id, date,
           chief_complaint, hpi, past_history, allergies, examination, assessment,
           plan, instructions, follow_up, vitals, status
         )
         VALUES (
-          $1, $2, $3, $4, $5, $6::timestamptz,
-          $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'completed'
+          $1, $2, $3, $4, $5, $6, $7::timestamptz,
+          $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'completed'
         )
       `,
       [
         note.id,
+        note.appointmentId || null,
         workspaceId,
         note.patientId,
         note.clinicId,
@@ -747,11 +757,12 @@ async function insertDemoWorkspaceData(client, userId, workspaceId, doctorProfil
 
   await client.query(
     `
-      INSERT INTO consultation_drafts (id, patient_id, workspace_id, clinic_id, doctor_user_id, payload, saved_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+      INSERT INTO consultation_drafts (id, appointment_id, patient_id, workspace_id, clinic_id, doctor_user_id, payload, saved_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
     `,
     [
       createId('consultation_draft'),
+      template.draft.appointmentId,
       template.draft.patientId,
       workspaceId,
       template.draft.clinicId,

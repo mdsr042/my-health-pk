@@ -13,18 +13,51 @@ import {
 } from './auth.js';
 import { initDb, query, withTransaction } from './db.js';
 import { cleanupExpiredDemoSessions, createEphemeralDemoSession } from './demoSeed.js';
+import { apiAccessLogMiddleware, logError, logInfo, logWarn, requestContextMiddleware } from './logger.js';
+import { createRateLimitMiddleware } from './rateLimit.js';
+import { appointmentSchema, parseOrThrow, patientSchema, signupSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
+import {
+  completeConsultationEncounter,
+  createAppointmentForWorkspace,
+  createWalkInEncounter,
+  saveConsultationDraftForEncounter,
+  updateAppointmentForWorkspace,
+} from './workflows.js';
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 4001);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distDir = path.resolve(__dirname, '../dist');
+const isProduction = process.env.NODE_ENV === 'production';
+const enablePublicDemo = process.env.ENABLE_PUBLIC_DEMO === 'true';
+
+const authRateLimit = createRateLimitMiddleware({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  prefix: 'auth',
+  message: 'Too many authentication attempts. Please try again later.',
+  code: 'RATE_LIMITED',
+});
 
 app.use(cors());
+app.use(requestContextMiddleware);
 app.use(express.json({ limit: '2mb' }));
+app.use(apiAccessLogMiddleware);
 
 function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
+async function recordAdminAudit(clientOrQuery, { actorUserId = null, targetUserId = null, workspaceId = null, action, details = {} }) {
+  const runner = typeof clientOrQuery === 'function' ? clientOrQuery : clientOrQuery.query.bind(clientOrQuery);
+  await runner(
+    `
+      INSERT INTO admin_audit_logs (id, actor_user_id, target_user_id, workspace_id, action, details)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+    [createId('admin_audit_log'), actorUserId, targetUserId, workspaceId, action, details]
+  );
 }
 
 function mapClinic(row) {
@@ -67,6 +100,31 @@ function mapAppointment(row) {
     type: row.type,
     chiefComplaint: row.chief_complaint,
     tokenNumber: row.token_number,
+  };
+}
+
+function mapClinicalNote(row, diagnosesByNote, medicationsByNote, labOrdersByNote) {
+  return {
+    id: row.id,
+    appointmentId: row.appointment_id ?? '',
+    patientId: row.patient_id,
+    clinicId: row.clinic_id,
+    doctorId: row.doctor_user_id,
+    date: row.date,
+    chiefComplaint: row.chief_complaint,
+    hpi: row.hpi,
+    pastHistory: row.past_history,
+    allergies: row.allergies,
+    examination: row.examination,
+    assessment: row.assessment,
+    plan: row.plan,
+    instructions: row.instructions,
+    followUp: row.follow_up,
+    vitals: row.vitals ?? {},
+    diagnoses: diagnosesByNote[row.id] ?? [],
+    medications: medicationsByNote[row.id] ?? [],
+    labOrders: labOrdersByNote[row.id] ?? [],
+    status: row.status,
   };
 }
 
@@ -237,33 +295,13 @@ async function getWorkspaceNotes(workspaceId, patientId = null) {
     return acc;
   }, {});
 
-  return notes.map(note => ({
-    id: note.id,
-    patientId: note.patient_id,
-    clinicId: note.clinic_id,
-    doctorId: note.doctor_user_id,
-    date: note.date,
-    chiefComplaint: note.chief_complaint,
-    hpi: note.hpi,
-    pastHistory: note.past_history,
-    allergies: note.allergies,
-    examination: note.examination,
-    assessment: note.assessment,
-    plan: note.plan,
-    instructions: note.instructions,
-    followUp: note.follow_up,
-    vitals: note.vitals ?? {},
-    diagnoses: diagnosesByNote[note.id] ?? [],
-    medications: medicationsByNote[note.id] ?? [],
-    labOrders: labOrdersByNote[note.id] ?? [],
-    status: note.status,
-  }));
+  return notes.map(note => mapClinicalNote(note, diagnosesByNote, medicationsByNote, labOrdersByNote));
 }
 
 async function getWorkspaceDrafts(workspaceId) {
   const { rows } = await query(
     `
-      SELECT patient_id, payload, saved_at
+      SELECT appointment_id, patient_id, payload, saved_at
       FROM consultation_drafts
       WHERE workspace_id = $1
     `,
@@ -272,38 +310,27 @@ async function getWorkspaceDrafts(workspaceId) {
 
   return Object.fromEntries(
     rows.map(row => [
-      row.patient_id,
+      row.appointment_id || `orphan:${row.patient_id}`,
       {
         ...row.payload,
+        appointmentId: row.appointment_id || row.payload?.appointmentId || '',
         savedAt: row.saved_at,
       },
     ])
   );
 }
 
-async function upsertDraft(workspaceId, doctorUserId, patientId, payload) {
-  await query(
-    `
-      INSERT INTO consultation_drafts (id, patient_id, workspace_id, clinic_id, doctor_user_id, payload, saved_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-      ON CONFLICT (patient_id) DO UPDATE SET
-        workspace_id = EXCLUDED.workspace_id,
-        clinic_id = EXCLUDED.clinic_id,
-        doctor_user_id = EXCLUDED.doctor_user_id,
-        payload = EXCLUDED.payload,
-        saved_at = NOW(),
-        updated_at = NOW()
-    `,
-    [createId('consultation_draft'), patientId, workspaceId, payload.clinicId, doctorUserId, payload]
-  );
-}
-
 app.get('/api/health', asyncHandler(async (_req, res) => {
   await query('SELECT 1');
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.round(process.uptime()),
+    environment: process.env.NODE_ENV || 'development',
+  });
 }));
 
-app.post('/api/auth/signup', asyncHandler(async (req, res) => {
+app.post('/api/auth/signup', authRateLimit, asyncHandler(async (req, res) => {
   const {
     fullName,
     email,
@@ -315,10 +342,11 @@ app.post('/api/auth/signup', asyncHandler(async (req, res) => {
     clinicName,
     city,
     notes,
-  } = req.body ?? {};
+  } = parseOrThrow(signupSchema, req.body ?? {}, 'INVALID_SIGNUP');
 
-  if (!fullName || !email || !phone || !password || !pmcNumber || !specialization || !clinicName || !city) {
-    return res.status(400).json({ error: 'Missing required signup fields', code: 'INVALID_SIGNUP' });
+  const passwordIssue = validatePasswordPolicy(password);
+  if (passwordIssue) {
+    return res.status(400).json({ error: passwordIssue, code: 'WEAK_PASSWORD' });
   }
 
   const existingUser = await query('SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email.trim()]);
@@ -405,7 +433,7 @@ app.post('/api/auth/signup', asyncHandler(async (req, res) => {
   res.status(201).json({ ok: true, message: 'Signup request submitted for admin approval.' });
 }));
 
-app.post('/api/auth/login', asyncHandler(async (req, res) => {
+app.post('/api/auth/login', authRateLimit, asyncHandler(async (req, res) => {
   const { email, password } = req.body ?? {};
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required', code: 'INVALID_LOGIN' });
@@ -450,7 +478,11 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
   res.json({ token, session });
 }));
 
-app.post('/api/auth/demo', asyncHandler(async (_req, res) => {
+app.post('/api/auth/demo', authRateLimit, asyncHandler(async (_req, res) => {
+  if (isProduction && !enablePublicDemo) {
+    return res.status(403).json({ error: 'Public demo access is disabled', code: 'DEMO_DISABLED' });
+  }
+
   await cleanupExpiredDemoSessions({ query });
 
   const { userId } = await withTransaction(async client => {
@@ -498,6 +530,29 @@ app.get('/api/admin/overview', requireAuth, requireRole('platform_admin'), async
       patients: patientCount.rows[0].count,
       appointments: visitCount.rows[0].count,
     },
+  });
+}));
+
+app.get('/api/admin/audit-logs', requireAuth, requireRole('platform_admin'), asyncHandler(async (_req, res) => {
+  const { rows } = await query(
+    `
+      SELECT id, actor_user_id, target_user_id, workspace_id, action, details, created_at
+      FROM admin_audit_logs
+      ORDER BY created_at DESC
+      LIMIT 20
+    `
+  );
+
+  res.json({
+    data: rows.map(row => ({
+      id: row.id,
+      action: row.action,
+      createdAt: row.created_at,
+      actorUserId: row.actor_user_id,
+      targetUserId: row.target_user_id,
+      workspaceId: row.workspace_id,
+      details: row.details ?? {},
+    })),
   });
 }));
 
@@ -681,6 +736,14 @@ app.post('/api/admin/approval-requests/:id/approve', requireAuth, requireRole('p
         [createId('clinic'), approval.workspace_id, approval.clinic_name || 'Main Clinic', approval.city || '', approval.city || '']
       );
     }
+
+    await recordAdminAudit(client, {
+      actorUserId: req.auth.user.id,
+      targetUserId: approval.user_id,
+      workspaceId: approval.workspace_id,
+      action: 'doctor_approved',
+      details: { approvalRequestId: id },
+    });
   });
 
   res.json({ ok: true });
@@ -709,6 +772,14 @@ app.post('/api/admin/approval-requests/:id/reject', requireAuth, requireRole('pl
       `,
       [id, reason, req.auth.user.id]
     );
+
+    await recordAdminAudit(client, {
+      actorUserId: req.auth.user.id,
+      targetUserId: approval.user_id,
+      workspaceId: approval.workspace_id,
+      action: 'doctor_rejected',
+      details: { approvalRequestId: id, reason },
+    });
   });
 
   res.json({ ok: true });
@@ -724,6 +795,14 @@ app.put('/api/admin/doctors/:id/status', requireAuth, requireRole('platform_admi
 
   await query(`UPDATE users SET status = $2, updated_at = NOW() WHERE id = $1`, [id, status]);
   await query(`UPDATE workspaces SET status = $2, updated_at = NOW() WHERE owner_user_id = $1`, [id, status]);
+  const workspaceResult = await query(`SELECT id FROM workspaces WHERE owner_user_id = $1 LIMIT 1`, [id]);
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    targetUserId: id,
+    workspaceId: workspaceResult.rows[0]?.id ?? null,
+    action: 'doctor_status_changed',
+    details: { status },
+  });
 
   res.json({ ok: true });
 }));
@@ -744,6 +823,12 @@ app.put('/api/admin/workspaces/:id/subscription', requireAuth, requireRole('plat
     `,
     [id, planName, status, trialEndsAt || null]
   );
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    workspaceId: id,
+    action: 'subscription_updated',
+    details: { planName, status, trialEndsAt: trialEndsAt || null },
+  });
 
   res.json({ ok: true });
 }));
@@ -832,10 +917,7 @@ app.get('/api/patients', requireAuth, requireRole('doctor_owner'), asyncHandler(
 }));
 
 app.post('/api/patients', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
-  const patient = req.body ?? {};
-  if (!patient.name) {
-    return res.status(400).json({ error: 'Patient name is required', code: 'INVALID_PATIENT' });
-  }
+  const patient = parseOrThrow(patientSchema, req.body ?? {}, 'INVALID_PATIENT');
 
   const id = patient.id || createId('patient');
   const mrn = patient.mrn || `MRN-${Date.now().toString().slice(-8)}`;
@@ -893,67 +975,30 @@ app.get('/api/appointments', requireAuth, requireRole('doctor_owner'), asyncHand
 }));
 
 app.post('/api/appointments', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
-  const appointment = req.body ?? {};
-  if (!appointment.patientId || !appointment.clinicId || !appointment.date || !appointment.time) {
-    return res.status(400).json({ error: 'Missing appointment data', code: 'INVALID_APPOINTMENT' });
-  }
+  const appointment = parseOrThrow(appointmentSchema, req.body ?? {}, 'INVALID_APPOINTMENT');
 
-  await query(
-    `
-      INSERT INTO appointments (
-        id, workspace_id, clinic_id, patient_id, doctor_user_id, date, time, status, type, chief_complaint, token_number, updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-    `,
-    [
-      appointment.id || createId('appointment'),
-      req.auth.workspace.id,
-      appointment.clinicId,
-      appointment.patientId,
-      req.auth.user.id,
-      appointment.date,
-      appointment.time,
-      appointment.status || 'scheduled',
-      appointment.type || 'new',
-      appointment.chiefComplaint || '',
-      appointment.tokenNumber || 0,
-    ]
+  const saved = await withTransaction(client =>
+    createAppointmentForWorkspace(client, {
+      workspaceId: req.auth.workspace.id,
+      doctorUserId: req.auth.user.id,
+      appointment,
+    })
   );
 
-  res.status(201).json({ ok: true });
+  res.status(201).json({ data: mapAppointment(saved) });
 }));
 
 app.put('/api/appointments/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const appointment = req.body ?? {};
-  await query(
-    `
-      UPDATE appointments
-      SET patient_id = $3,
-          clinic_id = $4,
-          date = $5,
-          time = $6,
-          status = $7,
-          type = $8,
-          chief_complaint = $9,
-          token_number = $10,
-          updated_at = NOW()
-      WHERE id = $1 AND workspace_id = $2
-    `,
-    [
-      id,
-      req.auth.workspace.id,
-      appointment.patientId,
-      appointment.clinicId,
-      appointment.date,
-      appointment.time,
-      appointment.status,
-      appointment.type,
-      appointment.chiefComplaint || '',
-      appointment.tokenNumber || 0,
-    ]
+  const appointment = parseOrThrow(appointmentSchema, req.body ?? {}, 'INVALID_APPOINTMENT');
+  const saved = await withTransaction(client =>
+    updateAppointmentForWorkspace(client, {
+      workspaceId: req.auth.workspace.id,
+      appointmentId: id,
+      appointment,
+    })
   );
-  res.json({ ok: true });
+  res.json({ data: mapAppointment(saved) });
 }));
 
 app.patch('/api/appointments/:id/status', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
@@ -1010,9 +1055,16 @@ app.get('/api/consultation-drafts', requireAuth, requireRole('doctor_owner'), as
   res.json({ data: drafts });
 }));
 
-app.put('/api/consultation-drafts/:patientId', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
-  const { patientId } = req.params;
-  await upsertDraft(req.auth.workspace.id, req.auth.user.id, patientId, req.body ?? {});
+app.put('/api/consultation-drafts/:appointmentId', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const { appointmentId } = req.params;
+  await withTransaction(client =>
+    saveConsultationDraftForEncounter(client, {
+      workspaceId: req.auth.workspace.id,
+      doctorUserId: req.auth.user.id,
+      appointmentId,
+      payload: req.body ?? {},
+    })
+  );
   res.json({ ok: true });
 }));
 
@@ -1024,125 +1076,19 @@ app.get('/api/clinical-notes', requireAuth, requireRole('doctor_owner'), asyncHa
 
 app.post('/api/consultations/complete', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   const payload = req.body ?? {};
-  const noteId = createId('note');
   const completedAt = new Date().toISOString();
-
-  await withTransaction(async client => {
-    await client.query(
-      `
-        INSERT INTO clinical_notes (
-          id, workspace_id, patient_id, clinic_id, doctor_user_id, date,
-          chief_complaint, hpi, past_history, allergies, examination, assessment,
-          plan, instructions, follow_up, vitals, status
-        )
-        VALUES (
-          $1, $2, $3, $4, $5, NOW(),
-          $6, $7, $8, $9, $10, $11,
-          $12, $13, $14, $15, 'completed'
-        )
-      `,
-      [
-        noteId,
-        req.auth.workspace.id,
-        payload.patientId,
-        payload.clinicId,
-        req.auth.user.id,
-        payload.chiefComplaint || '',
-        payload.hpi || '',
-        payload.pastHistory || '',
-        payload.allergies || '',
-        payload.examination || '',
-        payload.assessment || '',
-        payload.plan || '',
-        payload.instructions || '',
-        payload.followUp || '',
-        payload.vitals || {},
-      ]
-    );
-
-    for (const diagnosis of payload.diagnoses ?? []) {
-      await client.query(
-        `
-          INSERT INTO diagnoses (id, note_id, code, name, is_primary)
-          VALUES ($1, $2, $3, $4, $5)
-        `,
-        [diagnosis.id || createId('diagnosis'), noteId, diagnosis.code || '', diagnosis.name, Boolean(diagnosis.isPrimary)]
-      );
-    }
-
-    for (const medication of payload.medications ?? []) {
-      await client.query(
-        `
-          INSERT INTO medications (
-            id, note_id, name, name_urdu, generic_name, strength, form, route, dose_pattern,
-            frequency, frequency_urdu, duration, duration_urdu, instructions, instructions_urdu, diagnosis_id
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-        `,
-        [
-          medication.id || createId('medication'),
-          noteId,
-          medication.name,
-          medication.nameUrdu || '',
-          medication.generic || '',
-          medication.strength || '',
-          medication.form || '',
-          medication.route || '',
-          medication.dosePattern || '',
-          medication.frequency || '',
-          medication.frequencyUrdu || '',
-          medication.duration || '',
-          medication.durationUrdu || '',
-          medication.instructions || '',
-          medication.instructionsUrdu || '',
-          medication.diagnosisId || '',
-        ]
-      );
-    }
-
-    for (const order of payload.labOrders ?? []) {
-      await client.query(
-        `
-          INSERT INTO lab_orders (id, note_id, test_name, category, priority, status, result, date)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `,
-        [
-          order.id || createId('lab'),
-          noteId,
-          order.testName,
-          order.category,
-          order.priority || 'routine',
-          order.status || 'ordered',
-          order.result || '',
-          order.date,
-        ]
-      );
-    }
-
-    await client.query(
-      `
-        DELETE FROM consultation_drafts
-        WHERE patient_id = $1 AND workspace_id = $2
-      `,
-      [payload.patientId, req.auth.workspace.id]
-    );
-
-    await client.query(
-      `
-        UPDATE appointments
-        SET status = 'completed', updated_at = NOW()
-        WHERE workspace_id = $1
-          AND patient_id = $2
-          AND clinic_id = $3
-          AND status NOT IN ('cancelled', 'no-show')
-      `,
-      [req.auth.workspace.id, payload.patientId, payload.clinicId]
-    );
-  });
+  const { noteId } = await withTransaction(client =>
+    completeConsultationEncounter(client, {
+      workspaceId: req.auth.workspace.id,
+      doctorUserId: req.auth.user.id,
+      payload,
+    })
+  );
 
   res.status(201).json({
     data: {
       id: noteId,
+      appointmentId: payload.appointmentId,
       patientId: payload.patientId,
       clinicId: payload.clinicId,
       doctorId: req.auth.user.id,
@@ -1161,6 +1107,26 @@ app.post('/api/consultations/complete', requireAuth, requireRole('doctor_owner')
       medications: payload.medications || [],
       labOrders: payload.labOrders || [],
       status: 'completed',
+    },
+  });
+}));
+
+app.post('/api/walk-ins', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const { clinicId, ...payload } = parseOrThrow(walkInSchema, req.body ?? {}, 'INVALID_WALK_IN');
+
+  const result = await withTransaction(client =>
+    createWalkInEncounter(client, {
+      workspaceId: req.auth.workspace.id,
+      doctorUserId: req.auth.user.id,
+      clinicId,
+      payload,
+    })
+  );
+
+  res.status(201).json({
+    data: {
+      patient: mapPatient(result.patient),
+      appointment: mapAppointment(result.appointment),
     },
   });
 }));
@@ -1196,7 +1162,7 @@ app.use((req, res, next) => {
 });
 
 app.use((error, _req, res, _next) => {
-  console.error(error);
+  logError('api_error', error, { requestId: _req.requestId, path: _req.path, method: _req.method });
   const statusCode = error.statusCode || 500;
   res.status(statusCode).json({
     error: error.message || 'Server error',
@@ -1206,11 +1172,21 @@ app.use((error, _req, res, _next) => {
 
 initDb()
   .then(() => {
+    if (isProduction && (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD === 'admin123')) {
+      throw new Error('Production startup blocked: ADMIN_PASSWORD must be changed from the default value.');
+    }
+    if (isProduction && !process.env.JWT_SECRET) {
+      throw new Error('Production startup blocked: JWT_SECRET is required.');
+    }
+    if (isProduction && enablePublicDemo) {
+      logWarn('public_demo_enabled_in_production', {});
+    }
+
     app.listen(port, () => {
-      console.log(`App listening on http://localhost:${port}`);
+      logInfo('server_started', { port, environment: process.env.NODE_ENV || 'development' });
     });
   })
   .catch(error => {
-    console.error('Failed to initialize database', error);
+    logError('startup_failed', error);
     process.exit(1);
   });

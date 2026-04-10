@@ -1,6 +1,6 @@
 # My Health PK
 
-Frontend and local persistence API for the doctor/patient management UI.
+Postgres-backed doctor and patient management platform with doctor signup approval, admin operations, encounter-scoped consultations, and an isolated demo flow.
 
 ## Local Run
 
@@ -10,38 +10,39 @@ Install dependencies:
 npm install
 ```
 
-Start both the API and frontend together:
+Start Postgres and run the API:
 
 ```bash
-npm run dev:full
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/my_health" JWT_SECRET="dev-secret" ADMIN_EMAIL="admin@myhealth.pk" ADMIN_PASSWORD="admin123" npm run api
 ```
 
-This starts:
+In another terminal, start the frontend:
 
+```bash
+npm run dev
+```
+
+Default local ports:
 - Frontend: [http://localhost:8080](http://localhost:8080)
-- API: [http://localhost:4001/api/health](http://localhost:4001/api/health)
+- API health: [http://localhost:4001/api/health](http://localhost:4001/api/health)
 
-If port `8080` is already in use, run the frontend on another port:
+## Production Notes
 
-```bash
-npm run api
-npm run dev -- --port 3106
-```
+- Set production secrets only in the hosting platform.
+- Disable public demo in production unless explicitly required:
+  - `ENABLE_PUBLIC_DEMO=false`
+- Do not launch with the default admin password.
+- See:
+  - [Launch Runbook](./docs/launch-runbook.md)
+  - [Data Retention Policy Draft](./docs/data-retention-policy.md)
+  - [Privacy Policy Draft](./public/privacy-policy.html)
+  - [Terms Draft](./public/terms.html)
 
-## Persistence
+## Current Safety Features
 
-The app now stores data in a local SQLite database at:
-
-```text
-server/data/my-health.db
-```
-
-The frontend uses `/api` endpoints for:
-
-- Patients
-- Appointments
-- Clinical notes
-- Consultation drafts
-- Settings
-
-On first run, the API is automatically bootstrapped with the existing mock data.
+- Encounter-scoped consultation completion
+- Appointment-scoped consultation drafts
+- Workspace ownership validation on key write paths
+- Server-side walk-in creation and token assignment
+- Auth rate limiting and stronger signup password policy
+- Admin audit trail for approvals and account/subscription changes

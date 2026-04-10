@@ -1,0 +1,83 @@
+import { z } from 'zod';
+
+function createHttpError(message, code, statusCode) {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
+}
+
+export function validatePasswordPolicy(password) {
+  const value = String(password ?? '');
+  if (value.length < 8) return 'Password must be at least 8 characters long.';
+  if (!/[a-z]/.test(value)) return 'Password must include at least one lowercase letter.';
+  if (!/[A-Z]/.test(value)) return 'Password must include at least one uppercase letter.';
+  if (!/[0-9]/.test(value)) return 'Password must include at least one number.';
+  return '';
+}
+
+const trimmedString = (field, max = 255) =>
+  z.string({ required_error: `${field} is required` }).trim().min(1, `${field} is required`).max(max, `${field} is too long`);
+
+export const signupSchema = z.object({
+  fullName: trimmedString('Full name'),
+  email: z.string().trim().email('Valid email is required'),
+  phone: trimmedString('Phone', 40),
+  password: z.string().min(1, 'Password is required'),
+  pmcNumber: trimmedString('PMC number', 80),
+  specialization: trimmedString('Specialization'),
+  qualifications: z.string().trim().max(255).default(''),
+  clinicName: trimmedString('Clinic name'),
+  city: trimmedString('City'),
+  notes: z.string().trim().max(1000).default(''),
+});
+
+export const patientSchema = z.object({
+  id: z.string().optional(),
+  mrn: z.string().optional(),
+  name: trimmedString('Patient name'),
+  phone: z.string().trim().max(40).default(''),
+  age: z.number().int().min(0).max(130).default(0),
+  gender: z.enum(['Male', 'Female']).default('Male'),
+  cnic: z.string().trim().max(30).default(''),
+  address: z.string().trim().max(500).default(''),
+  bloodGroup: z.string().trim().max(10).default(''),
+  emergencyContact: z.string().trim().max(120).default(''),
+});
+
+export const appointmentSchema = z.object({
+  id: z.string().optional(),
+  patientId: trimmedString('Patient'),
+  clinicId: trimmedString('Clinic'),
+  doctorId: z.string().optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Appointment date must be YYYY-MM-DD'),
+  time: z.string().min(1, 'Appointment time is required').max(20),
+  status: z.enum(['scheduled', 'waiting', 'in-consultation', 'completed', 'cancelled', 'no-show']).default('scheduled'),
+  type: z.enum(['new', 'follow-up']).default('new'),
+  chiefComplaint: z.string().trim().max(500).default(''),
+  tokenNumber: z.number().int().min(0).default(0),
+});
+
+export const walkInSchema = z.object({
+  clinicId: trimmedString('Clinic'),
+  name: trimmedString('Patient name'),
+  phone: z.string().trim().max(40).default(''),
+  age: z.number().int().min(0).max(130).default(0),
+  gender: z.enum(['Male', 'Female']).default('Male'),
+  cnic: z.string().trim().max(30).default(''),
+  address: z.string().trim().max(500).default(''),
+  bloodGroup: z.string().trim().max(10).default(''),
+  emergencyContact: z.string().trim().max(120).default(''),
+  chiefComplaint: z.string().trim().max(500).default(''),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Walk-in date must be YYYY-MM-DD'),
+  time: z.string().max(20).optional(),
+});
+
+export function parseOrThrow(schema, value, code = 'INVALID_REQUEST') {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw createHttpError(issue?.message || 'Invalid request data', code, 400);
+  }
+  return result.data;
+}

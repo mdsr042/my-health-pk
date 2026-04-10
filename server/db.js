@@ -112,6 +112,16 @@ async function createBaseSchema(client) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS admin_audit_logs (
+      id TEXT PRIMARY KEY,
+      actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      target_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS clinics (
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -168,7 +178,8 @@ async function createBaseSchema(client) {
 
     CREATE TABLE IF NOT EXISTS consultation_drafts (
       id TEXT PRIMARY KEY,
-      patient_id TEXT NOT NULL UNIQUE REFERENCES patients(id) ON DELETE CASCADE,
+      appointment_id TEXT UNIQUE REFERENCES appointments(id) ON DELETE SET NULL,
+      patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       clinic_id TEXT NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
       doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -180,6 +191,7 @@ async function createBaseSchema(client) {
 
     CREATE TABLE IF NOT EXISTS clinical_notes (
       id TEXT PRIMARY KEY,
+      appointment_id TEXT REFERENCES appointments(id) ON DELETE SET NULL,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
       clinic_id TEXT NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
@@ -363,6 +375,28 @@ async function dropForeignKeysForColumns(client, tableName, columnNames) {
       WHERE nsp.nspname = 'public'
         AND rel.relname = $1
         AND con.contype = 'f'
+        AND attr.attname = ANY($2::text[])
+    `,
+    [tableName, columnNames]
+  );
+
+  for (const row of rows) {
+    await client.query(`ALTER TABLE ${tableName} DROP CONSTRAINT IF EXISTS ${row.conname}`);
+  }
+}
+
+async function dropUniqueConstraintsForColumns(client, tableName, columnNames) {
+  const { rows } = await client.query(
+    `
+      SELECT DISTINCT con.conname
+      FROM pg_constraint con
+      JOIN pg_class rel ON rel.oid = con.conrelid
+      JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+      JOIN unnest(con.conkey) AS keynum(attnum) ON TRUE
+      JOIN pg_attribute attr ON attr.attrelid = rel.oid AND attr.attnum = keynum.attnum
+      WHERE nsp.nspname = 'public'
+        AND rel.relname = $1
+        AND con.contype = 'u'
         AND attr.attname = ANY($2::text[])
     `,
     [tableName, columnNames]
@@ -588,7 +622,14 @@ async function runSchemaMigrations(client) {
     await remapPrimaryIds(client, { tableName: 'workspace_members', entity: 'workspace_member' });
     await remapPrimaryIds(client, { tableName: 'subscriptions', entity: 'subscription' });
     await remapPrimaryIds(client, { tableName: 'approval_requests', entity: 'approval_request' });
-    await remapPrimaryIds(client, { tableName: 'appointments', entity: 'appointment' });
+    await remapPrimaryIds(client, {
+      tableName: 'appointments',
+      entity: 'appointment',
+      references: [
+        { tableName: 'consultation_drafts', columnName: 'appointment_id', constraintName: 'consultation_drafts_appointment_id_fkey', onDelete: 'SET NULL' },
+        { tableName: 'clinical_notes', columnName: 'appointment_id', constraintName: 'clinical_notes_appointment_id_fkey', onDelete: 'SET NULL' },
+      ],
+    });
     await remapPrimaryIds(client, { tableName: 'doctor_profiles', entity: 'doctor_profile' });
     await remapPrimaryIds(client, { tableName: 'workspace_settings', entity: 'workspace_setting' });
     await remapPrimaryIds(client, { tableName: 'consultation_drafts', entity: 'consultation_draft' });
@@ -602,7 +643,7 @@ async function runSchemaMigrations(client) {
     await ensureUniqueConstraint(client, 'patients', 'patients_workspace_id_mrn_key', '(workspace_id, mrn)');
     await ensureUniqueConstraint(client, 'doctor_profiles', 'doctor_profiles_user_id_key', '(user_id)');
     await ensureUniqueConstraint(client, 'workspace_settings', 'workspace_settings_workspace_id_key', '(workspace_id)');
-    await ensureUniqueConstraint(client, 'consultation_drafts', 'consultation_drafts_patient_id_key', '(patient_id)');
+    await ensureUniqueConstraint(client, 'consultation_drafts', 'consultation_drafts_appointment_id_key', '(appointment_id)');
 
     await ensureIndex(client, 'idx_clinics_workspace_id', 'clinics', '(workspace_id)');
     await ensureIndex(client, 'idx_patients_workspace_created', 'patients', '(workspace_id, created_at DESC)');
@@ -610,6 +651,7 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_notes_workspace_patient_date', 'clinical_notes', '(workspace_id, patient_id, date DESC)');
     await ensureIndex(client, 'idx_approval_requests_status_created', 'approval_requests', '(status, created_at DESC)');
     await ensureIndex(client, 'idx_workspaces_demo_expires_at', 'workspaces', '(demo_expires_at)');
+    await ensureIndex(client, 'idx_admin_audit_logs_created', 'admin_audit_logs', '(created_at DESC)');
   });
 
   await runMigration(client, '004_demo_workspace_expiry', async () => {
@@ -619,6 +661,100 @@ async function runSchemaMigrations(client) {
 
   await runMigration(client, '005_medication_dose_pattern', async () => {
     await client.query(`ALTER TABLE medications ADD COLUMN IF NOT EXISTS dose_pattern TEXT NOT NULL DEFAULT ''`);
+  });
+
+  await runMigration(client, '006_encounter_scoped_drafts_and_notes', async () => {
+    await client.query(`ALTER TABLE consultation_drafts ADD COLUMN IF NOT EXISTS appointment_id TEXT`);
+    await client.query(`ALTER TABLE clinical_notes ADD COLUMN IF NOT EXISTS appointment_id TEXT`);
+
+    const draftRows = await client.query(
+      `
+        SELECT id, workspace_id, patient_id, clinic_id
+        FROM consultation_drafts
+        WHERE appointment_id IS NULL
+      `
+    );
+
+    for (const row of draftRows.rows) {
+      const match = await client.query(
+        `
+          SELECT id
+          FROM appointments
+          WHERE workspace_id = $1
+            AND patient_id = $2
+            AND clinic_id = $3
+          ORDER BY
+            CASE
+              WHEN status IN ('in-consultation', 'waiting', 'scheduled') THEN 0
+              WHEN status = 'completed' THEN 1
+              ELSE 2
+            END,
+            date DESC,
+            time DESC
+          LIMIT 1
+        `,
+        [row.workspace_id, row.patient_id, row.clinic_id]
+      );
+
+      if (match.rowCount > 0) {
+        await client.query(
+          `UPDATE consultation_drafts SET appointment_id = $2, updated_at = NOW() WHERE id = $1`,
+          [row.id, match.rows[0].id]
+        );
+      }
+    }
+
+    const noteRows = await client.query(
+      `
+        SELECT id, workspace_id, patient_id, clinic_id, date
+        FROM clinical_notes
+        WHERE appointment_id IS NULL
+      `
+    );
+
+    for (const row of noteRows.rows) {
+      const match = await client.query(
+        `
+          SELECT id
+          FROM appointments
+          WHERE workspace_id = $1
+            AND patient_id = $2
+            AND clinic_id = $3
+            AND date = ($4::timestamptz AT TIME ZONE 'UTC')::date::text
+          ORDER BY time DESC
+          LIMIT 1
+        `,
+        [row.workspace_id, row.patient_id, row.clinic_id, row.date]
+      );
+
+      if (match.rowCount > 0) {
+        await client.query(
+          `UPDATE clinical_notes SET appointment_id = $2, updated_at = NOW() WHERE id = $1`,
+          [row.id, match.rows[0].id]
+        );
+      }
+    }
+
+    await dropUniqueConstraintsForColumns(client, 'consultation_drafts', ['patient_id']);
+    await ensureForeignKey(
+      client,
+      'consultation_drafts',
+      'consultation_drafts_appointment_id_fkey',
+      'appointment_id',
+      'appointments',
+      'id',
+      'SET NULL'
+    );
+    await ensureForeignKey(
+      client,
+      'clinical_notes',
+      'clinical_notes_appointment_id_fkey',
+      'appointment_id',
+      'appointments',
+      'id',
+      'SET NULL'
+    );
+    await ensureUniqueConstraint(client, 'consultation_drafts', 'consultation_drafts_appointment_id_key', '(appointment_id)');
   });
 }
 

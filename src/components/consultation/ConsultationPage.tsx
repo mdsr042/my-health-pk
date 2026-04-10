@@ -77,7 +77,6 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const {
     getPatient,
     appointments,
-    updateAppointmentStatus,
     getPatientNotes,
     getConsultationDraft,
     saveConsultationDraft,
@@ -85,8 +84,17 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   } = useData();
   const patient = getPatient(patientId);
   const patientNotes = getPatientNotes(patientId);
-  const draft = getConsultationDraft(patientId);
-  const activeAppointment = appointments.find(a => a.patientId === patientId && a.status !== 'completed' && a.status !== 'cancelled');
+  const activeAppointment = [...appointments]
+    .filter(a => a.patientId === patientId && a.status !== 'completed' && a.status !== 'cancelled' && a.status !== 'no-show')
+    .sort((a, b) => {
+      const priority = (status: typeof a.status) => (status === 'in-consultation' ? 0 : status === 'waiting' ? 1 : 2);
+      const clinicBoost = activeClinic?.id ? Number(a.clinicId !== activeClinic.id) - Number(b.clinicId !== activeClinic.id) : 0;
+      if (clinicBoost !== 0) return clinicBoost;
+      const priorityDiff = priority(a.status) - priority(b.status);
+      if (priorityDiff !== 0) return priorityDiff;
+      return `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
+    })[0];
+  const draft = getConsultationDraft(activeAppointment?.id, patientId);
 
   const [activeView, setActiveView] = useState<TabView>('consultation');
   const [diagnosisOpen, setDiagnosisOpen] = useState(false);
@@ -162,10 +170,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       medications,
       labOrders,
     }),
+    appointmentId: activeAppointment?.id || draft?.appointmentId || '',
     patientId,
     clinicId: activeClinic?.id || activeAppointment?.clinicId || 'clinic-1',
     vitals,
   }), [
+    activeAppointment?.id,
     activeAppointment?.clinicId,
     activeClinic?.id,
     allergies,
@@ -184,19 +194,31 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     vitals,
   ]);
 
-  const handleSaveDraft = async () => {
+    const handleSaveDraft = async () => {
+    if (!activeAppointment?.id) {
+      toast.error('No active appointment found for this consultation');
+      return;
+    }
     await saveConsultationDraft(buildConsultationPayload());
     markUnsaved(patientId, false);
     toast.success('Draft saved', { description: `${patient?.name} consultation saved as draft` });
   };
 
   const handleHold = async () => {
+    if (!activeAppointment?.id) {
+      toast.error('No active appointment found for this consultation');
+      return;
+    }
     await saveConsultationDraft(buildConsultationPayload());
     markUnsaved(patientId, false);
     toast.info('Consultation on hold', { description: `${patient?.name} — will appear in your pending list` });
   };
 
   const handleComplete = async () => {
+    if (!activeAppointment?.id) {
+      toast.error('No active appointment found for this consultation');
+      return;
+    }
     await completeConsultation(buildConsultationPayload());
     markUnsaved(patientId, false);
     toast.success('Visit completed', { description: `${patient?.name} consultation finalized`, icon: <CheckCircle2 className="w-4 h-4 text-success" /> });

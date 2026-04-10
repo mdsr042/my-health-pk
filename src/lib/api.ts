@@ -1,5 +1,6 @@
 import type {
   AdminDoctorAccount,
+  AdminAuditLog,
   AdminOverview,
   ApprovalRequest,
   AppSettings,
@@ -139,17 +140,19 @@ export async function fetchAppointments() {
 }
 
 export async function createAppointment(appointment: Appointment) {
-  await request<{ ok: true }>('/appointments', {
+  const result = await request<{ data: Appointment }>('/appointments', {
     method: 'POST',
     body: JSON.stringify(appointment),
   });
+  return result.data;
 }
 
 export async function updateAppointment(appointment: Appointment) {
-  await request<{ ok: true }>(`/appointments/${appointment.id}`, {
+  const result = await request<{ data: Appointment }>(`/appointments/${appointment.id}`, {
     method: 'PUT',
     body: JSON.stringify(appointment),
   });
+  return result.data;
 }
 
 export async function updateAppointmentStatus(appointmentId: string, status: Appointment['status']) {
@@ -164,8 +167,8 @@ export async function fetchDrafts() {
   return result.data;
 }
 
-export async function persistDraft(patientId: string, payload: ConsultationDraft) {
-  await request<{ ok: true }>(`/consultation-drafts/${patientId}`, {
+export async function persistDraft(appointmentId: string, payload: ConsultationDraft) {
+  await request<{ ok: true }>(`/consultation-drafts/${appointmentId}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   });
@@ -179,6 +182,27 @@ export async function fetchClinicalNotes(patientId?: string) {
 
 export async function completeConsultation(payload: ConsultationDraft) {
   const result = await request<{ data: ClinicalNote }>('/consultations/complete', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function createWalkIn(payload: {
+  clinicId: string;
+  name: string;
+  phone: string;
+  age: number;
+  gender: Patient['gender'];
+  cnic: string;
+  address: string;
+  bloodGroup: string;
+  emergencyContact: string;
+  chiefComplaint: string;
+  date: string;
+  time?: string;
+}) {
+  const result = await request<{ data: { patient: Patient; appointment: Appointment } }>('/walk-ins', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -204,6 +228,11 @@ export async function fetchAdminOverview() {
 
 export async function fetchApprovalRequests() {
   const result = await request<{ data: ApprovalRequest[] }>('/admin/approval-requests');
+  return result.data;
+}
+
+export async function fetchAdminAuditLogs() {
+  const result = await request<{ data: AdminAuditLog[] }>('/admin/audit-logs');
   return result.data;
 }
 

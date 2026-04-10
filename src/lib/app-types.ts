@@ -11,6 +11,7 @@ import type {
 } from '@/data/mockData';
 
 export interface ConsultationDraft {
+  appointmentId: string;
   patientId: string;
   clinicId: string;
   chiefComplaint: string;
@@ -165,4 +166,14 @@ export interface AdminOverview {
   clinics: number;
   patients: number;
   appointments: number;
+}
+
+export interface AdminAuditLog {
+  id: string;
+  action: string;
+  createdAt: string;
+  actorUserId: string | null;
+  targetUserId: string | null;
+  workspaceId: string | null;
+  details: Record<string, unknown>;
 }

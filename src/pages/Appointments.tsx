@@ -110,17 +110,8 @@ export default function Appointments() {
       return;
     }
 
-    const tokenNumber = editingAppointmentId
-      ? form.tokenNumber
-      : Math.max(
-          0,
-          ...getAppointmentsForClinic(activeClinic.id)
-            .filter(appointment => appointment.date === form.date)
-            .map(appointment => appointment.tokenNumber)
-        ) + 1;
-
     await upsertAppointment({
-      id: editingAppointmentId ?? `apt-${Date.now()}`,
+      id: editingAppointmentId ?? '',
       patientId: form.patientId,
       clinicId: activeClinic.id,
       doctorId: user?.id || 'doctor',
@@ -129,7 +120,7 @@ export default function Appointments() {
       status: form.status,
       type: form.type,
       chiefComplaint: form.chiefComplaint.trim(),
-      tokenNumber,
+      tokenNumber: editingAppointmentId ? form.tokenNumber : 0,
     });
 
     toast.success(editingAppointmentId ? 'Appointment updated' : 'Appointment created');

@@ -100,6 +100,7 @@ export interface LabOrder {
 
 export interface ClinicalNote {
   id: string;
+  appointmentId?: string;
   patientId: string;
   clinicId: string;
   doctorId: string;

@@ -3,6 +3,7 @@ import type { Appointment, ClinicalNote, Patient } from '@/data/mockData';
 import {
   completeConsultation as completeConsultationRequest,
   createAppointment,
+  createWalkIn as createWalkInRequest,
   createPatient,
   fetchAppointments,
   fetchClinicalNotes,
@@ -17,6 +18,7 @@ import { getLocalDateKey, parseDateKey } from '@/lib/date';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface ConsultationPayload {
+  appointmentId: ConsultationDraft['appointmentId'];
   patientId: ConsultationDraft['patientId'];
   clinicId: ConsultationDraft['clinicId'];
   chiefComplaint: ConsultationDraft['chiefComplaint'];
@@ -52,7 +54,7 @@ interface DataContextType {
   getAppointmentsForClinic: (clinicId: string) => Appointment[];
   getAppointmentsForClinicOnDate: (clinicId: string, date: string) => Appointment[];
   getPatientNotes: (patientId: string) => ClinicalNote[];
-  getConsultationDraft: (patientId: string) => ConsultationDraft | undefined;
+  getConsultationDraft: (appointmentId?: string, patientId?: string) => ConsultationDraft | undefined;
   addPatient: (patient: Patient) => Promise<void>;
   addAppointment: (appointment: Appointment) => Promise<void>;
   upsertAppointment: (appointment: Appointment) => Promise<void>;
@@ -149,7 +151,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [notes]
   );
 
-  const getConsultationDraft = useCallback((patientId: string) => drafts[patientId], [drafts]);
+  const getConsultationDraft = useCallback((appointmentId?: string, patientId?: string) => {
+    if (appointmentId && drafts[appointmentId]) {
+      return drafts[appointmentId];
+    }
+
+    if (patientId) {
+      return Object.values(drafts).find(draft => !draft.appointmentId && draft.patientId === patientId);
+    }
+
+    return undefined;
+  }, [drafts]);
 
   const addPatient = useCallback(async (patient: Patient) => {
     const saved = await createPatient(patient);
@@ -157,18 +169,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addAppointment = useCallback(async (appointment: Appointment) => {
-    await createAppointment(appointment);
-    setAppointments(prev => sortAppointments([...prev, appointment]));
+    const saved = await createAppointment(appointment);
+    setAppointments(prev => sortAppointments([...prev.filter(item => item.id !== saved.id), saved]));
   }, []);
 
   const upsertAppointment = useCallback(async (appointment: Appointment) => {
     const exists = appointments.some(item => item.id === appointment.id);
     if (exists) {
-      await updateAppointment(appointment);
-      setAppointments(prev => sortAppointments(prev.map(item => (item.id === appointment.id ? appointment : item))));
+      const saved = await updateAppointment(appointment);
+      setAppointments(prev => sortAppointments(prev.map(item => (item.id === appointment.id ? saved : item))));
     } else {
-      await createAppointment(appointment);
-      setAppointments(prev => sortAppointments([...prev, appointment]));
+      const saved = await createAppointment(appointment);
+      setAppointments(prev => sortAppointments([...prev, saved]));
     }
   }, [appointments]);
 
@@ -220,8 +232,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       ...payload,
       savedAt: new Date().toISOString(),
     };
-    await persistDraft(payload.patientId, draft);
-    setDrafts(prev => ({ ...prev, [payload.patientId]: draft }));
+    await persistDraft(payload.appointmentId, draft);
+    setDrafts(prev => ({ ...prev, [payload.appointmentId]: draft }));
   }, []);
 
   const completeConsultation = useCallback(async (payload: ConsultationPayload) => {
@@ -233,16 +245,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setNotes(prev => [note, ...prev.filter(item => item.id !== note.id)]);
     setDrafts(prev => {
       const next = { ...prev };
-      delete next[payload.patientId];
+      delete next[payload.appointmentId];
       return next;
     });
     setAppointments(prev =>
       sortAppointments(
         prev.map(appointment =>
-          appointment.patientId === payload.patientId &&
-          appointment.clinicId === payload.clinicId &&
-          appointment.status !== 'cancelled' &&
-          appointment.status !== 'no-show'
+          appointment.id === payload.appointmentId
             ? { ...appointment, status: 'completed' }
             : appointment
         )
@@ -262,11 +271,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     emergencyContact: string;
     chiefComplaint: string;
   }, clinicId: string) => {
-    const patientId = `p-walkin-${Date.now()}`;
-    const mrn = `MRN-${Date.now().toString().slice(-8)}`;
-    const newPatient: Patient = {
-      id: patientId,
-      mrn,
+    const today = getLocalDateKey();
+    const saved = await createWalkInRequest({
+      clinicId,
       name: data.name,
       phone: data.phone,
       age: parseInt(data.age, 10) || 0,
@@ -275,35 +282,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
       address: data.address || '',
       bloodGroup: data.bloodGroup || '',
       emergencyContact: data.emergencyContact || '',
-    };
-
-    const today = getLocalDateKey();
-    const clinicAppointments = appointments.filter(appointment => appointment.clinicId === clinicId && appointment.date === today);
-    const tokenNumber = clinicAppointments.length > 0 ? Math.max(...clinicAppointments.map(item => item.tokenNumber)) + 1 : 1;
-    const now = new Date();
-    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-
-    const newAppointment: Appointment = {
-      id: `apt-walkin-${Date.now()}`,
-      patientId,
-      clinicId,
-      doctorId: user?.id || '',
-      date: today,
-      time,
-      status: 'waiting',
-      type: 'new',
       chiefComplaint: data.chiefComplaint || 'Walk-in',
-      tokenNumber,
-    };
+      date: today,
+    });
 
-    await createPatient(newPatient);
-    await createAppointment(newAppointment);
+    setPatients(prev => [saved.patient, ...prev.filter(item => item.id !== saved.patient.id)]);
+    setAppointments(prev => sortAppointments([...prev.filter(item => item.id !== saved.appointment.id), saved.appointment]));
 
-    setPatients(prev => [newPatient, ...prev]);
-    setAppointments(prev => sortAppointments([...prev, newAppointment]));
-
-    return patientId;
-  }, [appointments, user?.id]);
+    return saved.patient.id;
+  }, []);
 
   const restoreDemoData = useCallback(() => {
     setPatients([]);
