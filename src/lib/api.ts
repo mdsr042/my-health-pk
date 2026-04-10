@@ -6,6 +6,7 @@ import type {
   AppSettings,
   ConsultationDraft,
   MedicationCatalogEntry,
+  MedicationCatalogDetail,
   SessionPayload,
   SignupPayload,
 } from '@/lib/app-types';
@@ -239,6 +240,11 @@ export async function fetchAdminAuditLogs() {
 
 export async function searchMedicationCatalog(query: string, limit = 40) {
   const result = await request<{ data: MedicationCatalogEntry[] }>(`/medication-catalog?q=${encodeURIComponent(query)}&limit=${limit}`);
+  return result.data;
+}
+
+export async function fetchMedicationCatalogDetail(registrationNo: string) {
+  const result = await request<{ data: MedicationCatalogDetail }>(`/medication-catalog/${encodeURIComponent(registrationNo)}`);
   return result.data;
 }
 

@@ -6,11 +6,11 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { medicationLibrary, favoriteMedications, type Medication } from '@/data/mockData';
-import { searchMedicationCatalog } from '@/lib/api';
-import type { MedicationCatalogEntry } from '@/lib/app-types';
+import { fetchMedicationCatalogDetail, searchMedicationCatalog } from '@/lib/api';
+import type { MedicationCatalogDetail, MedicationCatalogEntry } from '@/lib/app-types';
 import { Badge } from '@/components/ui/badge';
 import { parseDosePattern } from '@/lib/medication-pattern';
-import { Search, Star, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Search, Star, Plus, Pencil, Trash2, Info } from 'lucide-react';
 
 interface MedicationModalProps {
   open: boolean;
@@ -42,12 +42,14 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   const [customDuration, setCustomDuration] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
   const [customInstructionsUrdu, setCustomInstructionsUrdu] = useState('');
-  const [instructionPreset, setInstructionPreset] = useState<string>('custom');
+  const [instructionPreset, setInstructionPreset] = useState<string>('select');
   const [catalogResults, setCatalogResults] = useState<MedicationCatalogEntry[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogDetail, setCatalogDetail] = useState<MedicationCatalogDetail | null>(null);
+  const [detailLoadingRegNo, setDetailLoadingRegNo] = useState('');
 
   useEffect(() => {
-    if (search.trim().length < 2) {
+    if (search.trim().length < 3) {
       setCatalogResults([]);
       setCatalogLoading(false);
       return;
@@ -88,7 +90,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       id: `cat-${entry.registrationNo}`,
       name: entry.brandName,
       nameUrdu: '',
-      generic: entry.genericName || '',
+      generic: '',
       strength: entry.strengthText || '',
       form: entry.dosageForm || '',
       route: entry.route || '',
@@ -101,7 +103,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     }))
   ), [catalogResults]);
 
-  const filtered = search.trim().length >= 2 ? remoteFiltered : localFiltered;
+  const filtered = search.trim().length >= 3 ? remoteFiltered : localFiltered;
   const isCustomMedication = selected?.id.startsWith('custom-') ?? false;
 
   const handleSelect = (med: Medication) => {
@@ -113,7 +115,8 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     setCustomInstructions(med.instructions);
     setCustomInstructionsUrdu(med.instructionsUrdu || '');
     const matchingPreset = instructionPresets.find(preset => preset.en === med.instructions);
-    setInstructionPreset(matchingPreset?.value ?? 'custom');
+    setInstructionPreset(matchingPreset?.value ?? (med.instructions ? 'custom' : 'select'));
+    setCatalogDetail(null);
   };
 
   const handleCustomMedication = () => {
@@ -132,6 +135,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       instructions: '',
       instructionsUrdu: '',
     });
+    setCatalogDetail(null);
   };
 
   const parsedPattern = useMemo(() => {
@@ -185,9 +189,32 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   const handleInstructionPresetChange = (value: string) => {
     setInstructionPreset(value);
     const preset = instructionPresets.find(item => item.value === value);
-    if (!preset || value === 'custom') return;
+    if (!preset) return;
+    if (value === 'select') {
+      setCustomInstructions('');
+      setCustomInstructionsUrdu('');
+      return;
+    }
+    if (value === 'custom') {
+      setCustomInstructions('');
+      setCustomInstructionsUrdu('');
+      return;
+    }
     setCustomInstructions(preset.en);
     setCustomInstructionsUrdu(preset.ur);
+  };
+
+  const handleOpenCatalogDetail = async (entry: MedicationCatalogEntry) => {
+    setDetailLoadingRegNo(entry.registrationNo);
+    try {
+      const detail = await fetchMedicationCatalogDetail(entry.registrationNo);
+      setCatalogDetail(detail);
+      setSelected(current => current && current.id === `cat-${entry.registrationNo}`
+        ? { ...current, generic: detail.genericName || current.generic, route: detail.route || current.route }
+        : current);
+    } finally {
+      setDetailLoadingRegNo('');
+    }
   };
 
   const handleClose = (o: boolean) => {
@@ -201,7 +228,9 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       setCustomDuration('');
       setCustomInstructions('');
       setCustomInstructionsUrdu('');
-      setInstructionPreset('custom');
+      setInstructionPreset('select');
+      setCatalogDetail(null);
+      setDetailLoadingRegNo('');
     }
     onOpenChange(o);
   };
@@ -233,6 +262,9 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
               <Button variant={!showFavorites ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setShowFavorites(false)}>
                 Browse All
               </Button>
+              <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={handleCustomMedication}>
+                <Plus className="w-3 h-3" /> Add Custom Medicine
+              </Button>
             </div>
 
             <div className="rounded-lg border border-border overflow-hidden">
@@ -245,10 +277,18 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                 {catalogLoading && <p className="text-sm text-muted-foreground text-center py-3">Searching Pakistan medicine catalog...</p>}
                 {filtered.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">No medications found</p>}
                 {filtered.map(med => (
-                  <button
+                  <div
                     key={med.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleSelect(med)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left ${
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        handleSelect(med);
+                      }
+                    }}
+                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left cursor-pointer ${
                       selected?.id === med.id ? 'bg-muted border border-border' : 'hover:bg-muted/50'
                     }`}
                   >
@@ -259,25 +299,32 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                           <Badge variant="outline" className="text-[10px]">Added</Badge>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground">{med.generic} • {med.form} • {med.strength}</p>
+                      <p className="text-xs text-muted-foreground">{med.form || 'Medicine'} • {med.strength || 'Strength not listed'}</p>
                     </div>
                     {favoriteMedications.includes(med.id) && <Star className="w-3 h-3 text-warning fill-warning" />}
+                    {med.id.startsWith('cat-') && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={e => {
+                          e.stopPropagation();
+                          void handleOpenCatalogDetail({
+                            registrationNo: med.id.replace('cat-', ''),
+                            brandName: med.name,
+                            strengthText: med.strength,
+                            dosageForm: med.form,
+                            route: med.route,
+                          });
+                        }}
+                      >
+                        <Info className="w-4 h-4 text-muted-foreground" />
+                      </Button>
+                    )}
                     <Plus className="w-4 h-4 text-muted-foreground" />
-                  </button>
+                  </div>
                 ))}
-                {search.trim().length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleCustomMedication}
-                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-dashed border-border text-left hover:bg-muted/50"
-                  >
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-foreground">Add custom medicine</p>
-                      <p className="text-xs text-muted-foreground">Use your own brand name and strength if it is not available in the catalog.</p>
-                    </div>
-                    <Plus className="w-4 h-4 text-muted-foreground" />
-                  </button>
-                )}
               </div>
             </div>
 
@@ -392,8 +439,34 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                       ) : (
                         <>
                           <p className="font-medium text-foreground">{selected.name}</p>
-                          <p className="text-xs text-muted-foreground">{selected.generic} • {selected.strength} • {selected.form}</p>
+                          <p className="text-xs text-muted-foreground">{selected.generic || 'Detail available on demand'} • {selected.strength} • {selected.form}</p>
                           <p className="text-xs text-muted-foreground mt-1" dir="rtl">{selected.nameUrdu}</p>
+                          {selected.id.startsWith('cat-') && (
+                            <div className="mt-2 space-y-1">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => void handleOpenCatalogDetail({
+                                  registrationNo: selected.id.replace('cat-', ''),
+                                  brandName: selected.name,
+                                  strengthText: selected.strength,
+                                  dosageForm: selected.form,
+                                  route: selected.route,
+                                })}
+                              >
+                                {detailLoadingRegNo === selected.id.replace('cat-', '') ? 'Loading details...' : 'Get medicine details'}
+                              </Button>
+                              {catalogDetail && catalogDetail.registrationNo === selected.id.replace('cat-', '') && (
+                                <div className="text-xs text-muted-foreground space-y-1">
+                                  <p>Generic: {catalogDetail.genericName || 'Not listed'}</p>
+                                  <p>Company: {catalogDetail.companyName || 'Not listed'}</p>
+                                  <p>Reg. No: {catalogDetail.registrationNo}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
@@ -445,8 +518,9 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                     <div className="space-y-1.5">
                       <Label className="text-xs">Instructions (English)</Label>
                       <Select value={instructionPreset} onValueChange={handleInstructionPresetChange}>
-                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select instruction" /></SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="select">Select instruction</SelectItem>
                           {instructionPresets.map(preset => (
                             <SelectItem key={preset.value} value={preset.value}>{preset.en}</SelectItem>
                           ))}

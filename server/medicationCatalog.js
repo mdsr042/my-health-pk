@@ -98,7 +98,7 @@ export async function searchMedicationCatalog(query, limit = 50) {
     .sort((a, b) => b.score - a.score || a.entry.brandName.localeCompare(b.entry.brandName))
     .slice(0, Math.max(1, Math.min(limit, 100)))
     .map(item => {
-      const { _searchText, ...entry } = item.entry;
+      const { _searchText, rawDisplayName, genericName, companyName, source, sourceUrl, ...entry } = item.entry;
       return entry;
     });
 
@@ -106,4 +106,13 @@ export async function searchMedicationCatalog(query, limit = 50) {
     metadata: catalog.metadata,
     entries: matches,
   };
+}
+
+export async function getMedicationCatalogEntry(registrationNo) {
+  const catalog = await loadCatalog();
+  const match = catalog.entries.find(entry => entry.registrationNo === registrationNo);
+  if (!match) return null;
+
+  const { _searchText, ...entry } = match;
+  return entry;
 }

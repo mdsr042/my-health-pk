@@ -14,7 +14,7 @@ import {
 import { initDb, query, withTransaction } from './db.js';
 import { cleanupExpiredDemoSessions, createEphemeralDemoSession } from './demoSeed.js';
 import { apiAccessLogMiddleware, logError, logInfo, logWarn, requestContextMiddleware } from './logger.js';
-import { searchMedicationCatalog } from './medicationCatalog.js';
+import { getMedicationCatalogEntry, searchMedicationCatalog } from './medicationCatalog.js';
 import { createRateLimitMiddleware } from './rateLimit.js';
 import { appointmentSchema, parseOrThrow, patientSchema, signupSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
 import {
@@ -336,6 +336,16 @@ app.get('/api/medication-catalog', requireAuth, asyncHandler(async (req, res) =>
   const limit = Number(req.query.limit ?? 40);
   const result = await searchMedicationCatalog(queryText, Number.isFinite(limit) ? limit : 40);
   res.json({ data: result.entries, meta: result.metadata });
+}));
+
+app.get('/api/medication-catalog/:registrationNo', requireAuth, asyncHandler(async (req, res) => {
+  const entry = await getMedicationCatalogEntry(String(req.params.registrationNo ?? ''));
+  if (!entry) {
+    res.status(404).json({ error: 'Medication not found', code: 'MEDICATION_NOT_FOUND' });
+    return;
+  }
+
+  res.json({ data: entry });
 }));
 
 app.post('/api/auth/signup', authRateLimit, asyncHandler(async (req, res) => {

@@ -181,12 +181,15 @@ export interface AdminAuditLog {
 export interface MedicationCatalogEntry {
   registrationNo: string;
   brandName: string;
-  rawDisplayName: string;
-  genericName: string;
-  companyName: string;
   strengthText: string;
   dosageForm: string;
   route: string;
+}
+
+export interface MedicationCatalogDetail extends MedicationCatalogEntry {
+  rawDisplayName: string;
+  genericName: string;
+  companyName: string;
   source: string;
   sourceUrl: string;
 }
