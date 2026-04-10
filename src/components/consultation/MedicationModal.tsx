@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -6,6 +6,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { medicationLibrary, favoriteMedications, type Medication } from '@/data/mockData';
+import { searchMedicationCatalog } from '@/lib/api';
+import type { MedicationCatalogEntry } from '@/lib/app-types';
 import { Badge } from '@/components/ui/badge';
 import { parseDosePattern } from '@/lib/medication-pattern';
 import { Search, Star, Plus, Pencil, Trash2 } from 'lucide-react';
@@ -28,11 +30,65 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   const [customDuration, setCustomDuration] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
   const [customInstructionsUrdu, setCustomInstructionsUrdu] = useState('');
+  const [catalogResults, setCatalogResults] = useState<MedicationCatalogEntry[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
-  const filtered = medicationLibrary.filter(m => {
+  useEffect(() => {
+    if (search.trim().length < 2) {
+      setCatalogResults([]);
+      setCatalogLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setCatalogLoading(true);
+      try {
+        const results = await searchMedicationCatalog(search.trim(), 50);
+        if (!cancelled) {
+          setCatalogResults(results);
+        }
+      } catch {
+        if (!cancelled) {
+          setCatalogResults([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setCatalogLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [search]);
+
+  const localFiltered = medicationLibrary.filter(m => {
     if (!search) return showFavorites ? favoriteMedications.includes(m.id) : true;
     return m.name.toLowerCase().includes(search.toLowerCase()) || m.generic.toLowerCase().includes(search.toLowerCase());
   });
+
+  const remoteFiltered = useMemo<Medication[]>(() => (
+    catalogResults.map(entry => ({
+      id: `cat-${entry.registrationNo}`,
+      name: entry.brandName,
+      nameUrdu: '',
+      generic: entry.genericName || '',
+      strength: entry.strengthText || '',
+      form: entry.dosageForm || '',
+      route: entry.route || '',
+      frequency: '',
+      frequencyUrdu: '',
+      duration: '',
+      durationUrdu: '',
+      instructions: '',
+      instructionsUrdu: '',
+    }))
+  ), [catalogResults]);
+
+  const filtered = search.trim().length >= 2 ? remoteFiltered : localFiltered;
 
   const handleSelect = (med: Medication) => {
     setSelected(med);
@@ -142,6 +198,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                 </h3>
               </div>
               <div className="max-h-[300px] overflow-y-auto space-y-1 p-2 scrollbar-thin">
+                {catalogLoading && <p className="text-sm text-muted-foreground text-center py-3">Searching Pakistan medicine catalog...</p>}
                 {filtered.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">No medications found</p>}
                 {filtered.map(med => (
                   <button

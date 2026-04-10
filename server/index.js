@@ -14,6 +14,7 @@ import {
 import { initDb, query, withTransaction } from './db.js';
 import { cleanupExpiredDemoSessions, createEphemeralDemoSession } from './demoSeed.js';
 import { apiAccessLogMiddleware, logError, logInfo, logWarn, requestContextMiddleware } from './logger.js';
+import { searchMedicationCatalog } from './medicationCatalog.js';
 import { createRateLimitMiddleware } from './rateLimit.js';
 import { appointmentSchema, parseOrThrow, patientSchema, signupSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
 import {
@@ -328,6 +329,13 @@ app.get('/api/health', asyncHandler(async (_req, res) => {
     uptimeSeconds: Math.round(process.uptime()),
     environment: process.env.NODE_ENV || 'development',
   });
+}));
+
+app.get('/api/medication-catalog', requireAuth, asyncHandler(async (req, res) => {
+  const queryText = String(req.query.q ?? '').trim();
+  const limit = Number(req.query.limit ?? 40);
+  const result = await searchMedicationCatalog(queryText, Number.isFinite(limit) ? limit : 40);
+  res.json({ data: result.entries, meta: result.metadata });
 }));
 
 app.post('/api/auth/signup', authRateLimit, asyncHandler(async (req, res) => {

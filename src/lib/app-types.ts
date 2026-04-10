@@ -177,3 +177,16 @@ export interface AdminAuditLog {
   workspaceId: string | null;
   details: Record<string, unknown>;
 }
+
+export interface MedicationCatalogEntry {
+  registrationNo: string;
+  brandName: string;
+  rawDisplayName: string;
+  genericName: string;
+  companyName: string;
+  strengthText: string;
+  dosageForm: string;
+  route: string;
+  source: string;
+  sourceUrl: string;
+}
