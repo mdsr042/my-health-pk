@@ -20,6 +20,18 @@ interface MedicationModalProps {
   prescribedMedications: Medication[];
 }
 
+const instructionPresets = [
+  { value: 'after_meals', en: 'Take after meals', ur: 'کھانے کے بعد لیں' },
+  { value: 'empty_stomach', en: 'Take on empty stomach', ur: 'خالی پیٹ لیں' },
+  { value: 'before_breakfast', en: 'Take before breakfast', ur: 'ناشتے سے پہلے لیں' },
+  { value: 'bedtime', en: 'Take at bedtime', ur: 'رات سونے سے پہلے لیں' },
+  { value: 'as_needed', en: 'Take when needed', ur: 'ضرورت کے وقت لیں' },
+  { value: 'custom', en: 'Custom instruction', ur: '' },
+] as const;
+
+const customForms = ['Tablet', 'Capsule', 'Syrup', 'Drops', 'Injection', 'Inhaler', 'Cream', 'Gel'] as const;
+const customRoutes = ['Oral', 'Injectable', 'Topical', 'Ophthalmic', 'Inhalation', 'Nasal'] as const;
+
 export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, prescribedMedications }: MedicationModalProps) {
   const [search, setSearch] = useState('');
   const [showFavorites, setShowFavorites] = useState(true);
@@ -30,6 +42,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   const [customDuration, setCustomDuration] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
   const [customInstructionsUrdu, setCustomInstructionsUrdu] = useState('');
+  const [instructionPreset, setInstructionPreset] = useState<string>('custom');
   const [catalogResults, setCatalogResults] = useState<MedicationCatalogEntry[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
 
@@ -89,6 +102,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   ), [catalogResults]);
 
   const filtered = search.trim().length >= 2 ? remoteFiltered : localFiltered;
+  const isCustomMedication = selected?.id.startsWith('custom-') ?? false;
 
   const handleSelect = (med: Medication) => {
     setSelected(med);
@@ -98,6 +112,26 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     setCustomDuration(med.duration);
     setCustomInstructions(med.instructions);
     setCustomInstructionsUrdu(med.instructionsUrdu || '');
+    const matchingPreset = instructionPresets.find(preset => preset.en === med.instructions);
+    setInstructionPreset(matchingPreset?.value ?? 'custom');
+  };
+
+  const handleCustomMedication = () => {
+    handleSelect({
+      id: `custom-${Date.now()}`,
+      name: search.trim() || '',
+      nameUrdu: '',
+      generic: '',
+      strength: '',
+      form: 'Tablet',
+      route: 'Oral',
+      frequency: '',
+      frequencyUrdu: '',
+      duration: '',
+      durationUrdu: '',
+      instructions: '',
+      instructionsUrdu: '',
+    });
   };
 
   const parsedPattern = useMemo(() => {
@@ -132,6 +166,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   const handleAdd = () => {
     if (!selected) return;
     if (dosePattern.trim() && !parsedPattern) return;
+    if (!selected.name.trim()) return;
 
     const isEditingExisting = prescribedMedications.some(med => med.id === selected.id);
 
@@ -147,6 +182,14 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     });
   };
 
+  const handleInstructionPresetChange = (value: string) => {
+    setInstructionPreset(value);
+    const preset = instructionPresets.find(item => item.value === value);
+    if (!preset || value === 'custom') return;
+    setCustomInstructions(preset.en);
+    setCustomInstructionsUrdu(preset.ur);
+  };
+
   const handleClose = (o: boolean) => {
     if (!o) {
       setSelected(null);
@@ -158,6 +201,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       setCustomDuration('');
       setCustomInstructions('');
       setCustomInstructionsUrdu('');
+      setInstructionPreset('custom');
     }
     onOpenChange(o);
   };
@@ -221,6 +265,19 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                     <Plus className="w-4 h-4 text-muted-foreground" />
                   </button>
                 ))}
+                {search.trim().length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleCustomMedication}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-dashed border-border text-left hover:bg-muted/50"
+                  >
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-foreground">Add custom medicine</p>
+                      <p className="text-xs text-muted-foreground">Use your own brand name and strength if it is not available in the catalog.</p>
+                    </div>
+                    <Plus className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -289,9 +346,56 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                   </div>
                   <div className="p-3 space-y-4">
                     <div className="bg-muted/50 rounded-lg p-3">
-                      <p className="font-medium text-foreground">{selected.name}</p>
-                      <p className="text-xs text-muted-foreground">{selected.generic} • {selected.strength} • {selected.form}</p>
-                      <p className="text-xs text-muted-foreground mt-1" dir="rtl">{selected.nameUrdu}</p>
+                      {isCustomMedication ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Medicine Name</Label>
+                            <Input
+                              value={selected.name}
+                              onChange={e => setSelected(current => current ? { ...current, name: e.target.value } : current)}
+                              placeholder="Enter medicine name"
+                              className="h-8 text-sm bg-background"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Dose / Strength</Label>
+                            <Input
+                              value={selected.strength}
+                              onChange={e => setSelected(current => current ? { ...current, strength: e.target.value } : current)}
+                              placeholder="500mg / 5ml"
+                              className="h-8 text-sm bg-background"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Form</Label>
+                            <Select value={selected.form || 'Tablet'} onValueChange={value => setSelected(current => current ? { ...current, form: value } : current)}>
+                              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {customForms.map(form => (
+                                  <SelectItem key={form} value={form}>{form}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Route</Label>
+                            <Select value={selected.route || 'Oral'} onValueChange={value => setSelected(current => current ? { ...current, route: value } : current)}>
+                              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {customRoutes.map(route => (
+                                  <SelectItem key={route} value={route}>{route}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="font-medium text-foreground">{selected.name}</p>
+                          <p className="text-xs text-muted-foreground">{selected.generic} • {selected.strength} • {selected.form}</p>
+                          <p className="text-xs text-muted-foreground mt-1" dir="rtl">{selected.nameUrdu}</p>
+                        </>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -340,7 +444,17 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
 
                     <div className="space-y-1.5">
                       <Label className="text-xs">Instructions (English)</Label>
-                      <Textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} rows={2} className="text-sm resize-none" />
+                      <Select value={instructionPreset} onValueChange={handleInstructionPresetChange}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {instructionPresets.map(preset => (
+                            <SelectItem key={preset.value} value={preset.value}>{preset.en}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {instructionPreset === 'custom' && (
+                        <Textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} rows={2} className="text-sm resize-none" />
+                      )}
                     </div>
 
                     <div className="space-y-1.5">
