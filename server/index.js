@@ -16,7 +16,7 @@ import { cleanupExpiredDemoSessions, createEphemeralDemoSession } from './demoSe
 import { apiAccessLogMiddleware, logError, logInfo, logWarn, requestContextMiddleware } from './logger.js';
 import { getMedicationCatalogEntries, getMedicationCatalogEntry, searchMedicationCatalog } from './medicationCatalog.js';
 import { createRateLimitMiddleware } from './rateLimit.js';
-import { appointmentSchema, parseOrThrow, patientSchema, signupSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
+import { appointmentSchema, parseOrThrow, passwordChangeSchema, passwordResetSchema, patientSchema, signupSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
 import {
   completeConsultationEncounter,
   createAppointmentForWorkspace,
@@ -577,6 +577,40 @@ app.post('/api/auth/login', authRateLimit, asyncHandler(async (req, res) => {
   res.json({ token, session });
 }));
 
+app.post('/api/auth/change-password', requireAuth, asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = parseOrThrow(passwordChangeSchema, req.body ?? {}, 'INVALID_PASSWORD_CHANGE');
+  const passwordIssue = validatePasswordPolicy(newPassword);
+  if (passwordIssue) {
+    return res.status(400).json({ error: passwordIssue, code: 'WEAK_PASSWORD' });
+  }
+
+  const { rows } = await query(
+    `
+      SELECT password_hash
+      FROM users
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [req.auth.user.id]
+  );
+
+  const user = rows[0];
+  if (!user || !(await verifyPassword(currentPassword, user.password_hash))) {
+    return res.status(401).json({ error: 'Current password is incorrect', code: 'INVALID_CURRENT_PASSWORD' });
+  }
+
+  await query(
+    `
+      UPDATE users
+      SET password_hash = $2, updated_at = NOW()
+      WHERE id = $1
+    `,
+    [req.auth.user.id, await hashPassword(newPassword)]
+  );
+
+  res.json({ ok: true });
+}));
+
 app.post('/api/auth/demo', authRateLimit, asyncHandler(async (_req, res) => {
   if (isProduction && !enablePublicDemo) {
     return res.status(403).json({ error: 'Public demo access is disabled', code: 'DEMO_DISABLED' });
@@ -906,6 +940,40 @@ app.put('/api/admin/doctors/:id/status', requireAuth, requireRole('platform_admi
   res.json({ ok: true });
 }));
 
+app.post('/api/admin/doctors/:id/reset-password', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { newPassword } = parseOrThrow(passwordResetSchema, req.body ?? {}, 'INVALID_PASSWORD_RESET');
+  const passwordIssue = validatePasswordPolicy(newPassword);
+  if (passwordIssue) {
+    return res.status(400).json({ error: passwordIssue, code: 'WEAK_PASSWORD' });
+  }
+
+  const result = await query(
+    `
+      UPDATE users
+      SET password_hash = $2, updated_at = NOW()
+      WHERE id = $1 AND role = 'doctor_owner'
+      RETURNING id
+    `,
+    [id, await hashPassword(newPassword)]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Doctor account not found', code: 'DOCTOR_NOT_FOUND' });
+  }
+
+  const workspaceResult = await query(`SELECT id FROM workspaces WHERE owner_user_id = $1 LIMIT 1`, [id]);
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    targetUserId: id,
+    workspaceId: workspaceResult.rows[0]?.id ?? null,
+    action: 'doctor_password_reset',
+    details: {},
+  });
+
+  res.json({ ok: true });
+}));
+
 app.put('/api/admin/workspaces/:id/subscription', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { planName, status, trialEndsAt } = req.body ?? {};
@@ -1025,6 +1093,42 @@ app.get('/api/patients/search-by-phone', requireAuth, requireRole('doctor_owner'
   res.json({ data: rows.map(mapPatient) });
 }));
 
+app.get('/api/patients/search', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const q = String(req.query.q ?? '').trim();
+  if (!q) {
+    return res.json({ data: [] });
+  }
+
+  const searchTerm = `%${q.toLowerCase()}%`;
+  const { rows } = await query(
+    `
+      SELECT *
+      FROM patients
+      WHERE workspace_id = $1
+        AND (
+          LOWER(name) LIKE $2
+          OR LOWER(mrn) LIKE $2
+          OR LOWER(phone) LIKE $2
+          OR LOWER(cnic) LIKE $2
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(name) = LOWER($3) THEN 0
+          WHEN LOWER(mrn) = LOWER($3) THEN 1
+          WHEN LOWER(phone) = LOWER($3) THEN 2
+          WHEN LOWER(cnic) = LOWER($3) THEN 3
+          WHEN LOWER(name) LIKE LOWER($4) THEN 4
+          ELSE 5
+        END,
+        created_at DESC
+      LIMIT 25
+    `,
+    [req.auth.workspace.id, searchTerm, q.toLowerCase(), `${q.toLowerCase()}%`]
+  );
+
+  res.json({ data: rows.map(mapPatient) });
+}));
+
 app.post('/api/patients', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   const patient = parseOrThrow(patientSchema, req.body ?? {}, 'INVALID_PATIENT');
 
@@ -1067,6 +1171,47 @@ app.post('/api/patients', requireAuth, requireRole('doctor_owner'), asyncHandler
       emergencyContact: patient.emergencyContact || '',
     },
   });
+}));
+
+app.put('/api/patients/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const patient = parseOrThrow(patientSchema, req.body ?? {}, 'INVALID_PATIENT');
+
+  const result = await query(
+    `
+      UPDATE patients
+      SET
+        name = $3,
+        phone = $4,
+        age = $5,
+        gender = $6,
+        cnic = $7,
+        address = $8,
+        blood_group = $9,
+        emergency_contact = $10,
+        updated_at = NOW()
+      WHERE id = $1 AND workspace_id = $2
+      RETURNING *
+    `,
+    [
+      id,
+      req.auth.workspace.id,
+      patient.name,
+      patient.phone || '',
+      patient.age || 0,
+      patient.gender || 'Male',
+      patient.cnic || '',
+      patient.address || '',
+      patient.bloodGroup || '',
+      patient.emergencyContact || '',
+    ]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Patient not found', code: 'PATIENT_NOT_FOUND' });
+  }
+
+  res.json({ data: mapPatient(result.rows[0]) });
 }));
 
 app.get('/api/appointments', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {

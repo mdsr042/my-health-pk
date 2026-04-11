@@ -23,6 +23,7 @@ export default function Appointments() {
     getAppointmentsForClinic,
     getAppointmentsForClinicOnDate,
     getPatient,
+    searchPatients,
     upsertAppointment,
   } = useData();
   const today = new Date();
@@ -228,6 +229,7 @@ export default function Appointments() {
         appointment={selectedAppointment}
         patient={selectedAppointment ? getPatient(selectedAppointment.patientId) ?? null : null}
         patients={patients}
+        searchPatients={searchPatients}
         clinics={doctorClinics}
         defaultClinicId={activeClinic?.id}
         defaultDate={bookingMode === 'next' ? getTomorrowDateKey() : selectedDateKey}

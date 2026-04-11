@@ -4,11 +4,12 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { Settings2, Bell, Globe, Shield, Palette } from 'lucide-react';
 import { readStorage, writeStorage } from '@/lib/storage';
 import { mergeAppSettings, SETTINGS_STORAGE_KEY, SETTINGS_UPDATED_EVENT } from '@/lib/app-defaults';
-import { fetchSettings, persistSettings } from '@/lib/api';
+import { changePassword, fetchSettings, persistSettings } from '@/lib/api';
 import type { AppSettings } from '@/lib/app-types';
 
 export default function SettingsPage() {
@@ -23,6 +24,10 @@ export default function SettingsPage() {
   const [compactMode, setCompactMode] = useState(saved.compactMode);
   const [clinicOverrides] = useState(saved.clinicOverrides);
   const [managedClinics] = useState(saved.managedClinics);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +82,29 @@ export default function SettingsPage() {
     }
 
     toast.success('Settings saved successfully');
+  };
+
+  const handlePasswordSave = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast.error('Please fill all password fields');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error('New password and confirmation do not match');
+      return;
+    }
+
+    setIsSavingPassword(true);
+    try {
+      await changePassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      toast.success('Password updated successfully');
+    } finally {
+      setIsSavingPassword(false);
+    }
   };
 
   const sections = [
@@ -178,13 +206,33 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Security placeholder */}
       <Card className="border-0 shadow-sm">
-        <CardContent className="p-5">
+        <CardContent className="p-5 space-y-4">
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-2">
             <Shield className="w-4 h-4 text-primary" /> Security
           </h2>
-          <p className="text-sm text-muted-foreground">Password change, two-factor authentication, and session management will be available after backend integration.</p>
+          <p className="text-sm text-muted-foreground">
+            Keep your account secure by updating your password here. Session controls now use the same backend auth flow as the rest of the app.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm">Current Password</Label>
+              <Input type="password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm">New Password</Label>
+              <Input type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm">Confirm New Password</Label>
+              <Input type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={() => void handlePasswordSave()} disabled={isSavingPassword}>
+              Update Password
+            </Button>
+          </div>
         </CardContent>
       </Card>
       <div className="flex justify-end">

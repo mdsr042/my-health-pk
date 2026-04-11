@@ -93,6 +93,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   } = useData();
   const patient = getPatient(patientId);
   const patientNotes = getPatientNotes(patientId);
+  const latestPreviousNote = patientNotes[0] ?? null;
   const activeAppointment = [...appointments]
     .filter(a => a.patientId === patientId && a.status !== 'completed' && a.status !== 'cancelled' && a.status !== 'no-show')
     .sort((a, b) => {
@@ -165,6 +166,46 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const openLabModal = (type: 'lab' | 'radiology') => { setLabOrderType(type); setLabOrderOpen(true); };
   const openReferralModal = (type: 'referral' | 'admission' | 'followup') => { setReferralType(type); setReferralOpen(true); };
   const openFollowUpBooking = () => setBookingOpen(true);
+
+  const reusePreviousDiagnoses = useCallback(() => {
+    if (!latestPreviousNote?.diagnoses.length) {
+      toast.info('No previous diagnoses available to reuse');
+      return;
+    }
+
+    setDiagnoses(prev => {
+      const existing = new Set(prev.map(item => `${item.code}:${item.name}`));
+      const additions = latestPreviousNote.diagnoses
+        .filter(item => !existing.has(`${item.code}:${item.name}`))
+        .map(item => ({
+          ...item,
+          id: `dx-reuse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        }));
+      return [...prev, ...additions];
+    });
+    markUnsaved(patientId, true);
+    toast.success('Previous diagnoses added');
+  }, [latestPreviousNote, markUnsaved, patientId]);
+
+  const reusePreviousMedications = useCallback(() => {
+    if (!latestPreviousNote?.medications.length) {
+      toast.info('No previous medications available to reuse');
+      return;
+    }
+
+    setMedications(prev => {
+      const existing = new Set(prev.map(item => `${item.name}:${item.strength}:${item.frequency}`));
+      const additions = latestPreviousNote.medications
+        .filter(item => !existing.has(`${item.name}:${item.strength}:${item.frequency}`))
+        .map(item => ({
+          ...item,
+          id: `med-reuse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        }));
+      return [...prev, ...additions];
+    });
+    markUnsaved(patientId, true);
+    toast.success('Previous medications added');
+  }, [latestPreviousNote, markUnsaved, patientId]);
 
   const buildConsultationPayload = useCallback(() => ({
     ...buildPayloadShape({
@@ -358,6 +399,37 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
           )}
         </div>
       </div>
+
+      {latestPreviousNote && (
+        <div className="bg-card border-b border-border px-4 lg:px-6 py-3">
+          <div className="grid gap-3 rounded-xl border border-border bg-muted/20 p-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Last Visit</p>
+              <p className="text-sm font-medium text-foreground">
+                {new Date(latestPreviousNote.date).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' })}
+              </p>
+              <p className="text-xs text-muted-foreground">{latestPreviousNote.chiefComplaint || 'No chief complaint recorded'}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Diagnoses</p>
+              <p className="text-sm text-foreground">{latestPreviousNote.diagnoses.slice(0, 2).map(dx => dx.name).join(', ') || '-'}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Medications</p>
+              <p className="text-sm text-foreground">{latestPreviousNote.medications.slice(0, 2).map(med => med.name).join(', ') || '-'}</p>
+              <p className="text-xs text-muted-foreground">{latestPreviousNote.followUp || 'No follow-up advice saved'}</p>
+            </div>
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <Button variant="outline" size="sm" className="h-8" onClick={reusePreviousDiagnoses}>
+                Reuse Diagnoses
+              </Button>
+              <Button variant="outline" size="sm" className="h-8" onClick={reusePreviousMedications}>
+                Reuse Medications
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* View tabs */}
       <div className="bg-card border-b border-border px-4 lg:px-6 flex gap-0.5 overflow-x-auto scrollbar-thin">

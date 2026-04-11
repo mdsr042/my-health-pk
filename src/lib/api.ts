@@ -106,6 +106,13 @@ export async function logoutSession() {
   await request<{ ok: true }>('/auth/logout', { method: 'POST' });
 }
 
+export async function changePassword(currentPassword: string, newPassword: string) {
+  await request<{ ok: true }>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
 export async function fetchClinics() {
   const result = await request<{ data: Clinic[] }>('/clinics');
   return result.data;
@@ -137,6 +144,19 @@ export async function createPatient(patient: Patient) {
     method: 'POST',
     body: JSON.stringify(patient),
   });
+  return result.data;
+}
+
+export async function updatePatient(patient: Patient) {
+  const result = await request<{ data: Patient }>(`/patients/${patient.id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patient),
+  });
+  return result.data;
+}
+
+export async function searchPatients(query: string) {
+  const result = await request<{ data: Patient[] }>(`/patients/search?q=${encodeURIComponent(query)}`);
   return result.data;
 }
 
@@ -291,6 +311,13 @@ export async function updateDoctorAccountStatus(doctorId: string, status: 'activ
   await request<{ ok: true }>(`/admin/doctors/${doctorId}/status`, {
     method: 'PUT',
     body: JSON.stringify({ status }),
+  });
+}
+
+export async function resetDoctorPassword(doctorId: string, newPassword: string) {
+  await request<{ ok: true }>(`/admin/doctors/${doctorId}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify({ newPassword }),
   });
 }
 

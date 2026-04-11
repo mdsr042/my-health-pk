@@ -10,7 +10,9 @@ import {
   fetchDrafts,
   fetchPatients,
   persistDraft,
+  searchPatients as searchPatientsRequest,
   searchPatientsByPhone as searchPatientsByPhoneRequest,
+  updatePatient as updatePatientRequest,
   updateAppointment,
   updateAppointmentStatus as updateAppointmentStatusRequest,
 } from '@/lib/api';
@@ -57,6 +59,7 @@ interface DataContextType {
   getPatientNotes: (patientId: string) => ClinicalNote[];
   getConsultationDraft: (appointmentId?: string, patientId?: string) => ConsultationDraft | undefined;
   addPatient: (patient: Patient) => Promise<void>;
+  updatePatient: (patient: Patient) => Promise<Patient>;
   addAppointment: (appointment: Appointment) => Promise<void>;
   upsertAppointment: (appointment: Appointment) => Promise<void>;
   updateAppointmentStatus: (appointmentId: string, status: Appointment['status']) => Promise<void>;
@@ -76,6 +79,7 @@ interface DataContextType {
     emergencyContact: string;
     chiefComplaint: string;
   }, clinicId: string) => Promise<WalkInResult>;
+  searchPatients: (query: string) => Promise<Patient[]>;
   searchPatientsByPhone: (phone: string) => Promise<Patient[]>;
   refreshData: () => Promise<void>;
 }
@@ -169,6 +173,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addPatient = useCallback(async (patient: Patient) => {
     const saved = await createPatient(patient);
     setPatients(prev => [saved, ...prev.filter(item => item.id !== saved.id)]);
+  }, []);
+
+  const updatePatient = useCallback(async (patient: Patient) => {
+    const saved = await updatePatientRequest(patient);
+    setPatients(prev => prev.map(item => (item.id === saved.id ? saved : item)));
+    return saved;
   }, []);
 
   const addAppointment = useCallback(async (appointment: Appointment) => {
@@ -302,6 +312,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return searchPatientsByPhoneRequest(phone.trim());
   }, []);
 
+  const searchPatients = useCallback(async (query: string) => {
+    if (!query.trim()) return [];
+    return searchPatientsRequest(query.trim());
+  }, []);
+
   const restoreDemoData = useCallback(() => {
     setPatients([]);
     setAppointments([]);
@@ -320,6 +335,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     getPatientNotes,
     getConsultationDraft,
     addPatient,
+    updatePatient,
     addAppointment,
     upsertAppointment,
     updateAppointmentStatus,
@@ -328,6 +344,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     completeConsultation,
     restoreDemoData,
     addWalkIn,
+    searchPatients,
     searchPatientsByPhone,
     refreshData,
   }), [
@@ -341,6 +358,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     getPatientNotes,
     getConsultationDraft,
     addPatient,
+    updatePatient,
     addAppointment,
     upsertAppointment,
     updateAppointmentStatus,
@@ -349,6 +367,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     completeConsultation,
     restoreDemoData,
     addWalkIn,
+    searchPatients,
     searchPatientsByPhone,
     refreshData,
   ]);

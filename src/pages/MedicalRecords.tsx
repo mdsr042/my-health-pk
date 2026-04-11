@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useData } from '@/contexts/DataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import AppointmentBookingDialog from '@/components/appointments/AppointmentBookingDialog';
-import { Search, FileText, Calendar, User, ChevronDown, ChevronUp, CalendarPlus } from 'lucide-react';
+import PatientDetailsDialog from '@/components/patients/PatientDetailsDialog';
+import { Search, FileText, Calendar, User, ChevronDown, ChevronUp, CalendarPlus, PencilLine } from 'lucide-react';
 import type { Patient } from '@/data/mockData';
 import { getLocalDateKey } from '@/lib/date';
 import { toast } from 'sonner';
@@ -18,12 +21,16 @@ function getTomorrowDateKey() {
 }
 
 export default function MedicalRecords() {
-  const { patients, getPatientNotes, upsertAppointment } = useData();
+  const { patients, getPatientNotes, upsertAppointment, updatePatient, searchPatients } = useData();
   const { activeClinic, doctorClinics, user } = useAuth();
   const [search, setSearch] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [clinicFilter, setClinicFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>('all');
   const [expandedPatientId, setExpandedPatientId] = useState<string | null>(null);
   const [expandedVisitIds, setExpandedVisitIds] = useState<Record<string, string | null>>({});
   const [bookingPatient, setBookingPatient] = useState<Patient | null>(null);
+  const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
 
   const handleBookNextAppointment = async (form: {
     id: string;
@@ -58,14 +65,53 @@ export default function MedicalRecords() {
     setBookingPatient(null);
   };
 
-  const patientsWithNotes = patients.filter(p => {
-    const hasNotes = getPatientNotes(p.id).length > 0;
-    if (!search) return hasNotes;
-    return hasNotes && (
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.mrn.toLowerCase().includes(search.toLowerCase())
-    );
-  });
+  const patientsWithNotes = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const keywordQuery = keyword.trim().toLowerCase();
+    const now = new Date();
+    const rangeStart = dateFilter === '30d'
+      ? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+      : dateFilter === '90d'
+        ? new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+        : dateFilter === '1y'
+          ? new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
+          : null;
+
+    return patients.filter(patient => {
+      const notes = getPatientNotes(patient.id);
+      if (notes.length === 0) return false;
+
+      const patientMatches = !query || [
+        patient.name,
+        patient.mrn,
+        patient.phone,
+        patient.cnic,
+      ].some(value => value.toLowerCase().includes(query));
+
+      const filteredNotes = notes.filter(note => {
+        const clinicMatches = clinicFilter === 'all' || note.clinicId === clinicFilter;
+        const dateMatches = !rangeStart || new Date(note.date) >= rangeStart;
+        const noteSearchBlob = [
+          note.chiefComplaint,
+          note.assessment,
+          note.plan,
+          note.followUp,
+          ...note.diagnoses.map(dx => dx.name),
+          ...note.medications.map(med => med.name),
+        ].join(' ').toLowerCase();
+        const keywordMatches = !keywordQuery || noteSearchBlob.includes(keywordQuery);
+        return clinicMatches && dateMatches && keywordMatches;
+      });
+
+      return patientMatches && filteredNotes.length > 0;
+    });
+  }, [clinicFilter, dateFilter, getPatientNotes, keyword, patients, search]);
+
+  const handleSavePatient = async (patient: Patient) => {
+    await updatePatient(patient);
+    toast.success('Patient details updated');
+    setEditingPatient(null);
+  };
 
   return (
     <div className="p-4 lg:p-6 space-y-6 animate-fade-in">
@@ -76,9 +122,48 @@ export default function MedicalRecords() {
         </div>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input placeholder="Search by patient name or MRN..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_220px_180px_minmax(0,1fr)]">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by name, MRN, phone, or CNIC..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Clinic</Label>
+          <Select value={clinicFilter} onValueChange={setClinicFilter}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All clinics</SelectItem>
+              {doctorClinics.map(clinic => (
+                <SelectItem key={clinic.id} value={clinic.id}>{clinic.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Date Range</Label>
+          <Select value={dateFilter} onValueChange={setDateFilter}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All time</SelectItem>
+              <SelectItem value="30d">Last 30 days</SelectItem>
+              <SelectItem value="90d">Last 90 days</SelectItem>
+              <SelectItem value="1y">Last 1 year</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Diagnosis / Medication Keyword</Label>
+          <Input
+            placeholder="e.g. diabetes, amlodipine"
+            value={keyword}
+            onChange={event => setKeyword(event.target.value)}
+          />
+        </div>
       </div>
 
       <div className="grid gap-4">
@@ -92,7 +177,30 @@ export default function MedicalRecords() {
         ) : (
           patientsWithNotes.map(patient => {
             const notes = getPatientNotes(patient.id);
+            const filteredNotes = notes.filter(note => {
+              const clinicMatches = clinicFilter === 'all' || note.clinicId === clinicFilter;
+              const noteSearchBlob = [
+                note.chiefComplaint,
+                note.assessment,
+                note.plan,
+                note.followUp,
+                ...note.diagnoses.map(dx => dx.name),
+                ...note.medications.map(med => med.name),
+              ].join(' ').toLowerCase();
+              const keywordMatches = !keyword.trim() || noteSearchBlob.includes(keyword.trim().toLowerCase());
+              const now = new Date();
+              const rangeStart = dateFilter === '30d'
+                ? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+                : dateFilter === '90d'
+                  ? new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+                  : dateFilter === '1y'
+                    ? new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
+                    : null;
+              const dateMatches = !rangeStart || new Date(note.date) >= rangeStart;
+              return clinicMatches && keywordMatches && dateMatches;
+            });
             const isPatientExpanded = expandedPatientId === patient.id;
+            const latestNote = filteredNotes[0] ?? notes[0] ?? null;
             return (
               <Card key={patient.id} className="border-0 shadow-sm hover:shadow-md transition-shadow">
                 <CardContent className="p-0">
@@ -132,9 +240,14 @@ export default function MedicalRecords() {
                           </p>
                           <p className="text-[11px] text-muted-foreground mt-0.5">Profile summary and visit history</p>
                         </div>
-                        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setBookingPatient(patient)}>
-                          <CalendarPlus className="w-3.5 h-3.5" /> Book Next Appointment
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setEditingPatient(patient)}>
+                            <PencilLine className="w-3.5 h-3.5" /> Edit Patient
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setBookingPatient(patient)}>
+                            <CalendarPlus className="w-3.5 h-3.5" /> Book Next Appointment
+                          </Button>
+                        </div>
                       </div>
                       <div className="grid gap-3 rounded-lg border border-border bg-muted/20 p-3 md:grid-cols-2 lg:grid-cols-4">
                         {[
@@ -157,10 +270,30 @@ export default function MedicalRecords() {
                           {patient.name} Visits
                         </p>
                       </div>
+                      {latestNote && (
+                        <div className="mb-3 grid gap-3 rounded-lg border border-border bg-background/80 p-3 lg:grid-cols-4">
+                          <div>
+                            <p className="text-[11px] font-medium text-muted-foreground">Last Visit</p>
+                            <p className="text-sm text-foreground">{new Date(latestNote.date).toLocaleDateString('en-PK')}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium text-muted-foreground">Last Diagnoses</p>
+                            <p className="text-sm text-foreground">{latestNote.diagnoses.slice(0, 2).map(dx => dx.name).join(', ') || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium text-muted-foreground">Last Medications</p>
+                            <p className="text-sm text-foreground">{latestNote.medications.slice(0, 2).map(med => med.name).join(', ') || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium text-muted-foreground">Follow-up Advice</p>
+                            <p className="text-sm text-foreground">{latestNote.followUp || '-'}</p>
+                          </div>
+                        </div>
+                      )}
                       <div className="space-y-2">
-                        {notes.map((note, index) => {
+                        {filteredNotes.map((note, index) => {
                           const isVisitExpanded = expandedVisitIds[patient.id] === note.id;
-                          const visitLabel = index === 0 ? 'Latest Visit' : `Visit ${notes.length - index}`;
+                          const visitLabel = index === 0 ? 'Latest Visit' : `Visit ${filteredNotes.length - index}`;
 
                           return (
                             <div key={note.id} className="rounded-lg border border-border bg-muted/20 overflow-hidden">
@@ -292,11 +425,18 @@ export default function MedicalRecords() {
         mode="next"
         patient={bookingPatient}
         patients={patients}
+        searchPatients={searchPatients}
         clinics={doctorClinics}
         defaultClinicId={activeClinic?.id}
         defaultDate={getTomorrowDateKey()}
         defaultType="follow-up"
         onSubmit={handleBookNextAppointment}
+      />
+      <PatientDetailsDialog
+        open={Boolean(editingPatient)}
+        patient={editingPatient}
+        onOpenChange={open => !open && setEditingPatient(null)}
+        onSave={handleSavePatient}
       />
     </div>
   );

@@ -13,6 +13,7 @@ import {
   fetchAdminOverview,
   fetchApprovalRequests,
   rejectDoctor,
+  resetDoctorPassword,
   updateDoctorAccountStatus,
   updateWorkspaceSubscription,
 } from '@/lib/api';
@@ -73,6 +74,7 @@ export default function AdminDashboard() {
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [planDrafts, setPlanDrafts] = useState<Record<string, { planName: string; status: AdminDoctorAccount['subscription']['status']; trialEndsAt: string }>>({});
+  const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
 
   const load = async () => {
     setLoading(true);
@@ -152,6 +154,19 @@ export default function AdminDashboard() {
       trialEndsAt: draft.trialEndsAt || null,
     });
     toast.success('Subscription updated');
+    await load();
+  };
+
+  const handleResetPassword = async (doctorId: string) => {
+    const nextPassword = (passwordDrafts[doctorId] || '').trim();
+    if (!nextPassword) {
+      toast.error('Enter a new password first');
+      return;
+    }
+
+    await resetDoctorPassword(doctorId, nextPassword);
+    setPasswordDrafts(prev => ({ ...prev, [doctorId]: '' }));
+    toast.success('Doctor password reset');
     await load();
   };
 
@@ -297,6 +312,23 @@ export default function AdminDashboard() {
                     </div>
                     <div className="flex items-end">
                       <Button className="w-full" onClick={() => void handleSavePlan(doctor)}>Save Plan</Button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Reset Password</Label>
+                      <Input
+                        type="password"
+                        value={passwordDrafts[doctor.id] ?? ''}
+                        onChange={event => setPasswordDrafts(prev => ({ ...prev, [doctor.id]: event.target.value }))}
+                        placeholder="Set a temporary or new password"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button variant="outline" className="w-full md:w-auto" onClick={() => void handleResetPassword(doctor.id)}>
+                        Reset Password
+                      </Button>
                     </div>
                   </div>
                 </div>

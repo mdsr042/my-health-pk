@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Search } from 'lucide-react';
 import type { Appointment, Clinic, Patient } from '@/data/mockData';
 
 type BookingMode = 'create' | 'reschedule' | 'next';
@@ -29,6 +30,7 @@ interface AppointmentBookingDialogProps {
   patient?: Patient | null;
   patients: Patient[];
   clinics: Clinic[];
+  searchPatients?: (query: string) => Promise<Patient[]>;
   defaultClinicId?: string;
   defaultDate?: string;
   defaultType?: Appointment['type'];
@@ -86,6 +88,7 @@ export default function AppointmentBookingDialog({
   patient,
   patients,
   clinics,
+  searchPatients,
   defaultClinicId,
   defaultDate,
   defaultType,
@@ -95,18 +98,55 @@ export default function AppointmentBookingDialog({
     buildInitialForm({ appointment, patient, defaultClinicId, defaultDate, defaultType, mode })
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [patientQuery, setPatientQuery] = useState('');
+  const [searchedPatients, setSearchedPatients] = useState<Patient[]>([]);
+  const [isSearchingPatients, setIsSearchingPatients] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setForm(buildInitialForm({ appointment, patient, defaultClinicId, defaultDate, defaultType, mode }));
+    setPatientQuery('');
+    setSearchedPatients([]);
   }, [appointment, patient, defaultClinicId, defaultDate, defaultType, mode, open]);
+
+  const patientLocked = mode !== 'create' || Boolean(patient);
+
+  useEffect(() => {
+    if (patientLocked || !open) return;
+    const trimmedQuery = patientQuery.trim();
+    if (!trimmedQuery) {
+      setSearchedPatients([]);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (!searchPatients) {
+        const queryLower = trimmedQuery.toLowerCase();
+        setSearchedPatients(
+          patients.filter(item =>
+            item.name.toLowerCase().includes(queryLower)
+            || item.mrn.toLowerCase().includes(queryLower)
+            || item.phone.toLowerCase().includes(queryLower)
+            || item.cnic.toLowerCase().includes(queryLower)
+          )
+        );
+        return;
+      }
+
+      setIsSearchingPatients(true);
+      void searchPatients(trimmedQuery)
+        .then(setSearchedPatients)
+        .finally(() => setIsSearchingPatients(false));
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [open, patientLocked, patientQuery, patients, searchPatients]);
 
   const selectedPatient = useMemo(
     () => patients.find(item => item.id === form.patientId) ?? patient ?? null,
     [form.patientId, patient, patients]
   );
-
-  const patientLocked = mode !== 'create' || Boolean(patient);
+  const patientOptions = patientQuery.trim() ? searchedPatients : patients;
 
   const updateForm = <K extends keyof BookingForm>(field: K, value: BookingForm[K]) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -140,16 +180,31 @@ export default function AppointmentBookingDialog({
                 </p>
               </div>
             ) : (
-              <Select value={form.patientId} onValueChange={value => updateForm('patientId', value)}>
-                <SelectTrigger><SelectValue placeholder="Select patient" /></SelectTrigger>
-                <SelectContent>
-                  {patients.map(item => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name} ({item.mrn})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by name, MRN, phone, or CNIC"
+                    value={patientQuery}
+                    onChange={event => setPatientQuery(event.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <Select value={form.patientId} onValueChange={value => updateForm('patientId', value)}>
+                  <SelectTrigger><SelectValue placeholder="Select patient" /></SelectTrigger>
+                  <SelectContent>
+                    {patientOptions.map(item => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name} ({item.mrn})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {isSearchingPatients && <p className="text-xs text-muted-foreground">Searching patients...</p>}
+                {!isSearchingPatients && patientQuery.trim() && patientOptions.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No patient matched this search.</p>
+                )}
+              </div>
             )}
           </div>
 
