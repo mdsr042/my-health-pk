@@ -3,6 +3,43 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Printer } from 'lucide-react';
 
+function compactPrintableFrequency(frequency: string) {
+  if (!frequency) return '';
+
+  const normalized = frequency.replaceAll(' in the ', ' in ');
+  const segments = normalized.split(/, | and /).map(item => item.trim()).filter(Boolean);
+  if (segments.length < 2) {
+    return normalized;
+  }
+
+  const parsed = segments.map(segment => {
+    const match = segment.match(/^(.+?) in (morning|noon|evening)$/i);
+    if (!match) return null;
+    return {
+      dose: match[1].trim(),
+      timing: match[2].toLowerCase(),
+    };
+  });
+
+  if (parsed.some(item => !item) || !parsed[0]) {
+    return normalized;
+  }
+
+  const firstDose = parsed[0].dose;
+  const first = `${firstDose} in ${parsed[0].timing}`;
+  const rest = parsed.slice(1).map(item => {
+    const doseWords = item!.dose.split(' ');
+    return `${doseWords[0]} in ${item!.timing}`;
+  });
+
+  if (rest.length === 1) return `${first} and ${rest[0]}`;
+  return `${first}, ${rest.slice(0, -1).join(', ')}, and ${rest.at(-1)}`;
+}
+
+function buildCompactUrduLine(med: Medication) {
+  return [med.frequencyUrdu, med.instructionsUrdu].filter(Boolean).join(' • ');
+}
+
 interface PrescriptionPreviewProps {
   patient: Patient;
   diagnoses: Diagnosis[];
@@ -176,28 +213,21 @@ export default function PrescriptionPreview({
                         {med.route && ` • ${med.route}`}
                         {med.duration && ` • ${med.duration}`}
                       </p>
-                      <p className="text-sm leading-5 text-foreground">
-                        {med.frequency}
-                        {med.instructions && <span className="text-muted-foreground"> • {med.instructions}</span>}
-                      </p>
-                      {med.frequencyUrdu && (
-                        <p
-                          className="text-xs leading-5 text-foreground text-right"
-                          dir="rtl"
-                          style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
-                        >
-                          {med.frequencyUrdu}
+                      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                        <p className="flex-1 min-w-[260px] text-sm leading-5 text-foreground">
+                          {compactPrintableFrequency(med.frequency)}
+                          {med.instructions && <span className="text-muted-foreground"> • {med.instructions}</span>}
                         </p>
-                      )}
-                      {med.instructionsUrdu && (
-                        <p
-                          className="text-xs leading-5 text-foreground text-right"
-                          dir="rtl"
-                          style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
-                        >
-                          {med.instructionsUrdu}
-                        </p>
-                      )}
+                        {buildCompactUrduLine(med) && (
+                          <p
+                            className="max-w-full text-xs leading-5 text-foreground text-right sm:max-w-[45%]"
+                            dir="rtl"
+                            style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
+                          >
+                            {buildCompactUrduLine(med)}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
