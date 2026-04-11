@@ -31,9 +31,18 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
       toast.error('Please fill required fields: Name, Phone, Age, Gender');
       return;
     }
-    const patientId = await addWalkIn(form, activeClinic?.id || 'clinic-1');
-    toast.success(`Walk-in patient "${form.name}" added to queue`);
-    onPatientCreated(patientId);
+    const result = await addWalkIn(form, activeClinic?.id || 'clinic-1');
+    toast.success(
+      result.reusedPatient
+        ? `Existing patient "${result.patient.name}" added back to today's queue`
+        : `Walk-in patient "${result.patient.name}" added to queue`,
+      {
+        description: result.reusedPatient
+          ? `Matched by ${result.matchedBy === 'name_age' ? 'name + age' : result.matchedBy}`
+          : 'New patient record created',
+      }
+    );
+    onPatientCreated(result.patient.id);
     setForm({ name: '', phone: '', age: '', gender: '', cnic: '', address: '', bloodGroup: '', emergencyContact: '', chiefComplaint: '' });
     onClose();
   };

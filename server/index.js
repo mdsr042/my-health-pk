@@ -1225,6 +1225,8 @@ app.post('/api/walk-ins', requireAuth, requireRole('doctor_owner'), asyncHandler
     data: {
       patient: mapPatient(result.patient),
       appointment: mapAppointment(result.appointment),
+      reusedPatient: result.reusedPatient,
+      matchedBy: result.matchedBy,
     },
   });
 }));

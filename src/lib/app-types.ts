@@ -206,3 +206,10 @@ export interface MedicationFavorite {
   createdAt: string;
   medicine: MedicationCatalogEntry;
 }
+
+export interface WalkInResult {
+  patient: Patient;
+  appointment: Appointment;
+  reusedPatient: boolean;
+  matchedBy: 'cnic' | 'phone' | 'name_age' | null;
+}

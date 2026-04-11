@@ -2,14 +2,61 @@ import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { useData } from '@/contexts/DataContext';
-import { Search, FileText, Calendar, User, ChevronDown, ChevronUp } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import AppointmentBookingDialog from '@/components/appointments/AppointmentBookingDialog';
+import { Search, FileText, Calendar, User, ChevronDown, ChevronUp, CalendarPlus } from 'lucide-react';
+import type { Patient } from '@/data/mockData';
+import { getLocalDateKey } from '@/lib/date';
+import { toast } from 'sonner';
+
+function getTomorrowDateKey() {
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  return getLocalDateKey(next);
+}
 
 export default function MedicalRecords() {
-  const { patients, getPatientNotes } = useData();
+  const { patients, getPatientNotes, upsertAppointment } = useData();
+  const { activeClinic, doctorClinics, user } = useAuth();
   const [search, setSearch] = useState('');
   const [expandedPatientId, setExpandedPatientId] = useState<string | null>(null);
   const [expandedVisitIds, setExpandedVisitIds] = useState<Record<string, string | null>>({});
+  const [bookingPatient, setBookingPatient] = useState<Patient | null>(null);
+
+  const handleBookNextAppointment = async (form: {
+    id: string;
+    patientId: string;
+    clinicId: string;
+    date: string;
+    time: string;
+    type: 'new' | 'follow-up';
+    status: 'scheduled' | 'waiting' | 'in-consultation' | 'completed' | 'cancelled' | 'no-show';
+    chiefComplaint: string;
+    tokenNumber: number;
+  }) => {
+    if (!form.patientId || !form.clinicId || !form.date || !form.time) {
+      toast.error('Please complete clinic, date, and time');
+      return;
+    }
+
+    await upsertAppointment({
+      id: '',
+      patientId: form.patientId,
+      clinicId: form.clinicId,
+      doctorId: user?.id || 'doctor',
+      date: form.date,
+      time: form.time,
+      status: form.status,
+      type: form.type,
+      chiefComplaint: form.chiefComplaint.trim(),
+      tokenNumber: 0,
+    });
+
+    toast.success('Next appointment booked');
+    setBookingPatient(null);
+  };
 
   const patientsWithNotes = patients.filter(p => {
     const hasNotes = getPatientNotes(p.id).length > 0;
@@ -78,7 +125,34 @@ export default function MedicalRecords() {
 
                   {isPatientExpanded && (
                     <div className="px-4 pb-4 border-t border-border/60">
-                      <div className="pt-3 pb-2">
+                      <div className="pt-3 pb-2 flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Patient Details
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Profile summary and visit history</p>
+                        </div>
+                        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setBookingPatient(patient)}>
+                          <CalendarPlus className="w-3.5 h-3.5" /> Book Next Appointment
+                        </Button>
+                      </div>
+                      <div className="grid gap-3 rounded-lg border border-border bg-muted/20 p-3 md:grid-cols-2 lg:grid-cols-4">
+                        {[
+                          { label: 'MRN', value: patient.mrn || '-' },
+                          { label: 'Age / Gender', value: `${patient.age}y / ${patient.gender}` },
+                          { label: 'Phone', value: patient.phone || '-' },
+                          { label: 'CNIC', value: patient.cnic || '-' },
+                          { label: 'Blood Group', value: patient.bloodGroup || '-' },
+                          { label: 'Emergency Contact', value: patient.emergencyContact || '-' },
+                          { label: 'Address', value: patient.address || '-', span: 'lg:col-span-2' },
+                        ].map(field => (
+                          <div key={field.label} className={field.span || ''}>
+                            <p className="text-[11px] font-medium text-muted-foreground">{field.label}</p>
+                            <p className="text-sm text-foreground">{field.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="pt-4 pb-2">
                         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                           {patient.name} Visits
                         </p>
@@ -210,6 +284,20 @@ export default function MedicalRecords() {
           })
         )}
       </div>
+
+      <AppointmentBookingDialog
+        open={Boolean(bookingPatient)}
+        onOpenChange={open => !open && setBookingPatient(null)}
+        title="Book Next Appointment"
+        mode="next"
+        patient={bookingPatient}
+        patients={patients}
+        clinics={doctorClinics}
+        defaultClinicId={activeClinic?.id}
+        defaultDate={getTomorrowDateKey()}
+        defaultType="follow-up"
+        onSubmit={handleBookNextAppointment}
+      />
     </div>
   );
 }

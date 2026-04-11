@@ -11,6 +11,7 @@ import type {
   MedicationFavorite,
   SessionPayload,
   SignupPayload,
+  WalkInResult,
 } from '@/lib/app-types';
 import type { Appointment, Clinic, ClinicalNote, Patient } from '@/data/mockData';
 
@@ -206,7 +207,7 @@ export async function createWalkIn(payload: {
   date: string;
   time?: string;
 }) {
-  const result = await request<{ data: { patient: Patient; appointment: Appointment } }>('/walk-ins', {
+  const result = await request<{ data: WalkInResult }>('/walk-ins', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

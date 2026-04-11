@@ -35,6 +35,8 @@ const instructionPresets = [
   { value: 'custom', en: 'Custom instruction', ur: '' },
 ] as const;
 
+const dosePatternSnippets = ['1+1+1', '1+0+1', '1+1'] as const;
+
 const customForms = ['Tablet', 'Capsule', 'Syrup', 'Drops', 'Injection', 'Inhaler', 'Cream', 'Gel'] as const;
 const customRoutes = ['Oral', 'Injectable', 'Topical', 'Ophthalmic', 'Inhalation', 'Nasal'] as const;
 
@@ -151,8 +153,9 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   const handleSelect = (med: Medication) => {
     setSelected(med);
     setDosePattern(med.dosePattern || '');
-    setCustomFrequency(med.frequency);
-    setCustomFrequencyUrdu(med.frequencyUrdu || '');
+    const parsed = med.dosePattern ? parseDosePattern(med.dosePattern, med) : null;
+    setCustomFrequency(parsed?.frequency || med.frequency);
+    setCustomFrequencyUrdu(parsed?.frequencyUrdu || med.frequencyUrdu || '');
     setCustomDuration(med.duration);
     setCustomInstructions(med.instructions);
     setCustomInstructionsUrdu(med.instructionsUrdu || '');
@@ -186,7 +189,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
 
   const patternError = useMemo(() => {
     if (!dosePattern.trim() || parsedPattern) return '';
-    return 'Use 3-slot shorthand like 1+0+1, 1+1+1, 2+2+2, or special codes SOS / HS.';
+    return 'Use 1, 1+1, 1+0+1, 1+1+1, or special codes SOS / HS.';
   }, [dosePattern, parsedPattern]);
 
   const handleDosePatternChange = (value: string) => {
@@ -194,7 +197,13 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     if (!selected) return;
 
     const parsed = parseDosePattern(value, selected);
-    if (!parsed) return;
+    if (!parsed) {
+      if (!value.trim()) {
+        setCustomFrequency('');
+        setCustomFrequencyUrdu('');
+      }
+      return;
+    }
 
     setCustomFrequency(parsed.frequency);
     setCustomFrequencyUrdu(parsed.frequencyUrdu);
@@ -596,28 +605,30 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">Dose Pattern</Label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {dosePatternSnippets.map(snippet => (
+                            <button
+                              key={snippet}
+                              type="button"
+                              onClick={() => handleDosePatternChange(snippet)}
+                              className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            >
+                              {snippet}
+                            </button>
+                          ))}
+                        </div>
                         <Input
                           value={dosePattern}
                           onChange={e => handleDosePatternChange(e.target.value)}
-                          placeholder="1+0+1 / SOS / HS"
+                          placeholder="1 / 1+1 / 1+0+1 / SOS / HS"
                           className="h-8 text-sm"
                         />
-                        <p className="text-[11px] text-muted-foreground">Examples: 1+0+1, 1+1+1, 2+2+2, SOS, HS</p>
+                        <p className="text-[11px] text-muted-foreground">Examples: 1, 1+1, 1+0+1, 1+1+1, SOS, HS</p>
                         {patternError && <p className="text-[11px] text-destructive">{patternError}</p>}
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">Frequency</Label>
-                        <Select value={customFrequency} onValueChange={setCustomFrequency}>
-                          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Once daily">Once daily</SelectItem>
-                            <SelectItem value="Twice daily">Twice daily</SelectItem>
-                            <SelectItem value="Three times daily">Three times daily</SelectItem>
-                            <SelectItem value="Four times daily">Four times daily</SelectItem>
-                            <SelectItem value="As needed">As needed</SelectItem>
-                            <SelectItem value="At bedtime">At bedtime</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <Input value={customFrequency} readOnly className="h-8 text-sm bg-muted/30" placeholder="Derived from dose pattern" />
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">Frequency (Urdu)</Label>

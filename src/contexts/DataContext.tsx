@@ -13,7 +13,7 @@ import {
   updateAppointment,
   updateAppointmentStatus as updateAppointmentStatusRequest,
 } from '@/lib/api';
-import type { ConsultationDraft } from '@/lib/app-types';
+import type { ConsultationDraft, WalkInResult } from '@/lib/app-types';
 import { getLocalDateKey, parseDateKey } from '@/lib/date';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -73,7 +73,7 @@ interface DataContextType {
     bloodGroup: string;
     emergencyContact: string;
     chiefComplaint: string;
-  }, clinicId: string) => Promise<string>;
+  }, clinicId: string) => Promise<WalkInResult>;
   refreshData: () => Promise<void>;
 }
 
@@ -289,7 +289,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setPatients(prev => [saved.patient, ...prev.filter(item => item.id !== saved.patient.id)]);
     setAppointments(prev => sortAppointments([...prev.filter(item => item.id !== saved.appointment.id), saved.appointment]));
 
-    return saved.patient.id;
+    return saved;
   }, []);
 
   const restoreDemoData = useCallback(() => {

@@ -19,10 +19,18 @@ import DiagnosisModal from '@/components/consultation/DiagnosisModal';
 import MedicationModal from '@/components/consultation/MedicationModal';
 import LabOrderModal from '@/components/consultation/LabOrderModal';
 import ReferralModal from '@/components/consultation/ReferralModal';
+import AppointmentBookingDialog from '@/components/appointments/AppointmentBookingDialog';
 import PrescriptionPreview from '@/components/consultation/PrescriptionPreview';
 import NotesTimeline from '@/components/consultation/NotesTimeline';
 import OrdersPanel from '@/components/consultation/OrdersPanel';
 import { readStorage } from '@/lib/storage';
+import { getLocalDateKey } from '@/lib/date';
+
+function getTomorrowDateKey() {
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  return getLocalDateKey(next);
+}
 
 interface ConsultationPageProps {
   patientId: string;
@@ -73,7 +81,7 @@ function buildPayloadShape(payload: {
 
 export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const { markUnsaved } = usePatientTabs();
-  const { activeClinic } = useAuth();
+  const { activeClinic, doctorClinics, user } = useAuth();
   const {
     getPatient,
     appointments,
@@ -81,6 +89,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     getConsultationDraft,
     saveConsultationDraft,
     completeConsultation,
+    upsertAppointment,
   } = useData();
   const patient = getPatient(patientId);
   const patientNotes = getPatientNotes(patientId);
@@ -103,6 +112,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [labOrderType, setLabOrderType] = useState<'lab' | 'radiology'>('lab');
   const [referralOpen, setReferralOpen] = useState(false);
   const [referralType, setReferralType] = useState<'referral' | 'admission' | 'followup'>('referral');
+  const [bookingOpen, setBookingOpen] = useState(false);
 
   // Consultation form state
   const [chiefComplaint, setChiefComplaint] = useState(draft?.chiefComplaint || activeAppointment?.chiefComplaint || '');
@@ -154,6 +164,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
   const openLabModal = (type: 'lab' | 'radiology') => { setLabOrderType(type); setLabOrderOpen(true); };
   const openReferralModal = (type: 'referral' | 'admission' | 'followup') => { setReferralType(type); setReferralOpen(true); };
+  const openFollowUpBooking = () => setBookingOpen(true);
 
   const buildConsultationPayload = useCallback(() => ({
     ...buildPayloadShape({
@@ -224,6 +235,34 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     toast.success('Visit completed', { description: `${patient?.name} consultation finalized`, icon: <CheckCircle2 className="w-4 h-4 text-success" /> });
   };
 
+  const handleBookNextAppointment = async (form: {
+    id: string;
+    patientId: string;
+    clinicId: string;
+    date: string;
+    time: string;
+    type: 'new' | 'follow-up';
+    status: 'scheduled' | 'waiting' | 'in-consultation' | 'completed' | 'cancelled' | 'no-show';
+    chiefComplaint: string;
+    tokenNumber: number;
+  }) => {
+    await upsertAppointment({
+      id: '',
+      patientId: form.patientId,
+      clinicId: form.clinicId,
+      doctorId: user?.id || 'doctor',
+      date: form.date,
+      time: form.time,
+      status: form.status,
+      type: form.type,
+      chiefComplaint: form.chiefComplaint.trim(),
+      tokenNumber: 0,
+    });
+
+    toast.success('Next appointment booked', { description: `${patient.name} follow-up scheduled` });
+    setBookingOpen(false);
+  };
+
   useEffect(() => {
     const settings = readStorage(SETTINGS_STORAGE_KEY, { autoSave: true });
     if (!settings.autoSave) return;
@@ -287,7 +326,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     { label: 'Radiology', icon: Scan, color: 'text-info', action: () => openLabModal('radiology') },
     { label: 'Referral', icon: ArrowRightLeft, color: 'text-destructive', action: () => openReferralModal('referral') },
     { label: 'Admission', icon: Building2, color: 'text-muted-foreground', action: () => openReferralModal('admission') },
-    { label: 'Follow-up', icon: CalendarPlus, color: 'text-accent', action: () => openReferralModal('followup') },
+    { label: 'Follow-up', icon: CalendarPlus, color: 'text-accent', action: openFollowUpBooking },
   ];
 
   return (
@@ -604,6 +643,20 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       />
       <LabOrderModal open={labOrderOpen} onOpenChange={setLabOrderOpen} onAdd={addLabOrder} type={labOrderType} />
       <ReferralModal open={referralOpen} onOpenChange={setReferralOpen} type={referralType} patientName={patient.name} />
+      <AppointmentBookingDialog
+        open={bookingOpen}
+        onOpenChange={setBookingOpen}
+        title="Book Next Appointment"
+        mode="next"
+        appointment={activeAppointment}
+        patient={patient}
+        patients={[patient]}
+        clinics={doctorClinics}
+        defaultClinicId={activeClinic?.id || activeAppointment?.clinicId}
+        defaultDate={getTomorrowDateKey()}
+        defaultType="follow-up"
+        onSubmit={handleBookNextAppointment}
+      />
     </div>
   );
 }

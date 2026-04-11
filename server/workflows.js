@@ -67,6 +67,55 @@ async function getNextTokenNumber(client, workspaceId, clinicId, date) {
   return result.rows[0]?.next_token ?? 1;
 }
 
+async function findMatchingPatientForWalkIn(client, workspaceId, payload) {
+  const normalizedCnic = String(payload.cnic ?? '').trim();
+  if (normalizedCnic) {
+    const result = await client.query(
+      `
+        SELECT id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
+        FROM patients
+        WHERE workspace_id = $1 AND cnic = $2
+        LIMIT 1
+      `,
+      [workspaceId, normalizedCnic]
+    );
+    if (result.rowCount > 0) return { patient: result.rows[0], matchedBy: 'cnic' };
+  }
+
+  const normalizedPhone = String(payload.phone ?? '').trim();
+  if (normalizedPhone) {
+    const result = await client.query(
+      `
+        SELECT id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
+        FROM patients
+        WHERE workspace_id = $1 AND phone = $2
+        LIMIT 1
+      `,
+      [workspaceId, normalizedPhone]
+    );
+    if (result.rowCount > 0) return { patient: result.rows[0], matchedBy: 'phone' };
+  }
+
+  const normalizedName = String(payload.name ?? '').trim();
+  const age = Number(payload.age ?? 0);
+  if (normalizedName && age > 0) {
+    const result = await client.query(
+      `
+        SELECT id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
+        FROM patients
+        WHERE workspace_id = $1
+          AND LOWER(name) = LOWER($2)
+          AND age = $3
+        LIMIT 1
+      `,
+      [workspaceId, normalizedName, age]
+    );
+    if (result.rowCount > 0) return { patient: result.rows[0], matchedBy: 'name_age' };
+  }
+
+  return null;
+}
+
 export async function createAppointmentForWorkspace(client, { workspaceId, doctorUserId, appointment }) {
   await requireOwnedPatient(client, workspaceId, appointment.patientId);
   await requireOwnedClinic(client, workspaceId, appointment.clinicId);
@@ -176,36 +225,41 @@ export async function saveConsultationDraftForEncounter(client, { workspaceId, d
 export async function createWalkInEncounter(client, { workspaceId, doctorUserId, clinicId, payload }) {
   await requireOwnedClinic(client, workspaceId, clinicId, { lock: true });
 
-  const patientId = createId('patient');
   const appointmentId = createId('appointment');
-  const mrn = `MRN-${Date.now().toString().slice(-8)}`;
   const now = new Date();
   const date = payload.date;
   const time = payload.time || `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   const tokenNumber = await getNextTokenNumber(client, workspaceId, clinicId, date);
+  const matchedPatient = await findMatchingPatientForWalkIn(client, workspaceId, payload);
 
-  const patientResult = await client.query(
-    `
-      INSERT INTO patients (
-        id, workspace_id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      RETURNING id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
-    `,
-    [
-      patientId,
-      workspaceId,
-      mrn,
-      payload.name,
-      payload.phone || '',
-      payload.age || 0,
-      payload.gender || 'Male',
-      payload.cnic || '',
-      payload.address || '',
-      payload.bloodGroup || '',
-      payload.emergencyContact || '',
-    ]
-  );
+  let patientRow = matchedPatient?.patient ?? null;
+  if (!patientRow) {
+    const patientId = createId('patient');
+    const mrn = `MRN-${Date.now().toString().slice(-8)}`;
+    const patientResult = await client.query(
+      `
+        INSERT INTO patients (
+          id, workspace_id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
+      `,
+      [
+        patientId,
+        workspaceId,
+        mrn,
+        payload.name,
+        payload.phone || '',
+        payload.age || 0,
+        payload.gender || 'Male',
+        payload.cnic || '',
+        payload.address || '',
+        payload.bloodGroup || '',
+        payload.emergencyContact || '',
+      ]
+    );
+    patientRow = patientResult.rows[0];
+  }
 
   const appointmentResult = await client.query(
     `
@@ -219,18 +273,21 @@ export async function createWalkInEncounter(client, { workspaceId, doctorUserId,
       appointmentId,
       workspaceId,
       clinicId,
-      patientId,
+      patientRow.id,
       doctorUserId,
       date,
       time,
+      matchedPatient ? 'follow-up' : 'new',
       payload.chiefComplaint || 'Walk-in',
       tokenNumber,
     ]
   );
 
   return {
-    patient: patientResult.rows[0],
+    patient: patientRow,
     appointment: appointmentResult.rows[0],
+    reusedPatient: Boolean(matchedPatient),
+    matchedBy: matchedPatient?.matchedBy ?? null,
   };
 }
 

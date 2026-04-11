@@ -67,6 +67,10 @@ function buildUrduTimingText(medication: Medication, slots: Array<{ timing: Timi
 }
 
 function buildEnglishFrequency(slots: Array<{ timing: TimingSlot; quantity: number }>, medication: Medication) {
+  if (slots.length === 1 && slots[0]?.timing === 'morning') {
+    return `${getEnglishDoseLabel(slots[0].quantity, medication)} once daily`;
+  }
+
   const activeTimings = slots.map(({ timing, quantity }) => `${getEnglishDoseLabel(quantity, medication)} in the ${timingLabels[timing].en}`);
 
   if (activeTimings.length === 1) return activeTimings[0];
@@ -95,7 +99,7 @@ export function parseDosePattern(input: string, medication: Medication): ParsedD
   }
 
   const parts = value.split('+');
-  if (parts.length !== 3) return null;
+  if (parts.length < 1 || parts.length > 3) return null;
 
   const quantities = parts.map(part => Number.parseInt(part, 10));
   if (quantities.some(quantity => Number.isNaN(quantity) || quantity < 0 || quantity > 9)) {
@@ -106,14 +110,20 @@ export function parseDosePattern(input: string, medication: Medication): ParsedD
     return null;
   }
 
+  const expandedQuantities =
+    quantities.length === 1
+      ? [quantities[0], 0, 0]
+      : quantities.length === 2
+        ? [quantities[0], 0, quantities[1]]
+        : quantities;
+
   const slots = (['morning', 'noon', 'evening'] as TimingSlot[])
-    .map((timing, index) => ({ timing, quantity: quantities[index] }))
+    .map((timing, index) => ({ timing, quantity: expandedQuantities[index] }))
     .filter(slot => slot.quantity > 0);
 
   return {
-    normalizedPattern: quantities.join('+'),
+    normalizedPattern: expandedQuantities.join('+'),
     frequency: buildEnglishFrequency(slots, medication),
     frequencyUrdu: buildUrduTimingText(medication, slots),
   };
 }
-
