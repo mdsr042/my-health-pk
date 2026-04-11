@@ -311,9 +311,6 @@ export default function LoginPage() {
             )}
 
             <p className="text-center text-xs text-muted-foreground mt-6">
-              Admin demo: admin@myhealth.pk / admin123
-            </p>
-            <p className="text-center text-xs text-muted-foreground mt-2">
               Try Demo opens a fresh sample workspace each time.
             </p>
           </CardContent>
