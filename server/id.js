@@ -17,6 +17,8 @@ export const ID_PREFIXES = {
   approval_requests: 'apr',
   admin_audit_log: 'aal',
   admin_audit_logs: 'aal',
+  medication_favorite: 'mfv',
+  medication_favorites: 'mfv',
   clinic: 'cl',
   clinics: 'cl',
   patient: 'pt',

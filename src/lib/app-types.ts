@@ -193,3 +193,16 @@ export interface MedicationCatalogDetail extends MedicationCatalogEntry {
   source: string;
   sourceUrl: string;
 }
+
+export interface MedicationCatalogSearchResult {
+  entries: MedicationCatalogEntry[];
+  hasMore: boolean;
+  nextCursor: number | null;
+}
+
+export interface MedicationFavorite {
+  id: string;
+  registrationNo: string;
+  createdAt: string;
+  medicine: MedicationCatalogEntry;
+}

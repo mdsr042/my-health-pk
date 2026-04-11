@@ -122,6 +122,15 @@ async function createBaseSchema(client) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS medication_favorites (
+      id TEXT PRIMARY KEY,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      registration_no TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (doctor_user_id, registration_no)
+    );
+
     CREATE TABLE IF NOT EXISTS clinics (
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -535,6 +544,7 @@ async function runSchemaMigrations(client) {
     await ensureAuditColumns(client, 'diagnoses');
     await ensureAuditColumns(client, 'medications');
     await ensureAuditColumns(client, 'lab_orders');
+    await ensureAuditColumns(client, 'medication_favorites');
 
     await ensureOwnedIdTable(client, {
       tableName: 'doctor_profiles',
@@ -636,6 +646,7 @@ async function runSchemaMigrations(client) {
     await remapPrimaryIds(client, { tableName: 'diagnoses', entity: 'diagnosis' });
     await remapPrimaryIds(client, { tableName: 'medications', entity: 'medication' });
     await remapPrimaryIds(client, { tableName: 'lab_orders', entity: 'lab_order' });
+    await remapPrimaryIds(client, { tableName: 'medication_favorites', entity: 'medication_favorite' });
   });
 
   await runMigration(client, '003_constraints_and_indexes', async () => {
@@ -644,6 +655,7 @@ async function runSchemaMigrations(client) {
     await ensureUniqueConstraint(client, 'doctor_profiles', 'doctor_profiles_user_id_key', '(user_id)');
     await ensureUniqueConstraint(client, 'workspace_settings', 'workspace_settings_workspace_id_key', '(workspace_id)');
     await ensureUniqueConstraint(client, 'consultation_drafts', 'consultation_drafts_appointment_id_key', '(appointment_id)');
+    await ensureUniqueConstraint(client, 'medication_favorites', 'medication_favorites_doctor_user_id_registration_no_key', '(doctor_user_id, registration_no)');
 
     await ensureIndex(client, 'idx_clinics_workspace_id', 'clinics', '(workspace_id)');
     await ensureIndex(client, 'idx_patients_workspace_created', 'patients', '(workspace_id, created_at DESC)');
@@ -652,6 +664,7 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_approval_requests_status_created', 'approval_requests', '(status, created_at DESC)');
     await ensureIndex(client, 'idx_workspaces_demo_expires_at', 'workspaces', '(demo_expires_at)');
     await ensureIndex(client, 'idx_admin_audit_logs_created', 'admin_audit_logs', '(created_at DESC)');
+    await ensureIndex(client, 'idx_medication_favorites_doctor_created', 'medication_favorites', '(doctor_user_id, created_at DESC)');
   });
 
   await runMigration(client, '004_demo_workspace_expiry', async () => {

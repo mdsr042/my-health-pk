@@ -5,9 +5,15 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { medicationLibrary, favoriteMedications, type Medication } from '@/data/mockData';
-import { fetchMedicationCatalogDetail, searchMedicationCatalog } from '@/lib/api';
-import type { MedicationCatalogDetail, MedicationCatalogEntry } from '@/lib/app-types';
+import type { Medication } from '@/data/mockData';
+import {
+  addMedicationFavorite,
+  fetchMedicationCatalogDetail,
+  fetchMedicationFavorites,
+  removeMedicationFavorite,
+  searchMedicationCatalog,
+} from '@/lib/api';
+import type { MedicationCatalogDetail, MedicationCatalogEntry, MedicationFavorite } from '@/lib/app-types';
 import { Badge } from '@/components/ui/badge';
 import { parseDosePattern } from '@/lib/medication-pattern';
 import { Search, Star, Plus, Pencil, Trash2, Info } from 'lucide-react';
@@ -32,6 +38,24 @@ const instructionPresets = [
 const customForms = ['Tablet', 'Capsule', 'Syrup', 'Drops', 'Injection', 'Inhaler', 'Cream', 'Gel'] as const;
 const customRoutes = ['Oral', 'Injectable', 'Topical', 'Ophthalmic', 'Inhalation', 'Nasal'] as const;
 
+function toMedication(entry: MedicationCatalogEntry): Medication {
+  return {
+    id: `cat-${entry.registrationNo}`,
+    name: entry.brandName,
+    nameUrdu: '',
+    generic: '',
+    strength: entry.strengthText || '',
+    form: entry.dosageForm || '',
+    route: entry.route || '',
+    frequency: '',
+    frequencyUrdu: '',
+    duration: '',
+    durationUrdu: '',
+    instructions: '',
+    instructionsUrdu: '',
+  };
+}
+
 export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, prescribedMedications }: MedicationModalProps) {
   const [search, setSearch] = useState('');
   const [showFavorites, setShowFavorites] = useState(true);
@@ -45,13 +69,46 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   const [instructionPreset, setInstructionPreset] = useState<string>('select');
   const [catalogResults, setCatalogResults] = useState<MedicationCatalogEntry[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogHasMore, setCatalogHasMore] = useState(false);
+  const [catalogCursor, setCatalogCursor] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [favorites, setFavorites] = useState<MedicationFavorite[]>([]);
+  const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set());
   const [catalogDetail, setCatalogDetail] = useState<MedicationCatalogDetail | null>(null);
   const [detailLoadingRegNo, setDetailLoadingRegNo] = useState('');
 
   useEffect(() => {
-    if (search.trim().length < 3) {
+    if (!open) return;
+
+    let cancelled = false;
+    const loadFavorites = async () => {
+      setFavoritesLoading(true);
+      try {
+        const data = await fetchMedicationFavorites();
+        if (cancelled) return;
+        setFavorites(data);
+        setFavoriteKeys(new Set(data.map(item => item.registrationNo)));
+      } finally {
+        if (!cancelled) {
+          setFavoritesLoading(false);
+        }
+      }
+    };
+
+    void loadFavorites();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (showFavorites || search.trim().length < 3) {
       setCatalogResults([]);
       setCatalogLoading(false);
+      setCatalogHasMore(false);
+      setCatalogCursor(null);
       return;
     }
 
@@ -59,13 +116,16 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     const timer = window.setTimeout(async () => {
       setCatalogLoading(true);
       try {
-        const results = await searchMedicationCatalog(search.trim(), 50);
-        if (!cancelled) {
-          setCatalogResults(results);
-        }
+        const result = await searchMedicationCatalog(search.trim(), 20, 0);
+        if (cancelled) return;
+        setCatalogResults(result.entries);
+        setCatalogHasMore(result.hasMore);
+        setCatalogCursor(result.nextCursor);
       } catch {
         if (!cancelled) {
           setCatalogResults([]);
+          setCatalogHasMore(false);
+          setCatalogCursor(null);
         }
       } finally {
         if (!cancelled) {
@@ -78,32 +138,14 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [search]);
+  }, [search, showFavorites]);
 
-  const localFiltered = medicationLibrary.filter(m => {
-    if (!search) return showFavorites ? favoriteMedications.includes(m.id) : true;
-    return m.name.toLowerCase().includes(search.toLowerCase()) || m.generic.toLowerCase().includes(search.toLowerCase());
-  });
+  const favoriteEntries = useMemo(
+    () => favorites.map(item => toMedication(item.medicine)),
+    [favorites]
+  );
 
-  const remoteFiltered = useMemo<Medication[]>(() => (
-    catalogResults.map(entry => ({
-      id: `cat-${entry.registrationNo}`,
-      name: entry.brandName,
-      nameUrdu: '',
-      generic: '',
-      strength: entry.strengthText || '',
-      form: entry.dosageForm || '',
-      route: entry.route || '',
-      frequency: '',
-      frequencyUrdu: '',
-      duration: '',
-      durationUrdu: '',
-      instructions: '',
-      instructionsUrdu: '',
-    }))
-  ), [catalogResults]);
-
-  const filtered = search.trim().length >= 3 ? remoteFiltered : localFiltered;
+  const filtered = showFavorites ? favoriteEntries : catalogResults.map(toMedication);
   const isCustomMedication = selected?.id.startsWith('custom-') ?? false;
 
   const handleSelect = (med: Medication) => {
@@ -135,7 +177,6 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       instructions: '',
       instructionsUrdu: '',
     });
-    setCatalogDetail(null);
   };
 
   const parsedPattern = useMemo(() => {
@@ -190,12 +231,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     setInstructionPreset(value);
     const preset = instructionPresets.find(item => item.value === value);
     if (!preset) return;
-    if (value === 'select') {
-      setCustomInstructions('');
-      setCustomInstructionsUrdu('');
-      return;
-    }
-    if (value === 'custom') {
+    if (value === 'select' || value === 'custom') {
       setCustomInstructions('');
       setCustomInstructionsUrdu('');
       return;
@@ -217,6 +253,44 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     }
   };
 
+  const handleToggleFavorite = async (registrationNo: string) => {
+    const isFavorite = favoriteKeys.has(registrationNo);
+    const previousKeys = new Set(favoriteKeys);
+    const nextKeys = new Set(favoriteKeys);
+
+    if (isFavorite) {
+      nextKeys.delete(registrationNo);
+    } else {
+      nextKeys.add(registrationNo);
+    }
+    setFavoriteKeys(nextKeys);
+
+    try {
+      if (isFavorite) {
+        await removeMedicationFavorite(registrationNo);
+        setFavorites(current => current.filter(item => item.registrationNo !== registrationNo));
+      } else {
+        const favorite = await addMedicationFavorite(registrationNo);
+        setFavorites(current => [favorite, ...current.filter(item => item.registrationNo !== registrationNo)]);
+      }
+    } catch {
+      setFavoriteKeys(previousKeys);
+    }
+  };
+
+  const loadMore = async () => {
+    if (showFavorites || !catalogHasMore || catalogCursor === null || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const result = await searchMedicationCatalog(search.trim(), 20, catalogCursor);
+      setCatalogResults(current => [...current, ...result.entries]);
+      setCatalogHasMore(result.hasMore);
+      setCatalogCursor(result.nextCursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   const handleClose = (o: boolean) => {
     if (!o) {
       setSelected(null);
@@ -229,6 +303,9 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       setCustomInstructions('');
       setCustomInstructionsUrdu('');
       setInstructionPreset('select');
+      setCatalogResults([]);
+      setCatalogHasMore(false);
+      setCatalogCursor(null);
       setCatalogDetail(null);
       setDetailLoadingRegNo('');
     }
@@ -249,7 +326,10 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
               <Input
                 placeholder="Search by brand or generic name..."
                 value={search}
-                onChange={e => { setSearch(e.target.value); if (e.target.value) setShowFavorites(false); }}
+                onChange={e => {
+                  setSearch(e.target.value);
+                  if (e.target.value) setShowFavorites(false);
+                }}
                 className="pl-9"
                 autoFocus
               />
@@ -274,57 +354,95 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                 </h3>
               </div>
               <div className="max-h-[300px] overflow-y-auto space-y-1 p-2 scrollbar-thin">
-                {catalogLoading && <p className="text-sm text-muted-foreground text-center py-3">Searching Pakistan medicine catalog...</p>}
-                {filtered.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">No medications found</p>}
-                {filtered.map(med => (
-                  <div
-                    key={med.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => handleSelect(med)}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        handleSelect(med);
-                      }
-                    }}
-                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left cursor-pointer ${
-                      selected?.id === med.id ? 'bg-muted border border-border' : 'hover:bg-muted/50'
-                    }`}
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-foreground">{med.name}</p>
-                        {prescribedMedications.some(item => item.name === med.name) && (
-                          <Badge variant="outline" className="text-[10px]">Added</Badge>
-                        )}
+                {showFavorites && favoritesLoading && (
+                  <p className="text-sm text-muted-foreground text-center py-3">Loading your favorite medicines...</p>
+                )}
+                {!showFavorites && catalogLoading && (
+                  <p className="text-sm text-muted-foreground text-center py-3">Searching Pakistan medicine catalog...</p>
+                )}
+                {showFavorites && !favoritesLoading && filtered.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-8">No favorite medicines yet. Search and star medicines to build your quick list.</p>
+                )}
+                {!showFavorites && search.trim().length < 3 && (
+                  <p className="text-sm text-muted-foreground text-center py-8">Type at least 3 letters to search the Pakistan medicine catalog.</p>
+                )}
+                {!showFavorites && search.trim().length >= 3 && !catalogLoading && filtered.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-8">No medicines found in the Pakistan catalog.</p>
+                )}
+                {filtered.map(med => {
+                  const registrationNo = med.id.startsWith('cat-') ? med.id.replace('cat-', '') : '';
+                  const isFavorite = registrationNo ? favoriteKeys.has(registrationNo) : false;
+
+                  return (
+                    <div
+                      key={med.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleSelect(med)}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          handleSelect(med);
+                        }
+                      }}
+                      className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left cursor-pointer ${
+                        selected?.id === med.id ? 'bg-muted border border-border' : 'hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-foreground truncate">{med.name}</p>
+                          {prescribedMedications.some(item => item.name === med.name) && (
+                            <Badge variant="outline" className="text-[10px]">Added</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">{med.form || 'Medicine'} • {med.strength || 'Strength not listed'}</p>
                       </div>
-                      <p className="text-xs text-muted-foreground">{med.form || 'Medicine'} • {med.strength || 'Strength not listed'}</p>
+                      {registrationNo ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
+                          onClick={event => {
+                            event.stopPropagation();
+                            void handleToggleFavorite(registrationNo);
+                          }}
+                        >
+                          <Star className={`w-4 h-4 ${isFavorite ? 'text-warning fill-warning' : 'text-muted-foreground'}`} />
+                        </Button>
+                      ) : null}
+                      {registrationNo ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
+                          onClick={event => {
+                            event.stopPropagation();
+                            void handleOpenCatalogDetail({
+                              registrationNo,
+                              brandName: med.name,
+                              strengthText: med.strength,
+                              dosageForm: med.form,
+                              route: med.route,
+                            });
+                          }}
+                        >
+                          <Info className="w-4 h-4 text-muted-foreground" />
+                        </Button>
+                      ) : null}
+                      <Plus className="w-4 h-4 text-muted-foreground" />
                     </div>
-                    {favoriteMedications.includes(med.id) && <Star className="w-3 h-3 text-warning fill-warning" />}
-                    {med.id.startsWith('cat-') && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0"
-                        onClick={e => {
-                          e.stopPropagation();
-                          void handleOpenCatalogDetail({
-                            registrationNo: med.id.replace('cat-', ''),
-                            brandName: med.name,
-                            strengthText: med.strength,
-                            dosageForm: med.form,
-                            route: med.route,
-                          });
-                        }}
-                      >
-                        <Info className="w-4 h-4 text-muted-foreground" />
-                      </Button>
-                    )}
-                    <Plus className="w-4 h-4 text-muted-foreground" />
+                  );
+                })}
+                {!showFavorites && filtered.length > 0 && catalogHasMore && (
+                  <div className="pt-2">
+                    <Button variant="outline" size="sm" className="w-full" onClick={() => void loadMore()} disabled={loadingMore}>
+                      {loadingMore ? 'Loading more...' : 'Load 20 more'}
+                    </Button>
                   </div>
-                ))}
+                )}
               </div>
             </div>
 
@@ -547,7 +665,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-border p-6 sm:p-8 text-center text-sm text-muted-foreground">
-                  Select a medicine from the list to set dose, frequency, duration, and instructions.
+                  Search the Pakistan medicine catalog, open your favorites, or add a custom medicine to begin prescribing.
                 </div>
               )}
             </div>

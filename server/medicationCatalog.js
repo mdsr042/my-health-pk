@@ -45,6 +45,7 @@ async function loadCatalog() {
           entry.registrationNo,
         ].filter(Boolean).join(' ')),
       })),
+      entryByRegistrationNo: new Map(entries.map(entry => [String(entry.registrationNo), entry])),
     };
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -55,6 +56,7 @@ async function loadCatalog() {
           totalEntries: 0,
         },
         entries: [],
+        entryByRegistrationNo: new Map(),
       };
     } else {
       throw error;
@@ -81,38 +83,63 @@ function scoreEntry(entry, query) {
   return score;
 }
 
-export async function searchMedicationCatalog(query, limit = 50) {
+function toSummary(entry) {
+  const { _searchText, rawDisplayName, genericName, companyName, source, sourceUrl, ...summary } = entry;
+  return summary;
+}
+
+function toDetail(entry) {
+  const { _searchText, ...detail } = entry;
+  return detail;
+}
+
+export async function searchMedicationCatalog(query, limit = 20, cursor = 0) {
   const catalog = await loadCatalog();
   const normalizedQuery = normalizeText(query);
+  const safeLimit = Math.max(1, Math.min(limit, 20));
+  const safeCursor = Math.max(0, Number.parseInt(String(cursor ?? 0), 10) || 0);
 
   if (!normalizedQuery) {
     return {
       metadata: catalog.metadata,
       entries: [],
+      hasMore: false,
+      nextCursor: null,
     };
   }
 
-  const matches = catalog.entries
+  const allMatches = catalog.entries
     .map(entry => ({ entry, score: scoreEntry(entry, normalizedQuery) }))
     .filter(item => item.score > 0)
-    .sort((a, b) => b.score - a.score || a.entry.brandName.localeCompare(b.entry.brandName))
-    .slice(0, Math.max(1, Math.min(limit, 100)))
-    .map(item => {
-      const { _searchText, rawDisplayName, genericName, companyName, source, sourceUrl, ...entry } = item.entry;
-      return entry;
-    });
+    .sort((a, b) => b.score - a.score || a.entry.brandName.localeCompare(b.entry.brandName));
+
+  const pagedMatches = allMatches
+    .slice(safeCursor, safeCursor + safeLimit)
+    .map(item => toSummary(item.entry));
+
+  const nextCursor = safeCursor + safeLimit < allMatches.length ? safeCursor + safeLimit : null;
 
   return {
     metadata: catalog.metadata,
-    entries: matches,
+    entries: pagedMatches,
+    hasMore: nextCursor !== null,
+    nextCursor,
   };
 }
 
 export async function getMedicationCatalogEntry(registrationNo) {
   const catalog = await loadCatalog();
-  const match = catalog.entries.find(entry => entry.registrationNo === registrationNo);
+  const match = catalog.entryByRegistrationNo.get(String(registrationNo))
+    ?? catalog.entries.find(entry => entry.registrationNo === registrationNo);
   if (!match) return null;
 
-  const { _searchText, ...entry } = match;
-  return entry;
+  return toDetail(match);
+}
+
+export async function getMedicationCatalogEntries(registrationNos) {
+  const catalog = await loadCatalog();
+  return registrationNos
+    .map(registrationNo => catalog.entryByRegistrationNo.get(String(registrationNo)))
+    .filter(Boolean)
+    .map(entry => toSummary(entry));
 }

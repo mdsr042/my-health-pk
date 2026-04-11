@@ -7,6 +7,8 @@ import type {
   ConsultationDraft,
   MedicationCatalogEntry,
   MedicationCatalogDetail,
+  MedicationCatalogSearchResult,
+  MedicationFavorite,
   SessionPayload,
   SignupPayload,
 } from '@/lib/app-types';
@@ -238,14 +240,39 @@ export async function fetchAdminAuditLogs() {
   return result.data;
 }
 
-export async function searchMedicationCatalog(query: string, limit = 40) {
-  const result = await request<{ data: MedicationCatalogEntry[] }>(`/medication-catalog?q=${encodeURIComponent(query)}&limit=${limit}`);
-  return result.data;
+export async function searchMedicationCatalog(query: string, limit = 20, cursor = 0) {
+  const result = await request<{ data: MedicationCatalogEntry[]; meta: { hasMore: boolean; nextCursor: number | null } }>(
+    `/medication-catalog?q=${encodeURIComponent(query)}&limit=${limit}&cursor=${cursor}`
+  );
+  return {
+    entries: result.data,
+    hasMore: result.meta.hasMore,
+    nextCursor: result.meta.nextCursor,
+  } satisfies MedicationCatalogSearchResult;
 }
 
 export async function fetchMedicationCatalogDetail(registrationNo: string) {
   const result = await request<{ data: MedicationCatalogDetail }>(`/medication-catalog/${encodeURIComponent(registrationNo)}`);
   return result.data;
+}
+
+export async function fetchMedicationFavorites() {
+  const result = await request<{ data: MedicationFavorite[] }>('/medication-favorites');
+  return result.data;
+}
+
+export async function addMedicationFavorite(registrationNo: string) {
+  const result = await request<{ data: MedicationFavorite }>('/medication-favorites', {
+    method: 'POST',
+    body: JSON.stringify({ registrationNo }),
+  });
+  return result.data;
+}
+
+export async function removeMedicationFavorite(registrationNo: string) {
+  await request<{ ok: true }>(`/medication-favorites/${encodeURIComponent(registrationNo)}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function approveDoctor(approvalRequestId: string) {

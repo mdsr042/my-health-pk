@@ -14,7 +14,7 @@ import {
 import { initDb, query, withTransaction } from './db.js';
 import { cleanupExpiredDemoSessions, createEphemeralDemoSession } from './demoSeed.js';
 import { apiAccessLogMiddleware, logError, logInfo, logWarn, requestContextMiddleware } from './logger.js';
-import { getMedicationCatalogEntry, searchMedicationCatalog } from './medicationCatalog.js';
+import { getMedicationCatalogEntries, getMedicationCatalogEntry, searchMedicationCatalog } from './medicationCatalog.js';
 import { createRateLimitMiddleware } from './rateLimit.js';
 import { appointmentSchema, parseOrThrow, patientSchema, signupSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
 import {
@@ -321,6 +321,31 @@ async function getWorkspaceDrafts(workspaceId) {
   );
 }
 
+async function getDoctorMedicationFavorites(doctorUserId) {
+  const favoritesResult = await query(
+    `
+      SELECT id, registration_no, created_at
+      FROM medication_favorites
+      WHERE doctor_user_id = $1
+      ORDER BY created_at DESC
+    `,
+    [doctorUserId]
+  );
+
+  const registrationNos = favoritesResult.rows.map(row => row.registration_no);
+  const medicines = await getMedicationCatalogEntries(registrationNos);
+  const medicineByRegistrationNo = new Map(medicines.map(medicine => [medicine.registrationNo, medicine]));
+
+  return favoritesResult.rows
+    .map(row => ({
+      id: row.id,
+      registrationNo: row.registration_no,
+      createdAt: row.created_at,
+      medicine: medicineByRegistrationNo.get(row.registration_no) ?? null,
+    }))
+    .filter(item => item.medicine);
+}
+
 app.get('/api/health', asyncHandler(async (_req, res) => {
   await query('SELECT 1');
   res.json({
@@ -333,9 +358,17 @@ app.get('/api/health', asyncHandler(async (_req, res) => {
 
 app.get('/api/medication-catalog', requireAuth, asyncHandler(async (req, res) => {
   const queryText = String(req.query.q ?? '').trim();
-  const limit = Number(req.query.limit ?? 40);
-  const result = await searchMedicationCatalog(queryText, Number.isFinite(limit) ? limit : 40);
-  res.json({ data: result.entries, meta: result.metadata });
+  const limit = Number(req.query.limit ?? 20);
+  const cursor = Number(req.query.cursor ?? 0);
+  const result = await searchMedicationCatalog(queryText, Number.isFinite(limit) ? limit : 20, Number.isFinite(cursor) ? cursor : 0);
+  res.json({
+    data: result.entries,
+    meta: {
+      ...result.metadata,
+      hasMore: result.hasMore,
+      nextCursor: result.nextCursor,
+    },
+  });
 }));
 
 app.get('/api/medication-catalog/:registrationNo', requireAuth, asyncHandler(async (req, res) => {
@@ -346,6 +379,53 @@ app.get('/api/medication-catalog/:registrationNo', requireAuth, asyncHandler(asy
   }
 
   res.json({ data: entry });
+}));
+
+app.get('/api/medication-favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const favorites = await getDoctorMedicationFavorites(req.auth.user.id);
+  res.json({ data: favorites });
+}));
+
+app.post('/api/medication-favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const registrationNo = String(req.body?.registrationNo ?? '').trim();
+  if (!registrationNo) {
+    res.status(400).json({ error: 'Registration number is required', code: 'INVALID_MEDICATION_FAVORITE' });
+    return;
+  }
+
+  const medicine = await getMedicationCatalogEntry(registrationNo);
+  if (!medicine) {
+    res.status(404).json({ error: 'Medication not found', code: 'MEDICATION_NOT_FOUND' });
+    return;
+  }
+
+  await withTransaction(async client => {
+    await client.query(
+      `
+        INSERT INTO medication_favorites (id, doctor_user_id, registration_no)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (doctor_user_id, registration_no)
+        DO UPDATE SET updated_at = NOW()
+      `,
+      [createId('medication_favorite'), req.auth.user.id, registrationNo]
+    );
+  });
+
+  const favorites = await getDoctorMedicationFavorites(req.auth.user.id);
+  const favorite = favorites.find(item => item.registrationNo === registrationNo);
+  res.status(201).json({ data: favorite });
+}));
+
+app.delete('/api/medication-favorites/:registrationNo', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  await query(
+    `
+      DELETE FROM medication_favorites
+      WHERE doctor_user_id = $1 AND registration_no = $2
+    `,
+    [req.auth.user.id, String(req.params.registrationNo ?? '').trim()]
+  );
+
+  res.json({ ok: true });
 }));
 
 app.post('/api/auth/signup', authRateLimit, asyncHandler(async (req, res) => {
