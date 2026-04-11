@@ -11,6 +11,7 @@ import type {
   MedicationFavorite,
   SessionPayload,
   SignupPayload,
+  WalkInPayload,
   WalkInResult,
 } from '@/lib/app-types';
 import type { Appointment, Clinic, ClinicalNote, Patient } from '@/data/mockData';
@@ -193,20 +194,12 @@ export async function completeConsultation(payload: ConsultationDraft) {
   return result.data;
 }
 
-export async function createWalkIn(payload: {
-  clinicId: string;
-  name: string;
-  phone: string;
-  age: number;
-  gender: Patient['gender'];
-  cnic: string;
-  address: string;
-  bloodGroup: string;
-  emergencyContact: string;
-  chiefComplaint: string;
-  date: string;
-  time?: string;
-}) {
+export async function searchPatientsByPhone(phone: string) {
+  const result = await request<{ data: Patient[] }>(`/patients/search-by-phone?phone=${encodeURIComponent(phone)}`);
+  return result.data;
+}
+
+export async function createWalkIn(payload: WalkInPayload) {
   const result = await request<{ data: WalkInResult }>('/walk-ins', {
     method: 'POST',
     body: JSON.stringify(payload),

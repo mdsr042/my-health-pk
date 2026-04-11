@@ -60,7 +60,8 @@ export const appointmentSchema = z.object({
 
 export const walkInSchema = z.object({
   clinicId: trimmedString('Clinic'),
-  name: trimmedString('Patient name'),
+  patientId: z.string().trim().max(120).optional(),
+  name: z.string().trim().max(255).default(''),
   phone: z.string().trim().max(40).default(''),
   age: z.number().int().min(0).max(130).default(0),
   gender: z.enum(['Male', 'Female']).default('Male'),

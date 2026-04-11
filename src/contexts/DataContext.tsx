@@ -10,6 +10,7 @@ import {
   fetchDrafts,
   fetchPatients,
   persistDraft,
+  searchPatientsByPhone as searchPatientsByPhoneRequest,
   updateAppointment,
   updateAppointmentStatus as updateAppointmentStatusRequest,
 } from '@/lib/api';
@@ -64,6 +65,7 @@ interface DataContextType {
   completeConsultation: (payload: ConsultationPayload) => Promise<ClinicalNote>;
   restoreDemoData: () => void;
   addWalkIn: (data: {
+    patientId?: string;
     name: string;
     phone: string;
     age: string;
@@ -74,6 +76,7 @@ interface DataContextType {
     emergencyContact: string;
     chiefComplaint: string;
   }, clinicId: string) => Promise<WalkInResult>;
+  searchPatientsByPhone: (phone: string) => Promise<Patient[]>;
   refreshData: () => Promise<void>;
 }
 
@@ -261,6 +264,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addWalkIn = useCallback(async (data: {
+    patientId?: string;
     name: string;
     phone: string;
     age: string;
@@ -274,6 +278,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const today = getLocalDateKey();
     const saved = await createWalkInRequest({
       clinicId,
+      patientId: data.patientId || undefined,
       name: data.name,
       phone: data.phone,
       age: parseInt(data.age, 10) || 0,
@@ -290,6 +295,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setAppointments(prev => sortAppointments([...prev.filter(item => item.id !== saved.appointment.id), saved.appointment]));
 
     return saved;
+  }, []);
+
+  const searchPatientsByPhone = useCallback(async (phone: string) => {
+    if (!phone.trim()) return [];
+    return searchPatientsByPhoneRequest(phone.trim());
   }, []);
 
   const restoreDemoData = useCallback(() => {
@@ -318,6 +328,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     completeConsultation,
     restoreDemoData,
     addWalkIn,
+    searchPatientsByPhone,
     refreshData,
   }), [
     patients,
@@ -338,6 +349,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     completeConsultation,
     restoreDemoData,
     addWalkIn,
+    searchPatientsByPhone,
     refreshData,
   ]);
 

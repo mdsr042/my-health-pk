@@ -21,6 +21,7 @@ import {
   completeConsultationEncounter,
   createAppointmentForWorkspace,
   createWalkInEncounter,
+  searchPatientsByPhone,
   saveConsultationDraftForEncounter,
   updateAppointmentForWorkspace,
 } from './workflows.js';
@@ -1014,6 +1015,16 @@ app.get('/api/patients', requireAuth, requireRole('doctor_owner'), asyncHandler(
   res.json({ data: rows.map(mapPatient) });
 }));
 
+app.get('/api/patients/search-by-phone', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const phone = String(req.query.phone ?? '').trim();
+  if (!phone) {
+    return res.json({ data: [] });
+  }
+
+  const rows = await withTransaction(client => searchPatientsByPhone(client, req.auth.workspace.id, phone));
+  res.json({ data: rows.map(mapPatient) });
+}));
+
 app.post('/api/patients', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   const patient = parseOrThrow(patientSchema, req.body ?? {}, 'INVALID_PATIENT');
 
@@ -1211,6 +1222,9 @@ app.post('/api/consultations/complete', requireAuth, requireRole('doctor_owner')
 
 app.post('/api/walk-ins', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   const { clinicId, ...payload } = parseOrThrow(walkInSchema, req.body ?? {}, 'INVALID_WALK_IN');
+  if (!payload.patientId && !String(payload.name ?? '').trim()) {
+    return res.status(400).json({ error: 'Patient name is required', code: 'INVALID_WALK_IN' });
+  }
 
   const result = await withTransaction(client =>
     createWalkInEncounter(client, {

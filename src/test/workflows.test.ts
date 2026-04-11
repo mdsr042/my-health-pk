@@ -354,4 +354,67 @@ describe('server encounter workflows', () => {
     expect(nameAgeResult.reusedPatient).toBe(true);
     expect(nameAgeResult.matchedBy).toBe('name_age');
   });
+
+  it('reuses the explicitly selected patient id for walk-ins', async () => {
+    const client = createClient([
+      { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
+      { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
+      { rowCount: 1, rows: [{ next_token: 6 }] },
+      { rowCount: 1, rows: [{ id: 'pt_selected', workspace_id: 'ws_1' }] },
+      {
+        rowCount: 1,
+        rows: [{
+          id: 'pt_selected',
+          mrn: 'MRN-00000006',
+          name: 'Selected Patient',
+          phone: '03001234567',
+          age: 35,
+          gender: 'Female',
+          cnic: '35201-0000000-1',
+          address: 'Model Town',
+          blood_group: 'A+',
+          emergency_contact: '03001230000',
+        }],
+      },
+      {
+        rowCount: 1,
+        rows: [{
+          id: 'apt_selected',
+          patient_id: 'pt_selected',
+          clinic_id: 'cl_1',
+          doctor_user_id: 'usr_1',
+          date: '2026-04-10',
+          time: '11:00',
+          status: 'waiting',
+          type: 'follow-up',
+          chief_complaint: 'Walk-in',
+          token_number: 6,
+        }],
+      },
+    ]);
+
+    const result = await createWalkInEncounter(client, {
+      workspaceId: 'ws_1',
+      doctorUserId: 'usr_1',
+      clinicId: 'cl_1',
+      payload: {
+        patientId: 'pt_selected',
+        name: 'Different Typed Name',
+        phone: '03001234567',
+        age: 20,
+        gender: 'Male',
+        cnic: '',
+        address: '',
+        bloodGroup: '',
+        emergencyContact: '',
+        chiefComplaint: 'Walk-in',
+        date: '2026-04-10',
+        time: '11:00',
+      },
+    });
+
+    expect(result.patient.id).toBe('pt_selected');
+    expect(result.reusedPatient).toBe(true);
+    expect(result.appointment.type).toBe('follow-up');
+  });
 });

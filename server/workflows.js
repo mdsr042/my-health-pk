@@ -116,6 +116,23 @@ async function findMatchingPatientForWalkIn(client, workspaceId, payload) {
   return null;
 }
 
+export async function searchPatientsByPhone(client, workspaceId, phone) {
+  const normalizedPhone = String(phone ?? '').trim();
+  if (!normalizedPhone) return [];
+
+  const result = await client.query(
+    `
+      SELECT id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
+      FROM patients
+      WHERE workspace_id = $1 AND phone = $2
+      ORDER BY created_at DESC, name ASC
+    `,
+    [workspaceId, normalizedPhone]
+  );
+
+  return result.rows;
+}
+
 export async function createAppointmentForWorkspace(client, { workspaceId, doctorUserId, appointment }) {
   await requireOwnedPatient(client, workspaceId, appointment.patientId);
   await requireOwnedClinic(client, workspaceId, appointment.clinicId);
@@ -230,10 +247,29 @@ export async function createWalkInEncounter(client, { workspaceId, doctorUserId,
   const date = payload.date;
   const time = payload.time || `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   const tokenNumber = await getNextTokenNumber(client, workspaceId, clinicId, date);
-  const matchedPatient = await findMatchingPatientForWalkIn(client, workspaceId, payload);
+
+  let matchedPatient = null;
+  if (payload.patientId) {
+    const patient = await requireOwnedPatient(client, workspaceId, payload.patientId);
+    const result = await client.query(
+      `
+        SELECT id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
+        FROM patients
+        WHERE id = $1 AND workspace_id = $2
+        LIMIT 1
+      `,
+      [patient.id, workspaceId]
+    );
+    matchedPatient = result.rowCount > 0 ? { patient: result.rows[0], matchedBy: 'phone' } : null;
+  } else {
+    matchedPatient = await findMatchingPatientForWalkIn(client, workspaceId, payload);
+  }
 
   let patientRow = matchedPatient?.patient ?? null;
   if (!patientRow) {
+    if (!String(payload.name ?? '').trim()) {
+      throw createHttpError('Patient name is required', 'INVALID_WALK_IN', 400);
+    }
     const patientId = createId('patient');
     const mrn = `MRN-${Date.now().toString().slice(-8)}`;
     const patientResult = await client.query(

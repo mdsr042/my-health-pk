@@ -213,3 +213,19 @@ export interface WalkInResult {
   reusedPatient: boolean;
   matchedBy: 'cnic' | 'phone' | 'name_age' | null;
 }
+
+export interface WalkInPayload {
+  clinicId: string;
+  patientId?: string;
+  name: string;
+  phone: string;
+  age: number;
+  gender: Patient['gender'];
+  cnic: string;
+  address: string;
+  bloodGroup: string;
+  emergencyContact: string;
+  chiefComplaint: string;
+  date: string;
+  time?: string;
+}
