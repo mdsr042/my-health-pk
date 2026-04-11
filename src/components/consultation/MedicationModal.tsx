@@ -238,13 +238,13 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
 
   const handleInstructionPresetChange = (value: string) => {
     setInstructionPreset(value);
-    const preset = instructionPresets.find(item => item.value === value);
-    if (!preset) return;
     if (value === 'select' || value === 'custom') {
       setCustomInstructions('');
       setCustomInstructionsUrdu('');
       return;
     }
+    const preset = instructionPresets.find(item => item.value === value);
+    if (!preset) return;
     setCustomInstructions(preset.en);
     setCustomInstructionsUrdu(preset.ur);
   };
