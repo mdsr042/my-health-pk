@@ -74,6 +74,15 @@ export const walkInSchema = z.object({
   time: z.string().max(20).optional(),
 });
 
+export const passwordChangeSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(1, 'New password is required'),
+});
+
+export const passwordResetSchema = z.object({
+  newPassword: z.string().min(1, 'New password is required'),
+});
+
 export function parseOrThrow(schema, value, code = 'INVALID_REQUEST') {
   const result = schema.safeParse(value);
   if (!result.success) {
