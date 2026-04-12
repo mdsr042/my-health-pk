@@ -10,6 +10,7 @@
     "start": "node server/index.js",
     "dev:full": "concurrently \"npm run api\" \"npm run dev\"",
     "catalog:fetch:pk": "node scripts/fetch-drap-medicines.mjs",
+    "smoke:core-flow": "node scripts/smoke-core-flow.mjs",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",

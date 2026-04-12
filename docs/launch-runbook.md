@@ -49,3 +49,25 @@
 10. Complete consultation
 11. Verify previous visit history
 12. Verify prescription print preview
+
+## Automated Post-Deploy Smoke Flow
+- Use a dedicated smoke doctor account and workspace for automated checks.
+- Run after every main deployment:
+
+```bash
+SMOKE_BASE_URL="https://your-app.onrender.com" \
+SMOKE_DOCTOR_EMAIL="smoke.doctor@myhealth.pk" \
+SMOKE_DOCTOR_PASSWORD="StrongPassword123" \
+npm run smoke:core-flow
+```
+
+- This validates the API-level continuity flow:
+  - patient lookup
+  - registration / reuse
+  - queue handoff
+  - consultation draft + completion
+  - prescription payload persistence
+  - records history
+  - next appointment
+  - authenticated account usability
+- Because it creates real records, do not point it at a real doctor workspace.

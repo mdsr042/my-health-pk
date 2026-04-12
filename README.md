@@ -46,3 +46,28 @@ Default local ports:
 - Server-side walk-in creation and token assignment
 - Auth rate limiting and stronger signup password policy
 - Admin audit trail for approvals and account/subscription changes
+
+## Post-Deploy Smoke Flow
+
+Run the core API smoke flow against a dedicated smoke doctor account after deployment:
+
+```bash
+SMOKE_BASE_URL="https://your-app.onrender.com" \
+SMOKE_DOCTOR_EMAIL="smoke.doctor@myhealth.pk" \
+SMOKE_DOCTOR_PASSWORD="StrongPassword123" \
+npm run smoke:core-flow
+```
+
+What it verifies:
+- health
+- doctor login / account usability
+- patient creation
+- patient lookup by phone and CNIC
+- walk-in patient reuse
+- queue -> consultation transition
+- consultation draft save
+- consultation completion with prescription payload
+- records/history retrieval
+- next appointment booking
+
+Use a dedicated smoke workspace/account only, because this script intentionally creates real records.
