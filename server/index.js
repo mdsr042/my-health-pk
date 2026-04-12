@@ -347,6 +347,36 @@ async function getDoctorMedicationFavorites(doctorUserId) {
     .filter(item => item.medicine);
 }
 
+function normalizeMedicationKey(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N}%+./ -]+/gu, '')
+    .trim();
+}
+
+async function getDoctorMedicationPreferences(doctorUserId) {
+  const { rows } = await query(
+    `
+      SELECT id, medication_key, registration_no, payload, created_at, updated_at
+      FROM medication_preferences
+      WHERE doctor_user_id = $1
+      ORDER BY updated_at DESC
+    `,
+    [doctorUserId]
+  );
+
+  return rows.map(row => ({
+    id: row.id,
+    medicationKey: row.medication_key,
+    registrationNo: row.registration_no,
+    payload: row.payload ?? {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
 app.get('/api/health', asyncHandler(async (_req, res) => {
   await query('SELECT 1');
   res.json({
@@ -427,6 +457,37 @@ app.delete('/api/medication-favorites/:registrationNo', requireAuth, requireRole
   );
 
   res.json({ ok: true });
+}));
+
+app.get('/api/medication-preferences', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const preferences = await getDoctorMedicationPreferences(req.auth.user.id);
+  res.json({ data: preferences });
+}));
+
+app.put('/api/medication-preferences', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const medicationKey = normalizeMedicationKey(req.body?.medicationKey);
+  const registrationNo = String(req.body?.registrationNo ?? '').trim();
+  const payload = req.body?.payload ?? {};
+
+  if (!medicationKey) {
+    return res.status(400).json({ error: 'Medication key is required', code: 'INVALID_MEDICATION_PREFERENCE' });
+  }
+
+  await withTransaction(async client => {
+    await client.query(
+      `
+        INSERT INTO medication_preferences (id, doctor_user_id, medication_key, registration_no, payload)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (doctor_user_id, medication_key)
+        DO UPDATE SET registration_no = EXCLUDED.registration_no, payload = EXCLUDED.payload, updated_at = NOW()
+      `,
+      [createId('medication_preference'), req.auth.user.id, medicationKey, registrationNo, payload]
+    );
+  });
+
+  const preferences = await getDoctorMedicationPreferences(req.auth.user.id);
+  const preference = preferences.find(item => item.medicationKey === medicationKey);
+  res.json({ data: preference });
 }));
 
 app.post('/api/auth/signup', authRateLimit, asyncHandler(async (req, res) => {

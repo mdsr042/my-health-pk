@@ -84,7 +84,7 @@ function scoreEntry(entry, query) {
 }
 
 function toSummary(entry) {
-  const { _searchText, rawDisplayName, genericName, companyName, source, sourceUrl, ...summary } = entry;
+  const { _searchText, rawDisplayName, source, sourceUrl, ...summary } = entry;
   return summary;
 }
 

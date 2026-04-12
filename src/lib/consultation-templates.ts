@@ -1,0 +1,157 @@
+import type { Diagnosis, LabOrder, Medication } from '@/data/mockData';
+
+export interface ConsultationTemplate {
+  id: string;
+  label: string;
+  chiefComplaint: string;
+  instructions: string;
+  followUp: string;
+  diagnoses: Array<Omit<Diagnosis, 'id'>>;
+  medications: Array<Omit<Medication, 'id'>>;
+  labOrders: Array<Omit<LabOrder, 'id'>>;
+}
+
+export const consultationTemplates: ConsultationTemplate[] = [
+  {
+    id: 'acute-diarrhea',
+    label: 'Diarrhea',
+    chiefComplaint: 'Acute diarrhea',
+    instructions: 'Maintain oral hydration and watch for red-flag symptoms.',
+    followUp: 'Review in 2 days or earlier if dehydration worsens.',
+    diagnoses: [
+      { code: 'A09', name: 'Infectious gastroenteritis and colitis, unspecified', isPrimary: true },
+    ],
+    medications: [
+      {
+        name: 'ORS Sachet',
+        nameUrdu: 'او آر ایس ساشے',
+        generic: 'Oral Rehydration Salts',
+        strength: '',
+        form: 'Sachet',
+        route: 'Oral',
+        languageMode: 'bilingual',
+        dosePattern: '',
+        frequency: 'Use after each loose stool',
+        frequencyUrdu: 'ہر پتلے پاخانے کے بعد استعمال کریں',
+        duration: '3 days',
+        durationUrdu: '۳ دن',
+        instructions: 'Mix in clean water and sip frequently',
+        instructionsUrdu: 'صاف پانی میں ملا کر وقفے وقفے سے پئیں',
+      },
+      {
+        name: 'Zinc Sulphate',
+        nameUrdu: 'زنک سلفیٹ',
+        generic: 'Zinc Sulphate',
+        strength: '20mg',
+        form: 'Tablet',
+        route: 'Oral',
+        languageMode: 'bilingual',
+        dosePattern: '1',
+        frequency: 'one tablet once daily',
+        frequencyUrdu: 'روزانہ 1 گولی',
+        duration: '14 days',
+        durationUrdu: '۱۴ دن',
+        instructions: 'Take after food',
+        instructionsUrdu: 'کھانے کے بعد لیں',
+      },
+    ],
+    labOrders: [],
+  },
+  {
+    id: 'malaria-workup',
+    label: 'Malaria',
+    chiefComplaint: 'Intermittent fever with chills',
+    instructions: 'Monitor temperature and maintain hydration.',
+    followUp: 'Review within 24 to 48 hours with test results.',
+    diagnoses: [
+      { code: 'B54', name: 'Unspecified malaria', isPrimary: true },
+    ],
+    medications: [
+      {
+        name: 'Paracetamol 500mg',
+        nameUrdu: 'پیراسیٹامول ۵۰۰ ملی گرام',
+        generic: 'Paracetamol',
+        strength: '500mg',
+        form: 'Tablet',
+        route: 'Oral',
+        languageMode: 'bilingual',
+        dosePattern: '1+1+1',
+        frequency: 'one tablet in morning, one in noon, and one in evening',
+        frequencyUrdu: 'صبح 1 گولی، دوپہر 1 گولی، شام 1 گولی',
+        duration: '3 days',
+        durationUrdu: '۳ دن',
+        instructions: 'Take after meals',
+        instructionsUrdu: 'کھانے کے بعد لیں',
+      },
+    ],
+    labOrders: [
+      {
+        testName: 'Malaria Parasite Test',
+        category: 'Microbiology',
+        priority: 'urgent',
+        status: 'ordered',
+        date: new Date().toISOString().slice(0, 10),
+      },
+      {
+        testName: 'Complete Blood Count (CBC)',
+        category: 'Hematology',
+        priority: 'routine',
+        status: 'ordered',
+        date: new Date().toISOString().slice(0, 10),
+      },
+    ],
+  },
+  {
+    id: 'enteric-fever',
+    label: 'Enteric Fever',
+    chiefComplaint: 'Fever with abdominal discomfort',
+    instructions: 'Use clean water, rest, and continue oral hydration.',
+    followUp: 'Review in 3 days or earlier if symptoms worsen.',
+    diagnoses: [
+      { code: 'A01.0', name: 'Typhoid fever', isPrimary: true },
+    ],
+    medications: [
+      {
+        name: 'Azithromycin 500mg',
+        nameUrdu: 'ازیتھرومائسن ۵۰۰ ملی گرام',
+        generic: 'Azithromycin',
+        strength: '500mg',
+        form: 'Tablet',
+        route: 'Oral',
+        languageMode: 'bilingual',
+        dosePattern: '1',
+        frequency: 'one tablet once daily',
+        frequencyUrdu: 'روزانہ 1 گولی',
+        duration: '7 days',
+        durationUrdu: '۷ دن',
+        instructions: 'Complete the full course',
+        instructionsUrdu: 'پوری دوا مکمل کریں',
+      },
+      {
+        name: 'Paracetamol 500mg',
+        nameUrdu: 'پیراسیٹامول ۵۰۰ ملی گرام',
+        generic: 'Paracetamol',
+        strength: '500mg',
+        form: 'Tablet',
+        route: 'Oral',
+        languageMode: 'bilingual',
+        dosePattern: '1+1+1',
+        frequency: 'one tablet in morning, one in noon, and one in evening',
+        frequencyUrdu: 'صبح 1 گولی، دوپہر 1 گولی، شام 1 گولی',
+        duration: '5 days',
+        durationUrdu: '۵ دن',
+        instructions: 'Take after meals',
+        instructionsUrdu: 'کھانے کے بعد لیں',
+      },
+    ],
+    labOrders: [
+      {
+        testName: 'Typhidot / Typhi Test',
+        category: 'Microbiology',
+        priority: 'urgent',
+        status: 'ordered',
+        date: new Date().toISOString().slice(0, 10),
+      },
+    ],
+  },
+];

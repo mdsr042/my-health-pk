@@ -181,6 +181,8 @@ export interface AdminAuditLog {
 export interface MedicationCatalogEntry {
   registrationNo: string;
   brandName: string;
+  genericName: string;
+  companyName: string;
   strengthText: string;
   dosageForm: string;
   route: string;
@@ -205,6 +207,15 @@ export interface MedicationFavorite {
   registrationNo: string;
   createdAt: string;
   medicine: MedicationCatalogEntry;
+}
+
+export interface MedicationPreference {
+  id: string;
+  medicationKey: string;
+  registrationNo: string;
+  createdAt: string;
+  updatedAt: string;
+  payload: Record<string, unknown>;
 }
 
 export interface WalkInResult {

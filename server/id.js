@@ -19,6 +19,8 @@ export const ID_PREFIXES = {
   admin_audit_logs: 'aal',
   medication_favorite: 'mfv',
   medication_favorites: 'mfv',
+  medication_preference: 'mpr',
+  medication_preferences: 'mpr',
   clinic: 'cl',
   clinics: 'cl',
   patient: 'pt',

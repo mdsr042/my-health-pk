@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -58,9 +58,20 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
   const [showFavorites, setShowFavorites] = useState(true);
   const [priority, setPriority] = useState<'routine' | 'urgent' | 'stat'>('routine');
   const [clinicalNotes, setClinicalNotes] = useState('');
+  const [selectedTest, setSelectedTest] = useState<{ name: string; category: string } | null>(null);
 
   const tests = type === 'lab' ? labTests : radiologyTests;
   const today = new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    if (!open) {
+      setSearch('');
+      setShowFavorites(true);
+      setPriority('routine');
+      setClinicalNotes('');
+      setSelectedTest(null);
+    }
+  }, [open]);
 
   const filtered = tests.filter(t => {
     if (!search) return showFavorites ? t.favorite : true;
@@ -77,13 +88,23 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
       date: today,
     };
     onAdd(order);
+    setSelectedTest({ name: testName, category });
   };
 
   const isLab = type === 'lab';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent
+        className="max-w-lg"
+        onKeyDown={event => {
+          if (event.key !== 'Enter' || event.shiftKey || !selectedTest) return;
+          const target = event.target as HTMLElement | null;
+          if (!target || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') return;
+          event.preventDefault();
+          handleAdd(selectedTest.name, selectedTest.category);
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {isLab ? <FlaskConical className="w-5 h-5 text-warning" /> : <Scan className="w-5 h-5 text-info" />}
@@ -141,7 +162,21 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
               <p className="text-sm text-muted-foreground text-center py-8">No tests found</p>
             )}
             {filtered.map(test => (
-              <div key={test.name} className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors group">
+              <div
+                key={test.name}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedTest({ name: test.name, category: test.category })}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setSelectedTest({ name: test.name, category: test.category });
+                  }
+                }}
+                className={`flex items-center gap-3 p-3 rounded-lg transition-colors group cursor-pointer ${
+                  selectedTest?.name === test.name ? 'bg-muted border border-border' : 'hover:bg-muted/50'
+                }`}
+              >
                 <div className="flex-1">
                   <p className="text-sm font-medium text-foreground">{test.name}</p>
                   <p className="text-xs text-muted-foreground">{test.category}</p>
@@ -151,13 +186,23 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
                   variant="outline"
                   size="sm"
                   className="h-7 text-xs gap-1"
-                  onClick={() => handleAdd(test.name, test.category)}
+                  onClick={event => {
+                    event.stopPropagation();
+                    handleAdd(test.name, test.category);
+                  }}
                 >
                   <Plus className="w-3 h-3" /> Order
                 </Button>
               </div>
             ))}
           </div>
+
+          {selectedTest && (
+            <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              Selected: <span className="font-medium text-foreground">{selectedTest.name}</span>
+              <span className="ml-2">Press Enter to order quickly.</span>
+            </div>
+          )}
 
           <div>
             <Textarea

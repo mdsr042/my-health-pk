@@ -23,6 +23,7 @@ import AppointmentBookingDialog from '@/components/appointments/AppointmentBooki
 import PrescriptionPreview from '@/components/consultation/PrescriptionPreview';
 import NotesTimeline from '@/components/consultation/NotesTimeline';
 import OrdersPanel from '@/components/consultation/OrdersPanel';
+import { consultationTemplates } from '@/lib/consultation-templates';
 import { readStorage } from '@/lib/storage';
 import { getLocalDateKey } from '@/lib/date';
 
@@ -166,6 +167,47 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const openLabModal = (type: 'lab' | 'radiology') => { setLabOrderType(type); setLabOrderOpen(true); };
   const openReferralModal = (type: 'referral' | 'admission' | 'followup') => { setReferralType(type); setReferralOpen(true); };
   const openFollowUpBooking = () => setBookingOpen(true);
+  const applyConsultationTemplate = useCallback((templateId: string) => {
+    const template = consultationTemplates.find(item => item.id === templateId);
+    if (!template) return;
+
+    setChiefComplaint(prev => prev || template.chiefComplaint);
+    setInstructions(prev => prev || template.instructions);
+    setFollowUp(prev => prev || template.followUp);
+    setDiagnoses(prev => {
+      const existing = new Set(prev.map(item => `${item.code}:${item.name}`));
+      const additions = template.diagnoses
+        .filter(item => !existing.has(`${item.code}:${item.name}`))
+        .map(item => ({
+          ...item,
+          id: `dx-template-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        }));
+      return [...prev, ...additions];
+    });
+    setMedications(prev => {
+      const existing = new Set(prev.map(item => `${item.name}:${item.strength}:${item.frequency}`));
+      const additions = template.medications
+        .filter(item => !existing.has(`${item.name}:${item.strength}:${item.frequency}`))
+        .map(item => ({
+          ...item,
+          id: `med-template-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        }));
+      return [...prev, ...additions];
+    });
+    setLabOrders(prev => {
+      const existing = new Set(prev.map(item => `${item.testName}:${item.category}`));
+      const additions = template.labOrders
+        .filter(item => !existing.has(`${item.testName}:${item.category}`))
+        .map(item => ({
+          ...item,
+          id: `lab-template-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          date: getLocalDateKey(),
+        }));
+      return [...prev, ...additions];
+    });
+    markUnsaved(patientId, true);
+    toast.success(`${template.label} template applied`);
+  }, [markUnsaved, patientId]);
 
   const reusePreviousDiagnoses = useCallback(() => {
     if (!latestPreviousNote?.diagnoses.length) {
@@ -505,6 +547,114 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 </CardContent>
               </Card>
 
+              <Card className="border-0 shadow-sm">
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold text-foreground">Treatment Templates</h3>
+                      <p className="text-xs text-muted-foreground">Use common editable starter sets for frequent OPD conditions.</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {consultationTemplates.map(template => (
+                      <Button
+                        key={template.id}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8"
+                        onClick={() => applyConsultationTemplate(template.id)}
+                      >
+                        {template.label}
+                      </Button>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="font-semibold text-foreground flex items-center gap-2">
+                          <Pill className="w-4 h-4 text-success" /> Medications
+                        </h3>
+                        <p className="text-xs text-muted-foreground">Prescribe without scrolling to the bottom of the note.</p>
+                      </div>
+                      <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setMedicationOpen(true)}>
+                        <Plus className="w-3.5 h-3.5" /> Add
+                      </Button>
+                    </div>
+                    {medications.length === 0 ? (
+                      <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No medications prescribed yet</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {medications.map(med => (
+                          <div key={med.id} className="bg-muted/50 rounded-lg p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-foreground text-sm">{med.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {med.form} • {med.route} • {med.frequency || med.frequencyUrdu || 'Frequency not set'} • {med.duration}
+                                </p>
+                                {med.frequencyUrdu && <p className="text-xs text-muted-foreground" dir="rtl">{med.frequencyUrdu}</p>}
+                                {med.instructions && <p className="text-xs text-muted-foreground mt-1">{med.instructions}</p>}
+                                {med.instructionsUrdu && <p className="text-xs text-muted-foreground" dir="rtl">{med.instructionsUrdu}</p>}
+                              </div>
+                              <button onClick={() => removeMedication(med.id)} className="text-xs text-destructive hover:underline">Remove</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="font-semibold text-foreground flex items-center gap-2">
+                          <FlaskConical className="w-4 h-4 text-warning" /> Investigations
+                        </h3>
+                        <p className="text-xs text-muted-foreground">Order labs and radiology from the first screen area.</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openLabModal('lab')}>
+                          <Plus className="w-3.5 h-3.5" /> Lab
+                        </Button>
+                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openLabModal('radiology')}>
+                          <Plus className="w-3.5 h-3.5" /> Radiology
+                        </Button>
+                      </div>
+                    </div>
+                    {labOrders.length === 0 ? (
+                      <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No investigations ordered yet</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {labOrders.map(order => (
+                          <div key={order.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                            <div className={`w-7 h-7 rounded-md flex items-center justify-center ${order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI') ? 'bg-info/10' : 'bg-warning/10'}`}>
+                              {order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI')
+                                ? <Scan className="w-3.5 h-3.5 text-info" />
+                                : <FlaskConical className="w-3.5 h-3.5 text-warning" />}
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-foreground">{order.testName}</p>
+                              <p className="text-xs text-muted-foreground">{order.category}</p>
+                            </div>
+                            <Badge variant="outline" className={`text-[10px] ${order.priority === 'stat' ? 'border-destructive/30 text-destructive' : order.priority === 'urgent' ? 'border-warning/30 text-warning' : ''}`}>
+                              {order.priority}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
               {/* Clinical form */}
               {clinicalFieldConfigs.map(field => {
                 const fieldState = {
@@ -578,60 +728,6 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 )}
               </div>
 
-              {/* Medications */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium text-foreground">Medications</h3>
-                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setMedicationOpen(true)}>
-                    <Plus className="w-3 h-3" /> Add
-                  </Button>
-                </div>
-                {medications.length === 0 ? (
-                  <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No medications prescribed yet</p>
-                ) : (
-                  <div className="space-y-2">
-                    {medications.map(med => (
-                      <div key={med.id} className="bg-muted/50 rounded-lg p-3">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="font-medium text-foreground text-sm">{med.name}</p>
-                            <p className="text-xs text-muted-foreground">{med.form} • {med.route} • {med.frequency} • {med.duration}</p>
-                            {med.frequencyUrdu && <p className="text-xs text-muted-foreground" dir="rtl">🕒 {med.frequencyUrdu}</p>}
-                            {med.instructions && <p className="text-xs text-muted-foreground mt-1">📋 {med.instructions}</p>}
-                            {med.instructionsUrdu && <p className="text-xs text-muted-foreground" dir="rtl">📋 {med.instructionsUrdu}</p>}
-                          </div>
-                          <button onClick={() => removeMedication(med.id)} className="text-xs text-destructive hover:underline">Remove</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Lab Orders */}
-              {labOrders.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-medium text-foreground mb-2">Lab & Radiology Orders</h3>
-                  <div className="space-y-2">
-                    {labOrders.map(order => (
-                      <div key={order.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
-                        <div className={`w-7 h-7 rounded-md flex items-center justify-center ${order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI') ? 'bg-info/10' : 'bg-warning/10'}`}>
-                          {order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI')
-                            ? <Scan className="w-3.5 h-3.5 text-info" />
-                            : <FlaskConical className="w-3.5 h-3.5 text-warning" />}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-foreground">{order.testName}</p>
-                          <p className="text-xs text-muted-foreground">{order.category}</p>
-                        </div>
-                        <Badge variant="outline" className={`text-[10px] ${order.priority === 'stat' ? 'border-destructive/30 text-destructive' : order.priority === 'urgent' ? 'border-warning/30 text-warning' : ''}`}>
-                          {order.priority}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               </div>
             )}
 

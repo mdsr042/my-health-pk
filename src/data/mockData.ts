@@ -74,6 +74,7 @@ export interface Medication {
   strength: string;
   form: string;
   route: string;
+  languageMode?: 'en' | 'ur' | 'bilingual';
   dosePattern?: string;
   doseUnitUrdu?: {
     singular: string;

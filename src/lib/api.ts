@@ -9,6 +9,7 @@ import type {
   MedicationCatalogDetail,
   MedicationCatalogSearchResult,
   MedicationFavorite,
+  MedicationPreference,
   SessionPayload,
   SignupPayload,
   WalkInPayload,
@@ -287,6 +288,23 @@ export async function removeMedicationFavorite(registrationNo: string) {
   await request<{ ok: true }>(`/medication-favorites/${encodeURIComponent(registrationNo)}`, {
     method: 'DELETE',
   });
+}
+
+export async function fetchMedicationPreferences() {
+  const result = await request<{ data: MedicationPreference[] }>('/medication-preferences');
+  return result.data;
+}
+
+export async function saveMedicationPreference(payload: {
+  medicationKey: string;
+  registrationNo?: string;
+  payload: Record<string, unknown>;
+}) {
+  const result = await request<{ data: MedicationPreference }>('/medication-preferences', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
 }
 
 export async function approveDoctor(approvalRequestId: string) {

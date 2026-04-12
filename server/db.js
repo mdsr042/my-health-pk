@@ -131,6 +131,17 @@ async function createBaseSchema(client) {
       UNIQUE (doctor_user_id, registration_no)
     );
 
+    CREATE TABLE IF NOT EXISTS medication_preferences (
+      id TEXT PRIMARY KEY,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      medication_key TEXT NOT NULL,
+      registration_no TEXT NOT NULL DEFAULT '',
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (doctor_user_id, medication_key)
+    );
+
     CREATE TABLE IF NOT EXISTS clinics (
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -545,6 +556,7 @@ async function runSchemaMigrations(client) {
     await ensureAuditColumns(client, 'medications');
     await ensureAuditColumns(client, 'lab_orders');
     await ensureAuditColumns(client, 'medication_favorites');
+    await ensureAuditColumns(client, 'medication_preferences');
 
     await ensureOwnedIdTable(client, {
       tableName: 'doctor_profiles',
@@ -665,6 +677,7 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_workspaces_demo_expires_at', 'workspaces', '(demo_expires_at)');
     await ensureIndex(client, 'idx_admin_audit_logs_created', 'admin_audit_logs', '(created_at DESC)');
     await ensureIndex(client, 'idx_medication_favorites_doctor_created', 'medication_favorites', '(doctor_user_id, created_at DESC)');
+    await ensureIndex(client, 'idx_medication_preferences_doctor_updated', 'medication_preferences', '(doctor_user_id, updated_at DESC)');
   });
 
   await runMigration(client, '004_demo_workspace_expiry', async () => {
@@ -768,6 +781,25 @@ async function runSchemaMigrations(client) {
       'SET NULL'
     );
     await ensureUniqueConstraint(client, 'consultation_drafts', 'consultation_drafts_appointment_id_key', '(appointment_id)');
+  });
+
+  await runMigration(client, '007_doctor_medication_preferences', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS medication_preferences (
+        id TEXT PRIMARY KEY,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        medication_key TEXT NOT NULL,
+        registration_no TEXT NOT NULL DEFAULT '',
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (doctor_user_id, medication_key)
+      )
+    `);
+
+    await ensureAuditColumns(client, 'medication_preferences');
+    await ensureUniqueConstraint(client, 'medication_preferences', 'medication_preferences_doctor_user_id_medication_key_key', '(doctor_user_id, medication_key)');
+    await ensureIndex(client, 'idx_medication_preferences_doctor_updated', 'medication_preferences', '(doctor_user_id, updated_at DESC)');
   });
 }
 

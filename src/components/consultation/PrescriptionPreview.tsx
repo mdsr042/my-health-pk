@@ -40,6 +40,15 @@ function buildCompactUrduLine(med: Medication) {
   return [med.frequencyUrdu, med.instructionsUrdu].filter(Boolean).join(' • ');
 }
 
+function inferMedicationLanguageMode(med: Medication) {
+  if (med.languageMode) return med.languageMode;
+  const hasEnglish = Boolean(med.frequency || med.instructions);
+  const hasUrdu = Boolean(med.frequencyUrdu || med.instructionsUrdu);
+  if (hasEnglish && hasUrdu) return 'bilingual';
+  if (hasUrdu) return 'ur';
+  return 'en';
+}
+
 interface PrescriptionPreviewProps {
   patient: Patient;
   diagnoses: Diagnosis[];
@@ -203,6 +212,13 @@ export default function PrescriptionPreview({
                 <div className="space-y-2">
                   {medications.map((med, index) => (
                     <div key={med.id} className="pb-2 border-b border-dashed border-border/80 last:border-b-0">
+                      {(() => {
+                        const languageMode = inferMedicationLanguageMode(med);
+                        const englishLine = [compactPrintableFrequency(med.frequency), med.instructions].filter(Boolean).join(' • ');
+                        const urduLine = buildCompactUrduLine(med);
+
+                        return (
+                          <>
                       <p className="text-sm font-semibold leading-5 text-foreground">
                         {index + 1}. {med.name}
                         {med.strength && <span className="font-medium"> - {med.strength}</span>}
@@ -214,20 +230,24 @@ export default function PrescriptionPreview({
                         {med.duration && ` • ${med.duration}`}
                       </p>
                       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-                        <p className="flex-1 min-w-[260px] text-sm leading-5 text-foreground">
-                          {compactPrintableFrequency(med.frequency)}
-                          {med.instructions && <span className="text-muted-foreground"> • {med.instructions}</span>}
-                        </p>
-                        {buildCompactUrduLine(med) && (
+                        {languageMode !== 'ur' && englishLine && (
+                          <p className="flex-1 min-w-[260px] text-sm leading-5 text-foreground">
+                            {englishLine}
+                          </p>
+                        )}
+                        {languageMode !== 'en' && urduLine && (
                           <p
                             className="max-w-full text-xs leading-5 text-foreground text-right sm:max-w-[45%]"
                             dir="rtl"
                             style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
                           >
-                            {buildCompactUrduLine(med)}
+                            {urduLine}
                           </p>
                         )}
                       </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
