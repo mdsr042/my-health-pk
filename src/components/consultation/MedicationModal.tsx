@@ -116,6 +116,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   const [catalogDetail, setCatalogDetail] = useState<MedicationCatalogDetail | null>(null);
   const [detailLoadingRegNo, setDetailLoadingRegNo] = useState('');
   const [languageMode, setLanguageMode] = useState<'en' | 'ur' | 'bilingual'>('bilingual');
+  const [savingFavorite, setSavingFavorite] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -190,6 +191,51 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
 
   const filtered = showFavorites ? favoriteEntries : catalogResults.map(toMedication);
   const isCustomMedication = selected?.id.startsWith('custom-') ?? false;
+  const selectedRegistrationNo = selected?.id.startsWith('cat-') ? selected.id.replace('cat-', '') : '';
+  const isSelectedFavorite = Boolean(selectedRegistrationNo && favoriteKeys.has(selectedRegistrationNo));
+
+  const buildMedicationFromForm = () => {
+    if (!selected) return null;
+    if (dosePattern.trim() && !parsedPattern) return null;
+    if (!selected.name.trim()) return null;
+
+    const isEditingExisting = prescribedMedications.some(med => med.id === selected.id);
+
+    return {
+      ...selected,
+      id: isEditingExisting ? selected.id : `rx-${Date.now()}`,
+      languageMode,
+      dosePattern: parsedPattern?.normalizedPattern || dosePattern.trim() || selected.dosePattern,
+      frequency: languageMode === 'ur' ? '' : (customFrequency || selected.frequency),
+      frequencyUrdu: languageMode === 'en' ? '' : (customFrequencyUrdu || selected.frequencyUrdu),
+      duration: customDuration || selected.duration,
+      instructions: languageMode === 'ur' ? '' : (customInstructions || selected.instructions),
+      instructionsUrdu: languageMode === 'en' ? '' : (customInstructionsUrdu || selected.instructionsUrdu),
+    } satisfies Medication;
+  };
+
+  const persistMedicationPreference = async (medicationToSave: Medication) => {
+    const savedPreference = await saveMedicationPreference({
+      medicationKey: getMedicationPreferenceKey(selected ?? medicationToSave),
+      registrationNo: medicationToSave.id.startsWith('cat-') ? medicationToSave.id.replace('cat-', '') : '',
+      payload: {
+        generic: medicationToSave.generic,
+        strength: medicationToSave.strength,
+        form: medicationToSave.form,
+        route: medicationToSave.route,
+        languageMode: medicationToSave.languageMode,
+        dosePattern: medicationToSave.dosePattern || '',
+        frequency: medicationToSave.frequency,
+        frequencyUrdu: medicationToSave.frequencyUrdu,
+        duration: medicationToSave.duration,
+        instructions: medicationToSave.instructions,
+        instructionsUrdu: medicationToSave.instructionsUrdu,
+      },
+    });
+
+    setPreferences(current => [savedPreference, ...current.filter(item => item.medicationKey !== savedPreference.medicationKey)]);
+    return savedPreference;
+  };
 
   const handleSelect = (med: Medication) => {
     const preference = preferences.find(item => item.medicationKey === getMedicationPreferenceKey(med));
@@ -276,45 +322,30 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   };
 
   const handleAdd = () => {
-    if (!selected) return;
-    if (dosePattern.trim() && !parsedPattern) return;
-    if (!selected.name.trim()) return;
-
-    const isEditingExisting = prescribedMedications.some(med => med.id === selected.id);
-    const medicationToSave: Medication = {
-      ...selected,
-      id: isEditingExisting ? selected.id : `rx-${Date.now()}`,
-      languageMode,
-      dosePattern: parsedPattern?.normalizedPattern || dosePattern.trim() || selected.dosePattern,
-      frequency: languageMode === 'ur' ? '' : (customFrequency || selected.frequency),
-      frequencyUrdu: languageMode === 'en' ? '' : (customFrequencyUrdu || selected.frequencyUrdu),
-      duration: customDuration || selected.duration,
-      instructions: languageMode === 'ur' ? '' : (customInstructions || selected.instructions),
-      instructionsUrdu: languageMode === 'en' ? '' : (customInstructionsUrdu || selected.instructionsUrdu),
-    };
+    const medicationToSave = buildMedicationFromForm();
+    if (!medicationToSave) return;
 
     onAdd(medicationToSave);
-    void saveMedicationPreference({
-      medicationKey: getMedicationPreferenceKey(selected),
-      registrationNo: selected.id.startsWith('cat-') ? selected.id.replace('cat-', '') : '',
-      payload: {
-        generic: medicationToSave.generic,
-        strength: medicationToSave.strength,
-        form: medicationToSave.form,
-        route: medicationToSave.route,
-        languageMode: medicationToSave.languageMode,
-        dosePattern: medicationToSave.dosePattern || '',
-        frequency: medicationToSave.frequency,
-        frequencyUrdu: medicationToSave.frequencyUrdu,
-        duration: medicationToSave.duration,
-        instructions: medicationToSave.instructions,
-        instructionsUrdu: medicationToSave.instructionsUrdu,
-      },
-    }).then(savedPreference => {
-      setPreferences(current => [savedPreference, ...current.filter(item => item.medicationKey !== savedPreference.medicationKey)]);
-    }).catch(() => {
+    void persistMedicationPreference(medicationToSave).catch(() => {
       // Keep prescribing flow fast even if preference persistence fails.
     });
+  };
+
+  const handleSaveFavorite = async () => {
+    const medicationToSave = buildMedicationFromForm();
+    if (!medicationToSave || !selectedRegistrationNo) return;
+
+    setSavingFavorite(true);
+    try {
+      await persistMedicationPreference({ ...medicationToSave, id: `cat-${selectedRegistrationNo}` });
+      if (!favoriteKeys.has(selectedRegistrationNo)) {
+        const favorite = await addMedicationFavorite(selectedRegistrationNo);
+        setFavorites(current => [favorite, ...current.filter(item => item.registrationNo !== selectedRegistrationNo)]);
+        setFavoriteKeys(current => new Set(current).add(selectedRegistrationNo));
+      }
+    } finally {
+      setSavingFavorite(false);
+    }
   };
 
   const handleInstructionPresetChange = (value: string) => {
@@ -511,7 +542,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 p-0"
+                          className="h-7 w-7 border border-primary/20 p-0 hover:border-primary/45"
                           onClick={event => {
                             event.stopPropagation();
                             void handleToggleFavorite(registrationNo);
@@ -525,7 +556,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 p-0"
+                          className="h-7 w-7 border border-primary/20 p-0 hover:border-primary/45"
                           onClick={event => {
                             event.stopPropagation();
                             void handleOpenCatalogDetail({
@@ -716,6 +747,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                             ))}
                           </SelectContent>
                         </Select>
+                        <p className="text-[11px] text-muted-foreground">Choose this per patient based on what they can read and understand.</p>
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">Dose Pattern</Label>
@@ -725,7 +757,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                               key={snippet}
                               type="button"
                               onClick={() => handleDosePatternChange(snippet)}
-                              className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              className="rounded-full border border-primary/25 bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/45 hover:bg-muted hover:text-foreground"
                             >
                               {snippet}
                             </button>
@@ -787,6 +819,18 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
 
                     <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end">
                       <Button variant="outline" size="sm" onClick={() => setSelected(null)}>Clear</Button>
+                      {!isCustomMedication && selectedRegistrationNo ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => void handleSaveFavorite()}
+                          disabled={savingFavorite}
+                        >
+                          <Star className={`w-4 h-4 ${isSelectedFavorite ? 'fill-warning text-warning' : ''}`} />
+                          {savingFavorite ? 'Saving...' : isSelectedFavorite ? 'Update Favorite Setup' : 'Save to Favorites'}
+                        </Button>
+                      ) : null}
                       <Button size="sm" className="gap-1.5" onClick={handleAdd}>
                         <Plus className="w-4 h-4" />
                         {prescribedMedications.some(med => med.id === selected.id) ? 'Update Prescription' : 'Add to Prescription'}
