@@ -21,6 +21,8 @@ export const ID_PREFIXES = {
   medication_favorites: 'mfv',
   medication_preference: 'mpr',
   medication_preferences: 'mpr',
+  treatment_template: 'ttm',
+  treatment_templates: 'ttm',
   clinic: 'cl',
   clinics: 'cl',
   patient: 'pt',

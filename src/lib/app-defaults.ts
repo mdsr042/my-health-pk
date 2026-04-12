@@ -11,6 +11,7 @@ export const defaultSettings: AppSettings = {
   prescriptionLang: 'bilingual',
   theme: 'light',
   compactMode: false,
+  sidebarCollapsed: true,
   clinicOverrides: {},
   managedClinics: [],
 };

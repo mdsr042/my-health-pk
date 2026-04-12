@@ -16,7 +16,7 @@ import { cleanupExpiredDemoSessions, createEphemeralDemoSession } from './demoSe
 import { apiAccessLogMiddleware, logError, logInfo, logWarn, requestContextMiddleware } from './logger.js';
 import { getMedicationCatalogEntries, getMedicationCatalogEntry, searchMedicationCatalog } from './medicationCatalog.js';
 import { createRateLimitMiddleware } from './rateLimit.js';
-import { appointmentSchema, parseOrThrow, passwordChangeSchema, passwordResetSchema, patientSchema, signupSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
+import { appointmentSchema, parseOrThrow, passwordChangeSchema, passwordResetSchema, patientSchema, signupSchema, treatmentTemplateSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
 import {
   completeConsultationEncounter,
   createAppointmentForWorkspace,
@@ -25,6 +25,7 @@ import {
   saveConsultationDraftForEncounter,
   updateAppointmentForWorkspace,
 } from './workflows.js';
+import { starterTreatmentTemplates } from './treatmentTemplates.js';
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 4001);
@@ -377,6 +378,79 @@ async function getDoctorMedicationPreferences(doctorUserId) {
   }));
 }
 
+function mapTreatmentTemplate(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    conditionLabel: row.condition_label ?? '',
+    chiefComplaint: row.chief_complaint ?? '',
+    instructions: row.instructions ?? '',
+    followUp: row.follow_up ?? '',
+    diagnoses: row.diagnoses ?? [],
+    medications: row.medications ?? [],
+    labOrders: row.lab_orders ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function getDoctorTreatmentTemplates(workspaceId, doctorUserId) {
+  const { rows } = await query(
+    `
+      SELECT id, name, condition_label, chief_complaint, instructions, follow_up, diagnoses, medications, lab_orders, created_at, updated_at
+      FROM treatment_templates
+      WHERE workspace_id = $1 AND doctor_user_id = $2
+      ORDER BY updated_at DESC, created_at DESC
+    `,
+    [workspaceId, doctorUserId]
+  );
+
+  return rows.map(mapTreatmentTemplate);
+}
+
+async function importStarterTreatmentTemplates(workspaceId, doctorUserId) {
+  await withTransaction(async client => {
+    for (const template of starterTreatmentTemplates) {
+      const existing = await client.query(
+        `
+          SELECT 1
+          FROM treatment_templates
+          WHERE workspace_id = $1 AND doctor_user_id = $2 AND lower(name) = lower($3)
+          LIMIT 1
+        `,
+        [workspaceId, doctorUserId, template.name]
+      );
+
+      if (existing.rowCount > 0) {
+        continue;
+      }
+
+      await client.query(
+        `
+          INSERT INTO treatment_templates (
+            id, workspace_id, doctor_user_id, name, condition_label, chief_complaint,
+            instructions, follow_up, diagnoses, medications, lab_orders
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `,
+        [
+          createId('treatment_template'),
+          workspaceId,
+          doctorUserId,
+          template.name,
+          template.conditionLabel,
+          template.chiefComplaint,
+          template.instructions,
+          template.followUp,
+          template.diagnoses,
+          template.medications,
+          template.labOrders,
+        ]
+      );
+    }
+  });
+}
+
 app.get('/api/health', asyncHandler(async (_req, res) => {
   await query('SELECT 1');
   res.json({
@@ -488,6 +562,108 @@ app.put('/api/medication-preferences', requireAuth, requireRole('doctor_owner'),
   const preferences = await getDoctorMedicationPreferences(req.auth.user.id);
   const preference = preferences.find(item => item.medicationKey === medicationKey);
   res.json({ data: preference });
+}));
+
+app.get('/api/treatment-templates', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const templates = await getDoctorTreatmentTemplates(req.auth.workspace.id, req.auth.user.id);
+  res.json({ data: templates });
+}));
+
+app.post('/api/treatment-templates/import-starters', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  await importStarterTreatmentTemplates(req.auth.workspace.id, req.auth.user.id);
+  const templates = await getDoctorTreatmentTemplates(req.auth.workspace.id, req.auth.user.id);
+  res.json({ data: templates });
+}));
+
+app.post('/api/treatment-templates', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(treatmentTemplateSchema, req.body, 'INVALID_TREATMENT_TEMPLATE');
+
+  const templateId = createId('treatment_template');
+  await query(
+    `
+      INSERT INTO treatment_templates (
+        id, workspace_id, doctor_user_id, name, condition_label, chief_complaint,
+        instructions, follow_up, diagnoses, medications, lab_orders
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `,
+    [
+      templateId,
+      req.auth.workspace.id,
+      req.auth.user.id,
+      payload.name,
+      payload.conditionLabel,
+      payload.chiefComplaint,
+      payload.instructions,
+      payload.followUp,
+      payload.diagnoses,
+      payload.medications,
+      payload.labOrders,
+    ]
+  );
+
+  const templates = await getDoctorTreatmentTemplates(req.auth.workspace.id, req.auth.user.id);
+  res.status(201).json({ data: templates.find(item => item.id === templateId) });
+}));
+
+app.put('/api/treatment-templates/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(treatmentTemplateSchema, req.body, 'INVALID_TREATMENT_TEMPLATE');
+  const templateId = String(req.params.id ?? '').trim();
+
+  const result = await query(
+    `
+      UPDATE treatment_templates
+      SET
+        name = $3,
+        condition_label = $4,
+        chief_complaint = $5,
+        instructions = $6,
+        follow_up = $7,
+        diagnoses = $8,
+        medications = $9,
+        lab_orders = $10,
+        updated_at = NOW()
+      WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $11
+      RETURNING id, name, condition_label, chief_complaint, instructions, follow_up, diagnoses, medications, lab_orders, created_at, updated_at
+    `,
+    [
+      templateId,
+      req.auth.workspace.id,
+      payload.name,
+      payload.conditionLabel,
+      payload.chiefComplaint,
+      payload.instructions,
+      payload.followUp,
+      payload.diagnoses,
+      payload.medications,
+      payload.labOrders,
+      req.auth.user.id,
+    ]
+  );
+
+  if (result.rowCount === 0) {
+    res.status(404).json({ error: 'Treatment template not found', code: 'TREATMENT_TEMPLATE_NOT_FOUND' });
+    return;
+  }
+
+  res.json({ data: mapTreatmentTemplate(result.rows[0]) });
+}));
+
+app.delete('/api/treatment-templates/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const result = await query(
+    `
+      DELETE FROM treatment_templates
+      WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $3
+    `,
+    [String(req.params.id ?? '').trim(), req.auth.workspace.id, req.auth.user.id]
+  );
+
+  if (result.rowCount === 0) {
+    res.status(404).json({ error: 'Treatment template not found', code: 'TREATMENT_TEMPLATE_NOT_FOUND' });
+    return;
+  }
+
+  res.json({ ok: true });
 }));
 
 app.post('/api/auth/signup', authRateLimit, asyncHandler(async (req, res) => {

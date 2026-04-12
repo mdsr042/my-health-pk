@@ -3,9 +3,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
+import { readStorage, writeStorage } from '@/lib/storage';
+import { mergeAppSettings, SETTINGS_STORAGE_KEY, SETTINGS_UPDATED_EVENT } from '@/lib/app-defaults';
 import {
   LayoutDashboard, Users, CalendarDays, FileText, Settings, LogOut,
-  Stethoscope, ChevronDown, Bell, Search, Menu, X
+  Stethoscope, ChevronDown, Bell, Search, Menu, X, FolderOpen, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
@@ -30,6 +32,7 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
   const { tabs, activeTabId, setActiveTab, closeTab } = usePatientTabs();
   const { patients } = useData();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => mergeAppSettings(readStorage(SETTINGS_STORAGE_KEY, {})).sidebarCollapsed);
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -49,24 +52,54 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
     setSearchOpen(false);
   };
 
+  const persistSidebarCollapsed = (nextCollapsed: boolean) => {
+    const nextSettings = mergeAppSettings({
+      ...readStorage(SETTINGS_STORAGE_KEY, {}),
+      sidebarCollapsed: nextCollapsed,
+    });
+    writeStorage(SETTINGS_STORAGE_KEY, nextSettings);
+    window.dispatchEvent(new Event(SETTINGS_UPDATED_EVENT));
+    setSidebarCollapsed(nextCollapsed);
+  };
+
+  React.useEffect(() => {
+    const handleSettingsUpdate = () => {
+      const nextSettings = mergeAppSettings(readStorage(SETTINGS_STORAGE_KEY, {}));
+      setSidebarCollapsed(nextSettings.sidebarCollapsed);
+    };
+
+    window.addEventListener(SETTINGS_UPDATED_EVENT, handleSettingsUpdate);
+    return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, handleSettingsUpdate);
+  }, []);
+
   return (
     <div className="min-h-screen bg-background flex">
       {/* Sidebar */}
       <aside className={`
-        fixed inset-y-0 left-0 z-40 w-64 bg-sidebar flex flex-col transition-transform lg:translate-x-0
+        fixed inset-y-0 left-0 z-40 w-64 bg-sidebar flex flex-col transition-[transform,width] duration-200 lg:translate-x-0
+        ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'}
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
-        <div className="p-5 flex items-center gap-3">
+        <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center px-2 py-5 lg:px-0' : 'p-5'}`}>
           <div className="w-9 h-9 rounded-lg bg-sidebar-primary/20 flex items-center justify-center">
             <Stethoscope className="w-5 h-5 text-sidebar-primary" />
           </div>
-          <span className="text-lg font-bold text-sidebar-foreground tracking-tight">My Health</span>
+          {!sidebarCollapsed && <span className="text-lg font-bold text-sidebar-foreground tracking-tight">My Health</span>}
+          <button
+            type="button"
+            className={`hidden lg:inline-flex ml-auto rounded-md p-1.5 text-sidebar-foreground hover:bg-sidebar-accent/60 ${sidebarCollapsed ? 'lg:ml-0' : ''}`}
+            onClick={() => persistSidebarCollapsed(!sidebarCollapsed)}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          </button>
           <button className="lg:hidden ml-auto text-sidebar-foreground" onClick={() => setSidebarOpen(false)}>
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <nav className="flex-1 px-3 py-2 space-y-1">
+        <nav className={`flex-1 py-2 space-y-1 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
           {navItems.map(item => {
             const Icon = item.icon;
             const active = currentPage === item.id;
@@ -74,14 +107,16 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
               <button
                 key={item.id}
                 onClick={() => { onNavigate(item.id); setSidebarOpen(false); }}
+                aria-label={item.label}
+                title={sidebarCollapsed ? item.label : undefined}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   active
                     ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                     : 'text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent/50'
-                }`}
+                } ${sidebarCollapsed ? 'lg:justify-center lg:px-2' : ''}`}
               >
                 <Icon className="w-4.5 h-4.5" />
-                {item.label}
+                {!sidebarCollapsed && item.label}
               </button>
             );
           })}
@@ -90,15 +125,17 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
           {tabs.length > 0 && (
             <button
               onClick={() => { onNavigate('workspace'); setSidebarOpen(false); }}
+              aria-label="Workspace"
+              title={sidebarCollapsed ? 'Workspace' : undefined}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 currentPage === 'workspace'
                   ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                   : 'text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent/50'
-              }`}
+              } ${sidebarCollapsed ? 'lg:justify-center lg:px-2' : ''}`}
             >
-              <FileText className="w-4.5 h-4.5" />
-              Workspace
-              <span className="ml-auto bg-sidebar-primary/30 text-sidebar-primary text-xs px-1.5 py-0.5 rounded-full">
+              <FolderOpen className="w-4.5 h-4.5" />
+              {!sidebarCollapsed && 'Workspace'}
+              <span className={`bg-sidebar-primary/30 text-sidebar-primary text-xs px-1.5 py-0.5 rounded-full ${sidebarCollapsed ? 'lg:hidden' : 'ml-auto'}`}>
                 {tabs.length}
               </span>
             </button>
@@ -106,15 +143,17 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
         </nav>
 
         {/* Doctor info */}
-        <div className="p-4 border-t border-sidebar-border">
-          <div className="flex items-center gap-3">
+        <div className={`border-t border-sidebar-border ${sidebarCollapsed ? 'p-3' : 'p-4'}`}>
+          <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center' : ''}`}>
             <div className="w-9 h-9 rounded-full bg-sidebar-primary/20 flex items-center justify-center text-sm font-semibold text-sidebar-primary">
               {doctor?.name.split(' ').slice(-2).map(n => n[0]).join('')}
             </div>
-            <div className="flex-1 min-w-0">
+            {!sidebarCollapsed && (
+              <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-sidebar-foreground truncate">{doctor?.name}</p>
               <p className="text-xs text-sidebar-muted truncate">{doctor?.specialization}</p>
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </aside>
@@ -123,12 +162,22 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
       {sidebarOpen && <div className="fixed inset-0 bg-foreground/20 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* Main */}
-      <div className="flex-1 lg:ml-64 flex flex-col min-h-screen">
+      <div className={`flex-1 flex flex-col min-h-screen transition-[margin] duration-200 ${sidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
         {/* Top bar */}
         <header className="sticky top-0 z-20 bg-card border-b border-border px-4 lg:px-6 h-14 flex items-center gap-3">
           <button className="lg:hidden text-foreground" onClick={() => setSidebarOpen(true)}>
             <Menu className="w-5 h-5" />
           </button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="hidden lg:inline-flex"
+            onClick={() => persistSidebarCollapsed(!sidebarCollapsed)}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          </Button>
 
           {/* Clinic switcher */}
           <DropdownMenu>

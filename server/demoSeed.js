@@ -530,6 +530,7 @@ function createDemoTemplate() {
     prescriptionLang: 'bilingual',
     theme: 'light',
     compactMode: false,
+    sidebarCollapsed: true,
     clinicOverrides: {},
     managedClinics: [],
   };

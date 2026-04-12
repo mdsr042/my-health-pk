@@ -12,8 +12,8 @@ import { toast } from 'sonner';
 import {
   Stethoscope, Pill, FlaskConical, Scan, FileText, Plus,
   Save, Pause, CheckCircle2, Printer, Heart, Thermometer,
-  Activity, Wind, Scale, Ruler, Clock, ArrowRightLeft, UserPlus,
-  Building2, CalendarPlus
+  Activity, Wind, Scale, Ruler, ArrowRightLeft,
+  Building2, CalendarPlus, ChevronRight, LayoutTemplate
 } from 'lucide-react';
 import DiagnosisModal from '@/components/consultation/DiagnosisModal';
 import MedicationModal from '@/components/consultation/MedicationModal';
@@ -23,9 +23,10 @@ import AppointmentBookingDialog from '@/components/appointments/AppointmentBooki
 import PrescriptionPreview from '@/components/consultation/PrescriptionPreview';
 import NotesTimeline from '@/components/consultation/NotesTimeline';
 import OrdersPanel from '@/components/consultation/OrdersPanel';
-import { consultationTemplates } from '@/lib/consultation-templates';
+import { fetchTreatmentTemplates } from '@/lib/api';
 import { readStorage } from '@/lib/storage';
 import { getLocalDateKey } from '@/lib/date';
+import type { TreatmentTemplate } from '@/lib/app-types';
 
 function getTomorrowDateKey() {
   const next = new Date();
@@ -115,6 +116,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [referralOpen, setReferralOpen] = useState(false);
   const [referralType, setReferralType] = useState<'referral' | 'admission' | 'followup'>('referral');
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [templates, setTemplates] = useState<TreatmentTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [lastVisitExpanded, setLastVisitExpanded] = useState(false);
 
   // Consultation form state
   const [chiefComplaint, setChiefComplaint] = useState(draft?.chiefComplaint || activeAppointment?.chiefComplaint || '');
@@ -168,7 +172,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const openReferralModal = (type: 'referral' | 'admission' | 'followup') => { setReferralType(type); setReferralOpen(true); };
   const openFollowUpBooking = () => setBookingOpen(true);
   const applyConsultationTemplate = useCallback((templateId: string) => {
-    const template = consultationTemplates.find(item => item.id === templateId);
+    const template = templates.find(item => item.id === templateId);
     if (!template) return;
 
     setChiefComplaint(prev => prev || template.chiefComplaint);
@@ -201,13 +205,14 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         .map(item => ({
           ...item,
           id: `lab-template-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          status: 'ordered',
           date: getLocalDateKey(),
         }));
       return [...prev, ...additions];
     });
     markUnsaved(patientId, true);
-    toast.success(`${template.label} template applied`);
-  }, [markUnsaved, patientId]);
+    toast.success(`${template.name} template applied`);
+  }, [markUnsaved, patientId, templates]);
 
   const reusePreviousDiagnoses = useCallback(() => {
     if (!latestPreviousNote?.diagnoses.length) {
@@ -347,6 +352,32 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   };
 
   useEffect(() => {
+    let cancelled = false;
+    const hydrateTemplates = async () => {
+      setTemplatesLoading(true);
+      try {
+        const remoteTemplates = await fetchTreatmentTemplates();
+        if (!cancelled) {
+          setTemplates(remoteTemplates);
+        }
+      } catch {
+        if (!cancelled) {
+          setTemplates([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setTemplatesLoading(false);
+        }
+      }
+    };
+
+    void hydrateTemplates();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const settings = readStorage(SETTINGS_STORAGE_KEY, { autoSave: true });
     if (!settings.autoSave) return;
 
@@ -411,6 +442,18 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     { label: 'Admission', icon: Building2, color: 'text-muted-foreground', action: () => openReferralModal('admission') },
     { label: 'Follow-up', icon: CalendarPlus, color: 'text-accent', action: openFollowUpBooking },
   ];
+  const previousDiagnosesAvailable = Boolean(latestPreviousNote?.diagnoses.length);
+  const previousMedicationsAvailable = Boolean(latestPreviousNote?.medications.length);
+  const clinicalFieldGroups = [
+    {
+      title: 'Symptoms & History',
+      fields: clinicalFieldConfigs.filter(field => ['chiefComplaint', 'hpi', 'pastHistory', 'allergies'].includes(field.key)),
+    },
+    {
+      title: 'Assessment & Plan',
+      fields: clinicalFieldConfigs.filter(field => ['examination', 'assessment', 'plan', 'instructions', 'followUp'].includes(field.key)),
+    },
+  ] as const;
 
   return (
     <div className="flex flex-col h-full">
@@ -444,31 +487,48 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
       {latestPreviousNote && (
         <div className="bg-card border-b border-border px-4 lg:px-6 py-3">
-          <div className="grid gap-3 rounded-xl border border-border bg-muted/20 p-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Last Visit</p>
-              <p className="text-sm font-medium text-foreground">
-                {new Date(latestPreviousNote.date).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' })}
-              </p>
-              <p className="text-xs text-muted-foreground">{latestPreviousNote.chiefComplaint || 'No chief complaint recorded'}</p>
+          <div className="rounded-xl border border-border bg-muted/20 p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Last Visit</p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-sm font-medium text-foreground">
+                    {new Date(latestPreviousNote.date).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' })}
+                  </p>
+                  <span className="text-xs text-muted-foreground">{latestPreviousNote.chiefComplaint || 'No chief complaint recorded'}</span>
+                  <span className="text-xs text-muted-foreground">{latestPreviousNote.diagnoses.length} diagnoses</span>
+                  <span className="text-xs text-muted-foreground">{latestPreviousNote.medications.length} medicines</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="h-8" onClick={reusePreviousDiagnoses} disabled={!previousDiagnosesAvailable}>
+                  Reuse Diagnoses
+                </Button>
+                <Button variant="outline" size="sm" className="h-8" onClick={reusePreviousMedications} disabled={!previousMedicationsAvailable}>
+                  Reuse Medications
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setLastVisitExpanded(current => !current)}>
+                  <ChevronRight className={`w-4 h-4 transition-transform ${lastVisitExpanded ? 'rotate-90' : ''}`} />
+                  {lastVisitExpanded ? 'Hide Details' : 'View Details'}
+                </Button>
+              </div>
             </div>
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Diagnoses</p>
-              <p className="text-sm text-foreground">{latestPreviousNote.diagnoses.slice(0, 2).map(dx => dx.name).join(', ') || '-'}</p>
-            </div>
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Medications</p>
-              <p className="text-sm text-foreground">{latestPreviousNote.medications.slice(0, 2).map(med => med.name).join(', ') || '-'}</p>
-              <p className="text-xs text-muted-foreground">{latestPreviousNote.followUp || 'No follow-up advice saved'}</p>
-            </div>
-            <div className="flex flex-wrap gap-2 lg:justify-end">
-              <Button variant="outline" size="sm" className="h-8" onClick={reusePreviousDiagnoses}>
-                Reuse Diagnoses
-              </Button>
-              <Button variant="outline" size="sm" className="h-8" onClick={reusePreviousMedications}>
-                Reuse Medications
-              </Button>
-            </div>
+            {lastVisitExpanded && (
+              <div className="mt-3 grid gap-3 border-t border-border/70 pt-3 lg:grid-cols-[1fr_1fr_1fr]">
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Diagnoses</p>
+                  <p className="text-sm text-foreground">{latestPreviousNote.diagnoses.slice(0, 3).map(dx => dx.name).join(', ') || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Medications</p>
+                  <p className="text-sm text-foreground">{latestPreviousNote.medications.slice(0, 3).map(med => med.name).join(', ') || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Follow-up</p>
+                  <p className="text-sm text-foreground">{latestPreviousNote.followUp || 'No follow-up advice saved'}</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -551,24 +611,32 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="font-semibold text-foreground">Treatment Templates</h3>
-                      <p className="text-xs text-muted-foreground">Use common editable starter sets for frequent OPD conditions.</p>
+                      <h3 className="font-semibold text-foreground flex items-center gap-2">
+                        <LayoutTemplate className="w-4 h-4 text-primary" /> Treatment Templates
+                      </h3>
+                      <p className="text-xs text-muted-foreground">Use your saved editable starter sets for frequent OPD conditions.</p>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {consultationTemplates.map(template => (
-                      <Button
-                        key={template.id}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8"
-                        onClick={() => applyConsultationTemplate(template.id)}
-                      >
-                        {template.label}
-                      </Button>
-                    ))}
-                  </div>
+                  {templatesLoading ? (
+                    <p className="text-sm text-muted-foreground">Loading treatment templates...</p>
+                  ) : templates.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No templates saved yet. Create them in Settings and they will appear here.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {templates.map(template => (
+                        <Button
+                          key={template.id}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          onClick={() => applyConsultationTemplate(template.id)}
+                        >
+                          {template.name}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -655,55 +723,64 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 </Card>
               </div>
 
-              {/* Clinical form */}
-              {clinicalFieldConfigs.map(field => {
-                const fieldState = {
-                  chiefComplaint: { value: chiefComplaint, setter: setChiefComplaint },
-                  hpi: { value: hpi, setter: setHpi },
-                  pastHistory: { value: pastHistory, setter: setPastHistory },
-                  allergies: { value: allergies, setter: setAllergies },
-                  examination: { value: examination, setter: setExamination },
-                  assessment: { value: assessment, setter: setAssessment },
-                  plan: { value: plan, setter: setPlan },
-                  instructions: { value: instructions, setter: setInstructions },
-                  followUp: { value: followUp, setter: setFollowUp },
-                }[field.key];
+              <div className="grid gap-4 xl:grid-cols-2">
+                {clinicalFieldGroups.map(group => (
+                  <Card key={group.title} className="border-0 shadow-sm">
+                    <CardContent className="p-4 space-y-4">
+                      <h3 className="font-semibold text-foreground">{group.title}</h3>
+                      {group.fields.map(field => {
+                        const fieldState = {
+                          chiefComplaint: { value: chiefComplaint, setter: setChiefComplaint },
+                          hpi: { value: hpi, setter: setHpi },
+                          pastHistory: { value: pastHistory, setter: setPastHistory },
+                          allergies: { value: allergies, setter: setAllergies },
+                          examination: { value: examination, setter: setExamination },
+                          assessment: { value: assessment, setter: setAssessment },
+                          plan: { value: plan, setter: setPlan },
+                          instructions: { value: instructions, setter: setInstructions },
+                          followUp: { value: followUp, setter: setFollowUp },
+                        }[field.key];
 
-                return (
-                <div key={field.label} className="space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <label className="text-sm font-medium text-foreground">{field.label}</label>
-                    <span className="text-[11px] text-muted-foreground">Tap a quick note to insert</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {field.suggestions.map(suggestion => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        onClick={() => appendSnippet(fieldState.setter, fieldState.value, suggestion)}
-                        className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
-                  <Textarea
-                    value={fieldState.value}
-                    onChange={e => handleFieldChange(fieldState.setter)(e.target.value)}
-                    onInput={e => {
-                      const target = e.currentTarget;
-                      target.style.height = 'auto';
-                      target.style.height = `${Math.max(target.scrollHeight, 56)}px`;
-                    }}
-                    placeholder={`Enter ${field.label.toLowerCase()}...`}
-                    rows={field.rows}
-                    className="min-h-[56px] resize-none"
-                  />
-                </div>
-              )})}
+                        return (
+                          <div key={field.label} className="space-y-1.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <label className="text-sm font-medium text-foreground">{field.label}</label>
+                              <span className="text-[11px] text-muted-foreground">Tap a quick note to insert</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {field.suggestions.map(suggestion => (
+                                <button
+                                  key={suggestion}
+                                  type="button"
+                                  onClick={() => appendSnippet(fieldState.setter, fieldState.value, suggestion)}
+                                  className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                >
+                                  {suggestion}
+                                </button>
+                              ))}
+                            </div>
+                            <Textarea
+                              value={fieldState.value}
+                              onChange={e => handleFieldChange(fieldState.setter)(e.target.value)}
+                              onInput={e => {
+                                const target = e.currentTarget;
+                                target.style.height = 'auto';
+                                target.style.height = `${Math.max(target.scrollHeight, 56)}px`;
+                              }}
+                              placeholder={`Enter ${field.label.toLowerCase()}...`}
+                              rows={field.rows}
+                              className="min-h-[56px] resize-none"
+                            />
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
 
-              {/* Diagnoses */}
-              <div>
+              <Card className="border-0 shadow-sm">
+                <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-medium text-foreground">Diagnoses</h3>
                   <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDiagnosisOpen(true)}>
@@ -726,7 +803,8 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                     ))}
                   </div>
                 )}
-              </div>
+                </CardContent>
+              </Card>
 
               </div>
             )}

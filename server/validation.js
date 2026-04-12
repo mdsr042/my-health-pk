@@ -83,6 +83,46 @@ export const passwordResetSchema = z.object({
   newPassword: z.string().min(1, 'New password is required'),
 });
 
+const templateDiagnosisSchema = z.object({
+  code: z.string().trim().max(50).default(''),
+  name: trimmedString('Diagnosis name'),
+  isPrimary: z.boolean().default(false),
+});
+
+const templateMedicationSchema = z.object({
+  name: trimmedString('Medication name'),
+  nameUrdu: z.string().trim().max(255).default(''),
+  generic: z.string().trim().max(255).default(''),
+  strength: z.string().trim().max(120).default(''),
+  form: z.string().trim().max(120).default(''),
+  route: z.string().trim().max(120).default(''),
+  languageMode: z.enum(['en', 'ur', 'bilingual']).default('bilingual'),
+  dosePattern: z.string().trim().max(120).default(''),
+  frequency: z.string().trim().max(255).default(''),
+  frequencyUrdu: z.string().trim().max(255).default(''),
+  duration: z.string().trim().max(120).default(''),
+  durationUrdu: z.string().trim().max(120).default(''),
+  instructions: z.string().trim().max(500).default(''),
+  instructionsUrdu: z.string().trim().max(500).default(''),
+});
+
+const templateLabOrderSchema = z.object({
+  testName: trimmedString('Investigation name'),
+  category: trimmedString('Category', 120),
+  priority: z.enum(['routine', 'urgent', 'stat']).default('routine'),
+});
+
+export const treatmentTemplateSchema = z.object({
+  name: trimmedString('Template name'),
+  conditionLabel: z.string().trim().max(255).default(''),
+  chiefComplaint: z.string().trim().max(500).default(''),
+  instructions: z.string().trim().max(1000).default(''),
+  followUp: z.string().trim().max(500).default(''),
+  diagnoses: z.array(templateDiagnosisSchema).max(25).default([]),
+  medications: z.array(templateMedicationSchema).max(25).default([]),
+  labOrders: z.array(templateLabOrderSchema).max(25).default([]),
+});
+
 export function parseOrThrow(schema, value, code = 'INVALID_REQUEST') {
   const result = schema.safeParse(value);
   if (!result.success) {

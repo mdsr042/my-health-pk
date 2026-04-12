@@ -142,6 +142,22 @@ async function createBaseSchema(client) {
       UNIQUE (doctor_user_id, medication_key)
     );
 
+    CREATE TABLE IF NOT EXISTS treatment_templates (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      condition_label TEXT NOT NULL DEFAULT '',
+      chief_complaint TEXT NOT NULL DEFAULT '',
+      instructions TEXT NOT NULL DEFAULT '',
+      follow_up TEXT NOT NULL DEFAULT '',
+      diagnoses JSONB NOT NULL DEFAULT '[]'::jsonb,
+      medications JSONB NOT NULL DEFAULT '[]'::jsonb,
+      lab_orders JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS clinics (
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -800,6 +816,30 @@ async function runSchemaMigrations(client) {
     await ensureAuditColumns(client, 'medication_preferences');
     await ensureUniqueConstraint(client, 'medication_preferences', 'medication_preferences_doctor_user_id_medication_key_key', '(doctor_user_id, medication_key)');
     await ensureIndex(client, 'idx_medication_preferences_doctor_updated', 'medication_preferences', '(doctor_user_id, updated_at DESC)');
+  });
+
+  await runMigration(client, '008_treatment_templates', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS treatment_templates (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        condition_label TEXT NOT NULL DEFAULT '',
+        chief_complaint TEXT NOT NULL DEFAULT '',
+        instructions TEXT NOT NULL DEFAULT '',
+        follow_up TEXT NOT NULL DEFAULT '',
+        diagnoses JSONB NOT NULL DEFAULT '[]'::jsonb,
+        medications JSONB NOT NULL DEFAULT '[]'::jsonb,
+        lab_orders JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await ensureAuditColumns(client, 'treatment_templates');
+    await ensureIndex(client, 'idx_treatment_templates_doctor_updated', 'treatment_templates', '(doctor_user_id, updated_at DESC)');
+    await ensureIndex(client, 'idx_treatment_templates_workspace_doctor', 'treatment_templates', '(workspace_id, doctor_user_id)');
   });
 }
 

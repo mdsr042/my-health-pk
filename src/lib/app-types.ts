@@ -55,6 +55,7 @@ export interface AppSettings {
   prescriptionLang: string;
   theme: string;
   compactMode: boolean;
+  sidebarCollapsed: boolean;
   clinicOverrides: Record<Clinic['id'], ClinicOverride>;
   managedClinics: Clinic[];
 }
@@ -216,6 +217,60 @@ export interface MedicationPreference {
   createdAt: string;
   updatedAt: string;
   payload: Record<string, unknown>;
+}
+
+export interface TreatmentTemplateDiagnosis {
+  code: string;
+  name: string;
+  isPrimary: boolean;
+}
+
+export interface TreatmentTemplateMedication {
+  name: string;
+  nameUrdu: string;
+  generic: string;
+  strength: string;
+  form: string;
+  route: string;
+  languageMode: 'en' | 'ur' | 'bilingual';
+  dosePattern: string;
+  frequency: string;
+  frequencyUrdu: string;
+  duration: string;
+  durationUrdu: string;
+  instructions: string;
+  instructionsUrdu: string;
+}
+
+export interface TreatmentTemplateLabOrder {
+  testName: string;
+  category: string;
+  priority: 'routine' | 'urgent' | 'stat';
+}
+
+export interface TreatmentTemplate {
+  id: string;
+  name: string;
+  conditionLabel: string;
+  chiefComplaint: string;
+  instructions: string;
+  followUp: string;
+  diagnoses: TreatmentTemplateDiagnosis[];
+  medications: TreatmentTemplateMedication[];
+  labOrders: TreatmentTemplateLabOrder[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TreatmentTemplatePayload {
+  name: string;
+  conditionLabel: string;
+  chiefComplaint: string;
+  instructions: string;
+  followUp: string;
+  diagnoses: TreatmentTemplateDiagnosis[];
+  medications: TreatmentTemplateMedication[];
+  labOrders: TreatmentTemplateLabOrder[];
 }
 
 export interface WalkInResult {

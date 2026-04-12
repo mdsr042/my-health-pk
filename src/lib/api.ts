@@ -12,6 +12,8 @@ import type {
   MedicationPreference,
   SessionPayload,
   SignupPayload,
+  TreatmentTemplate,
+  TreatmentTemplatePayload,
   WalkInPayload,
   WalkInResult,
 } from '@/lib/app-types';
@@ -305,6 +307,40 @@ export async function saveMedicationPreference(payload: {
     body: JSON.stringify(payload),
   });
   return result.data;
+}
+
+export async function fetchTreatmentTemplates() {
+  const result = await request<{ data: TreatmentTemplate[] }>('/treatment-templates');
+  return result.data;
+}
+
+export async function createTreatmentTemplate(payload: TreatmentTemplatePayload) {
+  const result = await request<{ data: TreatmentTemplate }>('/treatment-templates', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function importStarterTreatmentTemplates() {
+  const result = await request<{ data: TreatmentTemplate[] }>('/treatment-templates/import-starters', {
+    method: 'POST',
+  });
+  return result.data;
+}
+
+export async function updateTreatmentTemplate(templateId: string, payload: TreatmentTemplatePayload) {
+  const result = await request<{ data: TreatmentTemplate }>(`/treatment-templates/${templateId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function deleteTreatmentTemplate(templateId: string) {
+  await request<{ ok: true }>(`/treatment-templates/${templateId}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function approveDoctor(approvalRequestId: string) {
