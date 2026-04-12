@@ -20,7 +20,6 @@ export default function SettingsPage() {
   const [soundAlerts, setSoundAlerts] = useState(saved.soundAlerts);
   const [autoSave, setAutoSave] = useState(saved.autoSave);
   const [language, setLanguage] = useState(saved.language);
-  const [prescriptionLang, setPrescriptionLang] = useState(saved.prescriptionLang);
   const [theme, setTheme] = useState(saved.theme);
   const [compactMode, setCompactMode] = useState(saved.compactMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(saved.sidebarCollapsed);
@@ -49,7 +48,6 @@ export default function SettingsPage() {
         setSoundAlerts(mergedRemoteSettings.soundAlerts);
         setAutoSave(mergedRemoteSettings.autoSave);
         setLanguage(mergedRemoteSettings.language);
-        setPrescriptionLang(mergedRemoteSettings.prescriptionLang);
         setTheme(mergedRemoteSettings.theme);
         setCompactMode(mergedRemoteSettings.compactMode);
         setSidebarCollapsed(mergedRemoteSettings.sidebarCollapsed);
@@ -91,7 +89,6 @@ export default function SettingsPage() {
       soundAlerts,
       autoSave,
       language,
-      prescriptionLang,
       theme,
       compactMode,
       sidebarCollapsed,
@@ -261,16 +258,8 @@ export default function SettingsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-sm">Prescription Language</Label>
-              <Select value={prescriptionLang} onValueChange={setPrescriptionLang}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="en">English Only</SelectItem>
-                  <SelectItem value="ur">Urdu Only</SelectItem>
-                  <SelectItem value="bilingual">Bilingual (English + Urdu)</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="rounded-lg border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+              Prescription language is now selected while prescribing each medicine, so doctors can choose based on the patient’s understanding and education level.
             </div>
           </div>
         </CardContent>
