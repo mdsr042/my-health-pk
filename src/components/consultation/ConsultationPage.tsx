@@ -23,10 +23,11 @@ import AppointmentBookingDialog from '@/components/appointments/AppointmentBooki
 import PrescriptionPreview from '@/components/consultation/PrescriptionPreview';
 import NotesTimeline from '@/components/consultation/NotesTimeline';
 import OrdersPanel from '@/components/consultation/OrdersPanel';
-import { fetchTreatmentTemplates } from '@/lib/api';
+import TreatmentTemplateDialog from '@/components/settings/TreatmentTemplateDialog';
+import { createTreatmentTemplate, fetchTreatmentTemplates } from '@/lib/api';
 import { readStorage } from '@/lib/storage';
 import { getLocalDateKey } from '@/lib/date';
-import type { TreatmentTemplate } from '@/lib/app-types';
+import type { TreatmentTemplate, TreatmentTemplatePayload } from '@/lib/app-types';
 
 function getTomorrowDateKey() {
   const next = new Date();
@@ -119,6 +120,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [templates, setTemplates] = useState<TreatmentTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [lastVisitExpanded, setLastVisitExpanded] = useState(false);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
 
   // Consultation form state
   const [chiefComplaint, setChiefComplaint] = useState(draft?.chiefComplaint || activeAppointment?.chiefComplaint || '');
@@ -349,6 +351,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
     toast.success('Next appointment booked', { description: `${patient.name} follow-up scheduled` });
     setBookingOpen(false);
+  };
+
+  const handleCreateTemplate = async (payload: TreatmentTemplatePayload) => {
+    const createdTemplate = await createTreatmentTemplate(payload);
+    setTemplates(current => [createdTemplate, ...current]);
+    toast.success('Treatment template created');
   };
 
   useEffect(() => {
@@ -616,6 +624,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                       </h3>
                       <p className="text-xs text-muted-foreground">Use your saved editable starter sets for frequent OPD conditions.</p>
                     </div>
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setTemplateDialogOpen(true)}>
+                      <Plus className="w-3.5 h-3.5" /> Add Template
+                    </Button>
                   </div>
                   {templatesLoading ? (
                     <p className="text-sm text-muted-foreground">Loading treatment templates...</p>
@@ -902,6 +913,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         defaultDate={getTomorrowDateKey()}
         defaultType="follow-up"
         onSubmit={handleBookNextAppointment}
+      />
+      <TreatmentTemplateDialog
+        open={templateDialogOpen}
+        onOpenChange={setTemplateDialogOpen}
+        template={null}
+        onSave={handleCreateTemplate}
       />
     </div>
   );

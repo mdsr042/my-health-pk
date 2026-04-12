@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Plus, Trash2, Pill } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,11 +7,12 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import MedicationModal from '@/components/consultation/MedicationModal';
+import type { Medication } from '@/data/mockData';
 import type {
   TreatmentTemplate,
   TreatmentTemplateDiagnosis,
   TreatmentTemplateLabOrder,
-  TreatmentTemplateMedication,
   TreatmentTemplatePayload,
 } from '@/lib/app-types';
 
@@ -23,22 +24,6 @@ interface TreatmentTemplateDialogProps {
 }
 
 const blankDiagnosis = (): TreatmentTemplateDiagnosis => ({ code: '', name: '', isPrimary: false });
-const blankMedication = (): TreatmentTemplateMedication => ({
-  name: '',
-  nameUrdu: '',
-  generic: '',
-  strength: '',
-  form: 'Tablet',
-  route: 'Oral',
-  languageMode: 'bilingual',
-  dosePattern: '',
-  frequency: '',
-  frequencyUrdu: '',
-  duration: '',
-  durationUrdu: '',
-  instructions: '',
-  instructionsUrdu: '',
-});
 const blankLabOrder = (): TreatmentTemplateLabOrder => ({ testName: '', category: '', priority: 'routine' });
 
 const initialForm = (): TreatmentTemplatePayload => ({
@@ -54,12 +39,15 @@ const initialForm = (): TreatmentTemplatePayload => ({
 
 export default function TreatmentTemplateDialog({ open, onOpenChange, onSave, template }: TreatmentTemplateDialogProps) {
   const [form, setForm] = useState<TreatmentTemplatePayload>(initialForm());
+  const [templateMedications, setTemplateMedications] = useState<Medication[]>([]);
+  const [medicationModalOpen, setMedicationModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     if (!template) {
       setForm(initialForm());
+      setTemplateMedications([]);
       return;
     }
 
@@ -70,10 +58,21 @@ export default function TreatmentTemplateDialog({ open, onOpenChange, onSave, te
       instructions: template.instructions,
       followUp: template.followUp,
       diagnoses: template.diagnoses,
-      medications: template.medications,
+      medications: [],
       labOrders: template.labOrders,
     });
+    setTemplateMedications(
+      template.medications.map((medication, index) => ({
+        id: `tpl-med-${template.id}-${index}`,
+        ...medication,
+      }))
+    );
   }, [open, template]);
+
+  const normalizedTemplateMedications = useMemo(
+    () => templateMedications.map(({ id: _id, ...medication }) => medication),
+    [templateMedications]
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -86,7 +85,7 @@ export default function TreatmentTemplateDialog({ open, onOpenChange, onSave, te
         instructions: form.instructions.trim(),
         followUp: form.followUp.trim(),
         diagnoses: form.diagnoses.filter(item => item.name.trim()),
-        medications: form.medications.filter(item => item.name.trim()),
+        medications: normalizedTemplateMedications.filter(item => item.name.trim()),
         labOrders: form.labOrders.filter(item => item.testName.trim()),
       });
       onOpenChange(false);
@@ -195,54 +194,37 @@ export default function TreatmentTemplateDialog({ open, onOpenChange, onSave, te
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="font-medium text-foreground">Medications</h3>
-                <p className="text-xs text-muted-foreground">Save full dose and instruction defaults as part of the template.</p>
+                <p className="text-xs text-muted-foreground">Use the same prescribing flow here so template medicines behave exactly like prescription medicines.</p>
               </div>
-              <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setForm(current => ({ ...current, medications: [...current.medications, blankMedication()] }))}>
+              <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setMedicationModalOpen(true)}>
                 <Plus className="w-3.5 h-3.5" /> Add Medication
               </Button>
             </div>
             <div className="space-y-3">
-              {form.medications.length === 0 ? (
+              {templateMedications.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No medications added yet.</p>
-              ) : form.medications.map((medication, index) => (
-                <div key={`medication-${index}`} className="space-y-3 rounded-lg border border-border/60 p-3">
-                  <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-                    <Input value={medication.name} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) }))} placeholder="Medicine name" />
-                    <Input value={medication.generic} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, generic: event.target.value } : item) }))} placeholder="Generic" />
-                    <Input value={medication.strength} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, strength: event.target.value } : item) }))} placeholder="Strength" />
-                    <Input value={medication.nameUrdu} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, nameUrdu: event.target.value } : item) }))} placeholder="Medicine name (Urdu)" />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-                    <Input value={medication.form} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, form: event.target.value } : item) }))} placeholder="Form" />
-                    <Input value={medication.route} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, route: event.target.value } : item) }))} placeholder="Route" />
-                    <Input value={medication.dosePattern} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, dosePattern: event.target.value } : item) }))} placeholder="Dose pattern" />
-                    <Select value={medication.languageMode} onValueChange={value => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, languageMode: value as TreatmentTemplateMedication['languageMode'] } : item) }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="en">English Only</SelectItem>
-                        <SelectItem value="ur">Urdu Only</SelectItem>
-                        <SelectItem value="bilingual">Bilingual</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-                    <Input value={medication.frequency} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, frequency: event.target.value } : item) }))} placeholder="Frequency (English)" />
-                    <Input value={medication.frequencyUrdu} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, frequencyUrdu: event.target.value } : item) }))} placeholder="Frequency (Urdu)" />
-                    <Input value={medication.duration} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, duration: event.target.value } : item) }))} placeholder="Duration" />
-                    <Input value={medication.durationUrdu} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, durationUrdu: event.target.value } : item) }))} placeholder="Duration (Urdu)" />
-                  </div>
-                  <div className="grid gap-3 lg:grid-cols-[1fr_1fr_44px]">
-                    <Textarea value={medication.instructions} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, instructions: event.target.value } : item) }))} rows={2} placeholder="Instructions (English)" />
-                    <Textarea value={medication.instructionsUrdu} onChange={event => setForm(current => ({ ...current, medications: current.medications.map((item, itemIndex) => itemIndex === index ? { ...item, instructionsUrdu: event.target.value } : item) }))} rows={2} placeholder="Instructions (Urdu)" />
+              ) : templateMedications.map(medication => (
+                <div key={medication.id} className="rounded-lg border border-border/60 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <Pill className="w-4 h-4 text-success shrink-0" />
+                        <p className="font-medium text-foreground text-sm">{medication.name}</p>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {medication.form || 'Medicine'} • {medication.route || 'Route not set'} • {medication.strength || 'Strength not set'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {(medication.frequency || medication.frequencyUrdu || 'Frequency not set')} • {medication.duration || 'Duration not set'}
+                      </p>
+                      {medication.instructions && <p className="text-xs text-muted-foreground mt-1">{medication.instructions}</p>}
+                      {medication.instructionsUrdu && <p className="text-xs text-muted-foreground" dir="rtl">{medication.instructionsUrdu}</p>}
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
                       size="icon"
-                      className="self-start"
-                      onClick={() => setForm(current => ({
-                        ...current,
-                        medications: current.medications.filter((_, itemIndex) => itemIndex !== index),
-                      }))}
+                      onClick={() => setTemplateMedications(current => current.filter(item => item.id !== medication.id))}
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -300,6 +282,23 @@ export default function TreatmentTemplateDialog({ open, onOpenChange, onSave, te
             {saving ? 'Saving...' : template ? 'Save Changes' : 'Create Template'}
           </Button>
         </DialogFooter>
+
+        <MedicationModal
+          open={medicationModalOpen}
+          onOpenChange={setMedicationModalOpen}
+          prescribedMedications={templateMedications}
+          onAdd={medication => {
+            setTemplateMedications(current => {
+              const exists = current.some(item => item.id === medication.id);
+              return exists
+                ? current.map(item => item.id === medication.id ? medication : item)
+                : [...current, medication];
+            });
+          }}
+          onRemove={medicationId => {
+            setTemplateMedications(current => current.filter(item => item.id !== medicationId));
+          }}
+        />
       </DialogContent>
     </Dialog>
   );
