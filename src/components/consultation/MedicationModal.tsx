@@ -698,7 +698,9 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                       ) : (
                         <>
                           <p className="font-medium text-foreground">{selected.name}</p>
-                          <p className="text-xs text-muted-foreground">{selected.generic || 'Detail available on demand'} • {selected.strength} • {selected.form}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {selected.generic || 'Detail available on demand'} • {selected.strength || 'Strength not listed'} • {selected.form}
+                          </p>
                           <p className="text-xs text-muted-foreground mt-1" dir="rtl">{selected.nameUrdu}</p>
                           {selected.id.startsWith('cat-') && (
                             <div className="mt-2 space-y-1">
@@ -732,90 +734,120 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Route</Label>
-                        <Input value={selected.route} readOnly className="h-8 text-sm bg-muted/30" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Prescription Language</Label>
-                        <Select value={languageMode} onValueChange={value => setLanguageMode(value as 'en' | 'ur' | 'bilingual')}>
-                          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {prescriptionLanguageOptions.map(option => (
-                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <p className="text-[11px] text-muted-foreground">Choose this per patient based on what they can read and understand.</p>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Dose Pattern</Label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {dosePatternSnippets.map(snippet => (
-                            <button
-                              key={snippet}
-                              type="button"
-                              onClick={() => handleDosePatternChange(snippet)}
-                              className="rounded-full border border-primary/25 bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/45 hover:bg-muted hover:text-foreground"
-                            >
-                              {snippet}
-                            </button>
-                          ))}
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-border/70 p-3 space-y-3">
+                        <div>
+                          <h4 className="text-sm font-medium text-foreground">Core Setup</h4>
+                          <p className="text-[11px] text-muted-foreground">Fill the essential prescription details first.</p>
                         </div>
-                        <Input
-                          value={dosePattern}
-                          onChange={e => handleDosePatternChange(e.target.value)}
-                          placeholder="1 / 1+1 / 1+0+1 / SOS / HS"
-                          className="h-8 text-sm"
-                        />
-                        <p className="text-[11px] text-muted-foreground">Examples: 1, 1+1, 1+0+1, 1+1+1, SOS, HS</p>
-                        {patternError && <p className="text-[11px] text-destructive">{patternError}</p>}
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Frequency</Label>
-                        <Input value={customFrequency} readOnly className="h-8 text-sm bg-muted/30" placeholder="Derived from dose pattern" />
-                      </div>
-                      {languageMode !== 'en' && (
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">Frequency (Urdu)</Label>
-                          <Input value={customFrequencyUrdu} onChange={e => setCustomFrequencyUrdu(e.target.value)} dir="rtl" className="h-8 text-sm" />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Strength / Dose</Label>
+                            <Input
+                              value={selected.strength}
+                              onChange={e => setSelected(current => current ? { ...current, strength: e.target.value } : current)}
+                              placeholder="500mg / 5ml / 1 ampule"
+                              className="h-8 text-sm"
+                            />
+                            {!selected.strength && !isCustomMedication && (
+                              <p className="text-[11px] text-muted-foreground">This medicine has no listed strength. Add the exact strength manually.</p>
+                            )}
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Route</Label>
+                            <Input value={selected.route} readOnly className="h-8 text-sm bg-muted/30" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Prescription Language</Label>
+                            <Select value={languageMode} onValueChange={value => setLanguageMode(value as 'en' | 'ur' | 'bilingual')}>
+                              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {prescriptionLanguageOptions.map(option => (
+                                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <p className="text-[11px] text-muted-foreground">Choose this per patient based on what they can read and understand.</p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Duration</Label>
+                            <Input value={customDuration} onChange={e => setCustomDuration(e.target.value)} className="h-8 text-sm" placeholder="5 days / 2 weeks" />
+                          </div>
                         </div>
-                      )}
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Duration</Label>
-                        <Input value={customDuration} onChange={e => setCustomDuration(e.target.value)} className="h-8 text-sm" />
                       </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Start Date</Label>
-                        <Input type="date" defaultValue={new Date().toISOString().split('T')[0]} className="h-8 text-sm" />
-                      </div>
-                    </div>
 
-                    {languageMode !== 'ur' && (
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Instructions (English)</Label>
-                        <Select value={instructionPreset} onValueChange={handleInstructionPresetChange}>
-                          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select instruction" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="select">Select instruction</SelectItem>
-                            {instructionPresets.map(preset => (
-                              <SelectItem key={preset.value} value={preset.value}>{preset.en}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {instructionPreset === 'custom' && (
-                          <Textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} rows={2} className="text-sm resize-none" />
+                      <div className="rounded-lg border border-border/70 p-3 space-y-3">
+                        <div>
+                          <h4 className="text-sm font-medium text-foreground">Dose Pattern</h4>
+                          <p className="text-[11px] text-muted-foreground">Use shorthand and let frequency derive automatically.</p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <div className="flex flex-wrap gap-1.5">
+                              {dosePatternSnippets.map(snippet => (
+                                <button
+                                  key={snippet}
+                                  type="button"
+                                  onClick={() => handleDosePatternChange(snippet)}
+                                  className="rounded-full border border-primary/25 bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/45 hover:bg-muted hover:text-foreground"
+                                >
+                                  {snippet}
+                                </button>
+                              ))}
+                            </div>
+                            <Input
+                              value={dosePattern}
+                              onChange={e => handleDosePatternChange(e.target.value)}
+                              placeholder="1 / 1+1 / 1+0+1 / SOS / HS"
+                              className="h-8 text-sm"
+                            />
+                            <p className="text-[11px] text-muted-foreground">Examples: 1, 1+1, 1+0+1, 1+1+1, SOS, HS</p>
+                            {patternError && <p className="text-[11px] text-destructive">{patternError}</p>}
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Frequency</Label>
+                            <Input value={customFrequency} readOnly className="h-8 text-sm bg-muted/30" placeholder="Derived from dose pattern" />
+                          </div>
+                          {languageMode !== 'en' && (
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">Frequency (Urdu)</Label>
+                              <Input value={customFrequencyUrdu} onChange={e => setCustomFrequencyUrdu(e.target.value)} dir="rtl" className="h-8 text-sm" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-border/70 p-3 space-y-3">
+                        <div>
+                          <h4 className="text-sm font-medium text-foreground">Instructions</h4>
+                          <p className="text-[11px] text-muted-foreground">Keep this simple for the patient and editable when needed.</p>
+                        </div>
+                        {languageMode !== 'ur' && (
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Instructions (English)</Label>
+                            <Select value={instructionPreset} onValueChange={handleInstructionPresetChange}>
+                              <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select instruction" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="select">Select instruction</SelectItem>
+                                {instructionPresets.map(preset => (
+                                  <SelectItem key={preset.value} value={preset.value}>{preset.en}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {instructionPreset === 'custom' && (
+                              <Textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} rows={2} className="text-sm resize-none" />
+                            )}
+                          </div>
+                        )}
+
+                        {languageMode !== 'en' && (
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Instructions (Urdu)</Label>
+                            <Textarea value={customInstructionsUrdu} onChange={e => setCustomInstructionsUrdu(e.target.value)} dir="rtl" rows={2} className="text-sm resize-none" />
+                          </div>
                         )}
                       </div>
-                    )}
-
-                    {languageMode !== 'en' && (
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Instructions (Urdu)</Label>
-                        <Textarea value={customInstructionsUrdu} onChange={e => setCustomInstructionsUrdu(e.target.value)} dir="rtl" rows={2} className="text-sm resize-none" />
-                      </div>
-                    )}
+                    </div>
 
                     <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end">
                       <Button variant="outline" size="sm" onClick={() => setSelected(null)}>Clear</Button>
