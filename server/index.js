@@ -596,9 +596,9 @@ app.post('/api/treatment-templates', requireAuth, requireRole('doctor_owner'), a
       payload.chiefComplaint,
       payload.instructions,
       payload.followUp,
-      payload.diagnoses,
-      payload.medications,
-      payload.labOrders,
+      JSON.stringify(payload.diagnoses),
+      JSON.stringify(payload.medications),
+      JSON.stringify(payload.labOrders),
     ]
   );
 
@@ -634,9 +634,9 @@ app.put('/api/treatment-templates/:id', requireAuth, requireRole('doctor_owner')
       payload.chiefComplaint,
       payload.instructions,
       payload.followUp,
-      payload.diagnoses,
-      payload.medications,
-      payload.labOrders,
+      JSON.stringify(payload.diagnoses),
+      JSON.stringify(payload.medications),
+      JSON.stringify(payload.labOrders),
       req.auth.user.id,
     ]
   );
