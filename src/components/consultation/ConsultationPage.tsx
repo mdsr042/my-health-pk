@@ -623,21 +623,21 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
               <Card className="border-0 shadow-sm">
                 <CardContent className="p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="font-semibold text-foreground flex items-center gap-2">
                         <LayoutTemplate className="w-4 h-4 text-primary" /> Treatment Templates
                       </h3>
                       <p className="text-xs text-muted-foreground">Use your saved editable starter sets for frequent OPD conditions.</p>
                     </div>
-                    <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setTemplateDialogOpen(true)}>
-                      <Plus className="w-3.5 h-3.5" /> Add Template
-                    </Button>
-                  </div>
-                  <div className="flex justify-end">
-                    <Button variant="outline" size="sm" className="h-8" onClick={handleManageTemplates}>
-                      Manage Templates
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setTemplateDialogOpen(true)}>
+                        <Plus className="w-3.5 h-3.5" /> Add Template
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-8" onClick={handleManageTemplates}>
+                        Manage Templates
+                      </Button>
+                    </div>
                   </div>
                   {templatesLoading ? (
                     <p className="text-sm text-muted-foreground">Loading treatment templates...</p>
