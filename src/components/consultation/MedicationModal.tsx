@@ -849,13 +849,13 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                       </div>
                     </div>
 
-                    <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end">
-                      <Button variant="outline" size="sm" onClick={() => setSelected(null)}>Clear</Button>
+                    <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap gap-2 justify-end items-stretch sm:items-center">
+                      <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => setSelected(null)}>Clear</Button>
                       {!isCustomMedication && selectedRegistrationNo ? (
                         <Button
                           variant="outline"
                           size="sm"
-                          className="gap-1.5"
+                          className="gap-1.5 w-full sm:w-auto"
                           onClick={() => void handleSaveFavorite()}
                           disabled={savingFavorite}
                         >
@@ -863,7 +863,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                           {savingFavorite ? 'Saving...' : isSelectedFavorite ? 'Update Favorite Setup' : 'Save to Favorites'}
                         </Button>
                       ) : null}
-                      <Button size="sm" className="gap-1.5" onClick={handleAdd}>
+                      <Button size="sm" className="gap-1.5 w-full sm:w-auto" onClick={handleAdd}>
                         <Plus className="w-4 h-4" />
                         {prescribedMedications.some(med => med.id === selected.id) ? 'Update Prescription' : 'Add to Prescription'}
                       </Button>
