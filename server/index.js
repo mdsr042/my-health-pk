@@ -14,7 +14,7 @@ import {
 import { initDb, query, withTransaction } from './db.js';
 import { cleanupExpiredDemoSessions, createEphemeralDemoSession } from './demoSeed.js';
 import { apiAccessLogMiddleware, logError, logInfo, logWarn, requestContextMiddleware } from './logger.js';
-import { getMedicationCatalogEntries, getMedicationCatalogEntry, searchMedicationCatalog } from './medicationCatalog.js';
+import { getMedicationCatalogEntries, getMedicationCatalogEntry, searchMedicationCatalog, warmMedicationCatalog } from './medicationCatalog.js';
 import { createRateLimitMiddleware } from './rateLimit.js';
 import { appointmentSchema, parseOrThrow, passwordChangeSchema, passwordResetSchema, patientSchema, signupSchema, treatmentTemplateSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
 import {
@@ -1667,7 +1667,7 @@ app.use((error, _req, res, _next) => {
 });
 
 initDb()
-  .then(() => {
+  .then(async () => {
     if (isProduction && (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD === 'admin123')) {
       throw new Error('Production startup blocked: ADMIN_PASSWORD must be changed from the default value.');
     }
@@ -1677,6 +1677,8 @@ initDb()
     if (isProduction && enablePublicDemo) {
       logWarn('public_demo_enabled_in_production', {});
     }
+
+    await warmMedicationCatalog();
 
     app.listen(port, () => {
       logInfo('server_started', { port, environment: process.env.NODE_ENV || 'development' });
