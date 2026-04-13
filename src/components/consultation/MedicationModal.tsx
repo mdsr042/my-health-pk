@@ -295,6 +295,8 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     if (!dosePattern.trim() || parsedPattern) return '';
     return 'Use 1, 1+1, 1+0+1, 1+1+1, or special codes SOS / HS.';
   }, [dosePattern, parsedPattern]);
+  const requiredDosePatternError = selected && !dosePattern.trim() ? 'Dose pattern is required before adding this medication.' : '';
+  const canSubmitMedication = Boolean(selected && selected.name.trim() && dosePattern.trim() && parsedPattern);
 
   const handleDosePatternChange = (value: string) => {
     setDosePattern(value);
@@ -802,7 +804,9 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                               className="h-8 text-sm"
                             />
                             <p className="text-[11px] text-muted-foreground">Examples: 1, 1+1, 1+0+1, 1+1+1, SOS, HS</p>
-                            {patternError && <p className="text-[11px] text-destructive">{patternError}</p>}
+                            {(patternError || requiredDosePatternError) && (
+                              <p className="text-[11px] text-destructive">{patternError || requiredDosePatternError}</p>
+                            )}
                           </div>
                           <div className="space-y-1.5">
                             <Label className="text-xs">Frequency</Label>
@@ -857,13 +861,13 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                           size="sm"
                           className="gap-1.5 w-full sm:w-auto"
                           onClick={() => void handleSaveFavorite()}
-                          disabled={savingFavorite}
+                          disabled={savingFavorite || !canSubmitMedication}
                         >
                           <Star className={`w-4 h-4 ${isSelectedFavorite ? 'fill-warning text-warning' : ''}`} />
                           {savingFavorite ? 'Saving...' : isSelectedFavorite ? 'Update Favorite Setup' : 'Save to Favorites'}
                         </Button>
                       ) : null}
-                      <Button size="sm" className="gap-1.5 w-full sm:w-auto" onClick={handleAdd}>
+                      <Button size="sm" className="gap-1.5 w-full sm:w-auto" onClick={handleAdd} disabled={!canSubmitMedication}>
                         <Plus className="w-4 h-4" />
                         {prescribedMedications.some(med => med.id === selected.id) ? 'Update Prescription' : 'Add to Prescription'}
                       </Button>
