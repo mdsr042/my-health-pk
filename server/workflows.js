@@ -302,7 +302,7 @@ export async function createWalkInEncounter(client, { workspaceId, doctorUserId,
       INSERT INTO appointments (
         id, workspace_id, clinic_id, patient_id, doctor_user_id, date, time, status, type, chief_complaint, token_number, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'waiting', 'new', $8, $9, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'waiting', $8, $9, $10, NOW())
       RETURNING id, patient_id, clinic_id, doctor_user_id, date, time, status, type, chief_complaint, token_number
     `,
     [
