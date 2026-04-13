@@ -40,7 +40,7 @@ import type {
   TreatmentTemplate,
   TreatmentTemplatePayload,
 } from '@/lib/app-types';
-import { APP_NAVIGATE_EVENT, SETTINGS_TREATMENT_TEMPLATES_HASH } from '@/lib/app-defaults';
+import { APP_NAVIGATE_EVENT, SETTINGS_SECTION_TEMPLATES } from '@/lib/app-defaults';
 
 function getTomorrowDateKey() {
   const next = new Date();
@@ -410,8 +410,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   };
 
   const handleManageTemplates = () => {
-    window.location.hash = SETTINGS_TREATMENT_TEMPLATES_HASH;
-    window.dispatchEvent(new CustomEvent(APP_NAVIGATE_EVENT, { detail: { page: 'settings' } }));
+    window.dispatchEvent(new CustomEvent(APP_NAVIGATE_EVENT, {
+      detail: { page: 'settings', settingsSection: SETTINGS_SECTION_TEMPLATES },
+    }));
   };
 
   useEffect(() => {

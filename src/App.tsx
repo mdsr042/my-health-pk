@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { APP_NAVIGATE_EVENT } from '@/lib/app-defaults';
+import { APP_NAVIGATE_EVENT, SETTINGS_SECTION_OVERVIEW } from '@/lib/app-defaults';
 import LoginPage from '@/pages/Login';
 import ClinicSelection from '@/pages/ClinicSelection';
 import AppLayout from '@/components/layout/AppLayout';
@@ -29,12 +29,20 @@ function AppContent() {
   const { openTab } = usePatientTabs();
   const { getPatient } = useData();
   const [currentPage, setCurrentPage] = useState('dashboard');
+  const [settingsSection, setSettingsSection] = useState(SETTINGS_SECTION_OVERVIEW);
+
+  const navigateToPage = (page: string, nextSettingsSection = SETTINGS_SECTION_OVERVIEW) => {
+    setCurrentPage(page);
+    if (page === 'settings') {
+      setSettingsSection(nextSettingsSection);
+    }
+  };
 
   useEffect(() => {
     const handleNavigate = (event: Event) => {
-      const detail = (event as CustomEvent<{ page?: string }>).detail;
+      const detail = (event as CustomEvent<{ page?: string; settingsSection?: string }>).detail;
       if (detail?.page) {
-        setCurrentPage(detail.page);
+        navigateToPage(detail.page, detail.settingsSection ?? SETTINGS_SECTION_OVERVIEW);
       }
     };
 
@@ -46,7 +54,7 @@ function AppContent() {
     const patient = getPatient(patientId);
     if (patient) {
       openTab(patientId, patient.name, patient.mrn);
-      setCurrentPage('workspace');
+      navigateToPage('workspace');
     }
   };
 
@@ -64,15 +72,15 @@ function AppContent() {
   if (!clinicSelected) return <ClinicSelection />;
 
   return (
-    <AppLayout currentPage={currentPage} onNavigate={setCurrentPage} onOpenPatient={handleOpenPatient}>
-      {currentPage === 'dashboard' && <Dashboard onOpenPatient={handleOpenPatient} onNavigate={setCurrentPage} />}
+    <AppLayout currentPage={currentPage} onNavigate={navigateToPage} onOpenPatient={handleOpenPatient}>
+      {currentPage === 'dashboard' && <Dashboard onOpenPatient={handleOpenPatient} onNavigate={navigateToPage} />}
       {currentPage === 'queue' && <PatientQueue onOpenPatient={handleOpenPatient} />}
       {currentPage === 'workspace' && <PatientWorkspace />}
       {currentPage === 'appointments' && <Appointments />}
       {currentPage === 'records' && <MedicalRecords />}
       {currentPage === 'clinics' && <ClinicsPage />}
       {currentPage === 'profile' && <Profile />}
-      {currentPage === 'settings' && <SettingsPage />}
+      {currentPage === 'settings' && <SettingsPage initialSection={settingsSection} />}
     </AppLayout>
   );
 }
