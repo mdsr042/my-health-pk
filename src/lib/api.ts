@@ -2,13 +2,20 @@ import type {
   AdminDoctorAccount,
   AdminAuditLog,
   AdminOverview,
+  AdviceTemplate,
+  AdviceTemplatePayload,
   ApprovalRequest,
   AppSettings,
   ConsultationDraft,
+  DiagnosisSet,
+  DiagnosisSetPayload,
+  InvestigationSet,
+  InvestigationSetPayload,
   MedicationCatalogEntry,
   MedicationCatalogDetail,
   MedicationCatalogSearchResult,
   MedicationFavorite,
+  MedicationLibraryFavorite,
   MedicationPreference,
   SessionPayload,
   SignupPayload,
@@ -278,6 +285,14 @@ export async function fetchMedicationFavorites() {
   return result.data;
 }
 
+export async function fetchMedicationLibraryFavorites() {
+  const [favorites, preferences] = await Promise.all([fetchMedicationFavorites(), fetchMedicationPreferences()]);
+  return favorites.map(favorite => ({
+    favorite,
+    preference: preferences.find(item => item.registrationNo === favorite.registrationNo) ?? null,
+  })) satisfies MedicationLibraryFavorite[];
+}
+
 export async function addMedicationFavorite(registrationNo: string) {
   const result = await request<{ data: MedicationFavorite }>('/medication-favorites', {
     method: 'POST',
@@ -341,6 +356,81 @@ export async function deleteTreatmentTemplate(templateId: string) {
   await request<{ ok: true }>(`/treatment-templates/${templateId}`, {
     method: 'DELETE',
   });
+}
+
+export async function fetchDiagnosisSets() {
+  const result = await request<{ data: DiagnosisSet[] }>('/diagnosis-sets');
+  return result.data;
+}
+
+export async function createDiagnosisSet(payload: DiagnosisSetPayload) {
+  const result = await request<{ data: DiagnosisSet }>('/diagnosis-sets', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function updateDiagnosisSet(id: string, payload: DiagnosisSetPayload) {
+  const result = await request<{ data: DiagnosisSet }>(`/diagnosis-sets/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function deleteDiagnosisSet(id: string) {
+  await request<{ ok: true }>(`/diagnosis-sets/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchInvestigationSets() {
+  const result = await request<{ data: InvestigationSet[] }>('/investigation-sets');
+  return result.data;
+}
+
+export async function createInvestigationSet(payload: InvestigationSetPayload) {
+  const result = await request<{ data: InvestigationSet }>('/investigation-sets', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function updateInvestigationSet(id: string, payload: InvestigationSetPayload) {
+  const result = await request<{ data: InvestigationSet }>(`/investigation-sets/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function deleteInvestigationSet(id: string) {
+  await request<{ ok: true }>(`/investigation-sets/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchAdviceTemplates() {
+  const result = await request<{ data: AdviceTemplate[] }>('/advice-templates');
+  return result.data;
+}
+
+export async function createAdviceTemplate(payload: AdviceTemplatePayload) {
+  const result = await request<{ data: AdviceTemplate }>('/advice-templates', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function updateAdviceTemplate(id: string, payload: AdviceTemplatePayload) {
+  const result = await request<{ data: AdviceTemplate }>(`/advice-templates/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function deleteAdviceTemplate(id: string) {
+  await request<{ ok: true }>(`/advice-templates/${id}`, { method: 'DELETE' });
 }
 
 export async function approveDoctor(approvalRequestId: string) {

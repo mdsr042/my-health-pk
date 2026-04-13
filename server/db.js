@@ -158,6 +158,38 @@ async function createBaseSchema(client) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS diagnosis_sets (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      diagnoses JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS investigation_sets (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      lab_orders JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS advice_templates (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      language_mode TEXT NOT NULL DEFAULT 'bilingual',
+      instructions TEXT NOT NULL DEFAULT '',
+      follow_up TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS clinics (
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -840,6 +872,56 @@ async function runSchemaMigrations(client) {
     await ensureAuditColumns(client, 'treatment_templates');
     await ensureIndex(client, 'idx_treatment_templates_doctor_updated', 'treatment_templates', '(doctor_user_id, updated_at DESC)');
     await ensureIndex(client, 'idx_treatment_templates_workspace_doctor', 'treatment_templates', '(workspace_id, doctor_user_id)');
+  });
+
+  await runMigration(client, '009_reusable_clinical_library', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS diagnosis_sets (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        diagnoses JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS investigation_sets (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        lab_orders JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS advice_templates (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        language_mode TEXT NOT NULL DEFAULT 'bilingual',
+        instructions TEXT NOT NULL DEFAULT '',
+        follow_up TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await ensureAuditColumns(client, 'diagnosis_sets');
+    await ensureAuditColumns(client, 'investigation_sets');
+    await ensureAuditColumns(client, 'advice_templates');
+    await ensureIndex(client, 'idx_diagnosis_sets_doctor_updated', 'diagnosis_sets', '(doctor_user_id, updated_at DESC)');
+    await ensureIndex(client, 'idx_investigation_sets_doctor_updated', 'investigation_sets', '(doctor_user_id, updated_at DESC)');
+    await ensureIndex(client, 'idx_advice_templates_doctor_updated', 'advice_templates', '(doctor_user_id, updated_at DESC)');
+    await ensureIndex(client, 'idx_diagnosis_sets_workspace_doctor', 'diagnosis_sets', '(workspace_id, doctor_user_id)');
+    await ensureIndex(client, 'idx_investigation_sets_workspace_doctor', 'investigation_sets', '(workspace_id, doctor_user_id)');
+    await ensureIndex(client, 'idx_advice_templates_workspace_doctor', 'advice_templates', '(workspace_id, doctor_user_id)');
   });
 }
 

@@ -16,7 +16,20 @@ import { cleanupExpiredDemoSessions, createEphemeralDemoSession } from './demoSe
 import { apiAccessLogMiddleware, logError, logInfo, logWarn, requestContextMiddleware } from './logger.js';
 import { getMedicationCatalogEntries, getMedicationCatalogEntry, searchMedicationCatalog, warmMedicationCatalog } from './medicationCatalog.js';
 import { createRateLimitMiddleware } from './rateLimit.js';
-import { appointmentSchema, parseOrThrow, passwordChangeSchema, passwordResetSchema, patientSchema, signupSchema, treatmentTemplateSchema, validatePasswordPolicy, walkInSchema } from './validation.js';
+import {
+  adviceTemplateSchema,
+  appointmentSchema,
+  diagnosisSetSchema,
+  investigationSetSchema,
+  parseOrThrow,
+  passwordChangeSchema,
+  passwordResetSchema,
+  patientSchema,
+  signupSchema,
+  treatmentTemplateSchema,
+  validatePasswordPolicy,
+  walkInSchema,
+} from './validation.js';
 import {
   completeConsultationEncounter,
   createAppointmentForWorkspace,
@@ -394,6 +407,38 @@ function mapTreatmentTemplate(row) {
   };
 }
 
+function mapDiagnosisSet(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    diagnoses: row.diagnoses ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapInvestigationSet(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    labOrders: row.lab_orders ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapAdviceTemplate(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    languageMode: row.language_mode,
+    instructions: row.instructions ?? '',
+    followUp: row.follow_up ?? '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 async function getDoctorTreatmentTemplates(workspaceId, doctorUserId) {
   const { rows } = await query(
     `
@@ -406,6 +451,48 @@ async function getDoctorTreatmentTemplates(workspaceId, doctorUserId) {
   );
 
   return rows.map(mapTreatmentTemplate);
+}
+
+async function getDoctorDiagnosisSets(workspaceId, doctorUserId) {
+  const { rows } = await query(
+    `
+      SELECT id, name, diagnoses, created_at, updated_at
+      FROM diagnosis_sets
+      WHERE workspace_id = $1 AND doctor_user_id = $2
+      ORDER BY updated_at DESC, created_at DESC
+    `,
+    [workspaceId, doctorUserId]
+  );
+
+  return rows.map(mapDiagnosisSet);
+}
+
+async function getDoctorInvestigationSets(workspaceId, doctorUserId) {
+  const { rows } = await query(
+    `
+      SELECT id, name, lab_orders, created_at, updated_at
+      FROM investigation_sets
+      WHERE workspace_id = $1 AND doctor_user_id = $2
+      ORDER BY updated_at DESC, created_at DESC
+    `,
+    [workspaceId, doctorUserId]
+  );
+
+  return rows.map(mapInvestigationSet);
+}
+
+async function getDoctorAdviceTemplates(workspaceId, doctorUserId) {
+  const { rows } = await query(
+    `
+      SELECT id, name, language_mode, instructions, follow_up, created_at, updated_at
+      FROM advice_templates
+      WHERE workspace_id = $1 AND doctor_user_id = $2
+      ORDER BY updated_at DESC, created_at DESC
+    `,
+    [workspaceId, doctorUserId]
+  );
+
+  return rows.map(mapAdviceTemplate);
 }
 
 async function importStarterTreatmentTemplates(workspaceId, doctorUserId) {
@@ -661,6 +748,165 @@ app.delete('/api/treatment-templates/:id', requireAuth, requireRole('doctor_owne
   if (result.rowCount === 0) {
     res.status(404).json({ error: 'Treatment template not found', code: 'TREATMENT_TEMPLATE_NOT_FOUND' });
     return;
+  }
+
+  res.json({ ok: true });
+}));
+
+app.get('/api/diagnosis-sets', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const sets = await getDoctorDiagnosisSets(req.auth.workspace.id, req.auth.user.id);
+  res.json({ data: sets });
+}));
+
+app.post('/api/diagnosis-sets', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(diagnosisSetSchema, req.body, 'INVALID_DIAGNOSIS_SET');
+  const setId = createId('diagnosis_set');
+
+  await query(
+    `
+      INSERT INTO diagnosis_sets (id, workspace_id, doctor_user_id, name, diagnoses)
+      VALUES ($1, $2, $3, $4, $5)
+    `,
+    [setId, req.auth.workspace.id, req.auth.user.id, payload.name, JSON.stringify(payload.diagnoses)]
+  );
+
+  const sets = await getDoctorDiagnosisSets(req.auth.workspace.id, req.auth.user.id);
+  res.status(201).json({ data: sets.find(item => item.id === setId) });
+}));
+
+app.put('/api/diagnosis-sets/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(diagnosisSetSchema, req.body, 'INVALID_DIAGNOSIS_SET');
+  const result = await query(
+    `
+      UPDATE diagnosis_sets
+      SET name = $3, diagnoses = $4, updated_at = NOW()
+      WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $5
+      RETURNING id, name, diagnoses, created_at, updated_at
+    `,
+    [String(req.params.id ?? '').trim(), req.auth.workspace.id, payload.name, JSON.stringify(payload.diagnoses), req.auth.user.id]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Diagnosis set not found', code: 'DIAGNOSIS_SET_NOT_FOUND' });
+  }
+
+  res.json({ data: mapDiagnosisSet(result.rows[0]) });
+}));
+
+app.delete('/api/diagnosis-sets/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const result = await query(
+    `DELETE FROM diagnosis_sets WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $3`,
+    [String(req.params.id ?? '').trim(), req.auth.workspace.id, req.auth.user.id]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Diagnosis set not found', code: 'DIAGNOSIS_SET_NOT_FOUND' });
+  }
+
+  res.json({ ok: true });
+}));
+
+app.get('/api/investigation-sets', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const sets = await getDoctorInvestigationSets(req.auth.workspace.id, req.auth.user.id);
+  res.json({ data: sets });
+}));
+
+app.post('/api/investigation-sets', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(investigationSetSchema, req.body, 'INVALID_INVESTIGATION_SET');
+  const setId = createId('investigation_set');
+
+  await query(
+    `
+      INSERT INTO investigation_sets (id, workspace_id, doctor_user_id, name, lab_orders)
+      VALUES ($1, $2, $3, $4, $5)
+    `,
+    [setId, req.auth.workspace.id, req.auth.user.id, payload.name, JSON.stringify(payload.labOrders)]
+  );
+
+  const sets = await getDoctorInvestigationSets(req.auth.workspace.id, req.auth.user.id);
+  res.status(201).json({ data: sets.find(item => item.id === setId) });
+}));
+
+app.put('/api/investigation-sets/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(investigationSetSchema, req.body, 'INVALID_INVESTIGATION_SET');
+  const result = await query(
+    `
+      UPDATE investigation_sets
+      SET name = $3, lab_orders = $4, updated_at = NOW()
+      WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $5
+      RETURNING id, name, lab_orders, created_at, updated_at
+    `,
+    [String(req.params.id ?? '').trim(), req.auth.workspace.id, payload.name, JSON.stringify(payload.labOrders), req.auth.user.id]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Investigation set not found', code: 'INVESTIGATION_SET_NOT_FOUND' });
+  }
+
+  res.json({ data: mapInvestigationSet(result.rows[0]) });
+}));
+
+app.delete('/api/investigation-sets/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const result = await query(
+    `DELETE FROM investigation_sets WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $3`,
+    [String(req.params.id ?? '').trim(), req.auth.workspace.id, req.auth.user.id]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Investigation set not found', code: 'INVESTIGATION_SET_NOT_FOUND' });
+  }
+
+  res.json({ ok: true });
+}));
+
+app.get('/api/advice-templates', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const templates = await getDoctorAdviceTemplates(req.auth.workspace.id, req.auth.user.id);
+  res.json({ data: templates });
+}));
+
+app.post('/api/advice-templates', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(adviceTemplateSchema, req.body, 'INVALID_ADVICE_TEMPLATE');
+  const templateId = createId('advice_template');
+
+  await query(
+    `
+      INSERT INTO advice_templates (id, workspace_id, doctor_user_id, name, language_mode, instructions, follow_up)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `,
+    [templateId, req.auth.workspace.id, req.auth.user.id, payload.name, payload.languageMode, payload.instructions, payload.followUp]
+  );
+
+  const templates = await getDoctorAdviceTemplates(req.auth.workspace.id, req.auth.user.id);
+  res.status(201).json({ data: templates.find(item => item.id === templateId) });
+}));
+
+app.put('/api/advice-templates/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(adviceTemplateSchema, req.body, 'INVALID_ADVICE_TEMPLATE');
+  const result = await query(
+    `
+      UPDATE advice_templates
+      SET name = $3, language_mode = $4, instructions = $5, follow_up = $6, updated_at = NOW()
+      WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $7
+      RETURNING id, name, language_mode, instructions, follow_up, created_at, updated_at
+    `,
+    [String(req.params.id ?? '').trim(), req.auth.workspace.id, payload.name, payload.languageMode, payload.instructions, payload.followUp, req.auth.user.id]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Advice template not found', code: 'ADVICE_TEMPLATE_NOT_FOUND' });
+  }
+
+  res.json({ data: mapAdviceTemplate(result.rows[0]) });
+}));
+
+app.delete('/api/advice-templates/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const result = await query(
+    `DELETE FROM advice_templates WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $3`,
+    [String(req.params.id ?? '').trim(), req.auth.workspace.id, req.auth.user.id]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Advice template not found', code: 'ADVICE_TEMPLATE_NOT_FOUND' });
   }
 
   res.json({ ok: true });

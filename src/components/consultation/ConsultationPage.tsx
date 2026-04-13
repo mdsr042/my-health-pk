@@ -13,7 +13,7 @@ import {
   Stethoscope, Pill, FlaskConical, Scan, FileText, Plus,
   Save, Pause, CheckCircle2, Printer, Heart, Thermometer,
   Activity, Wind, Scale, Ruler, ArrowRightLeft,
-  Building2, CalendarPlus, ChevronRight, LayoutTemplate
+  Building2, CalendarPlus, ChevronRight, LayoutTemplate, NotebookTabs, MessageSquareQuote
 } from 'lucide-react';
 import DiagnosisModal from '@/components/consultation/DiagnosisModal';
 import MedicationModal from '@/components/consultation/MedicationModal';
@@ -24,10 +24,22 @@ import PrescriptionPreview from '@/components/consultation/PrescriptionPreview';
 import NotesTimeline from '@/components/consultation/NotesTimeline';
 import OrdersPanel from '@/components/consultation/OrdersPanel';
 import TreatmentTemplateDialog from '@/components/settings/TreatmentTemplateDialog';
-import { createTreatmentTemplate, fetchTreatmentTemplates } from '@/lib/api';
+import {
+  createTreatmentTemplate,
+  fetchAdviceTemplates,
+  fetchDiagnosisSets,
+  fetchInvestigationSets,
+  fetchTreatmentTemplates,
+} from '@/lib/api';
 import { readStorage } from '@/lib/storage';
 import { getLocalDateKey } from '@/lib/date';
-import type { TreatmentTemplate, TreatmentTemplatePayload } from '@/lib/app-types';
+import type {
+  AdviceTemplate,
+  DiagnosisSet,
+  InvestigationSet,
+  TreatmentTemplate,
+  TreatmentTemplatePayload,
+} from '@/lib/app-types';
 import { APP_NAVIGATE_EVENT, SETTINGS_TREATMENT_TEMPLATES_HASH } from '@/lib/app-defaults';
 
 function getTomorrowDateKey() {
@@ -119,6 +131,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [referralType, setReferralType] = useState<'referral' | 'admission' | 'followup'>('referral');
   const [bookingOpen, setBookingOpen] = useState(false);
   const [templates, setTemplates] = useState<TreatmentTemplate[]>([]);
+  const [diagnosisSets, setDiagnosisSets] = useState<DiagnosisSet[]>([]);
+  const [investigationSets, setInvestigationSets] = useState<InvestigationSet[]>([]);
+  const [adviceTemplates, setAdviceTemplates] = useState<AdviceTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [lastVisitExpanded, setLastVisitExpanded] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
@@ -257,6 +272,40 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     toast.success('Previous medications added');
   }, [latestPreviousNote, markUnsaved, patientId]);
 
+  const reusePreviousInvestigations = useCallback(() => {
+    if (!latestPreviousNote?.labOrders.length) {
+      toast.info('No previous investigations available to reuse');
+      return;
+    }
+
+    setLabOrders(prev => {
+      const existing = new Set(prev.map(item => `${item.testName}:${item.category}`));
+      const additions = latestPreviousNote.labOrders
+        .filter(item => !existing.has(`${item.testName}:${item.category}`))
+        .map(item => ({
+          ...item,
+          id: `lab-reuse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          status: 'ordered',
+          date: getLocalDateKey(),
+        }));
+      return [...prev, ...additions];
+    });
+    markUnsaved(patientId, true);
+    toast.success('Previous investigations added');
+  }, [latestPreviousNote, markUnsaved, patientId]);
+
+  const reusePreviousAdvice = useCallback(() => {
+    if (!latestPreviousNote?.instructions && !latestPreviousNote?.followUp) {
+      toast.info('No previous advice available to reuse');
+      return;
+    }
+
+    setInstructions(prev => prev || latestPreviousNote?.instructions || '');
+    setFollowUp(prev => prev || latestPreviousNote?.followUp || '');
+    markUnsaved(patientId, true);
+    toast.success('Previous advice added');
+  }, [latestPreviousNote, markUnsaved, patientId]);
+
   const buildConsultationPayload = useCallback(() => ({
     ...buildPayloadShape({
       chiefComplaint,
@@ -370,13 +419,24 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     const hydrateTemplates = async () => {
       setTemplatesLoading(true);
       try {
-        const remoteTemplates = await fetchTreatmentTemplates();
+        const [remoteTemplates, remoteDiagnosisSets, remoteInvestigationSets, remoteAdviceTemplates] = await Promise.all([
+          fetchTreatmentTemplates(),
+          fetchDiagnosisSets(),
+          fetchInvestigationSets(),
+          fetchAdviceTemplates(),
+        ]);
         if (!cancelled) {
           setTemplates(remoteTemplates);
+          setDiagnosisSets(remoteDiagnosisSets);
+          setInvestigationSets(remoteInvestigationSets);
+          setAdviceTemplates(remoteAdviceTemplates);
         }
       } catch {
         if (!cancelled) {
           setTemplates([]);
+          setDiagnosisSets([]);
+          setInvestigationSets([]);
+          setAdviceTemplates([]);
         }
       } finally {
         if (!cancelled) {
@@ -458,6 +518,8 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   ];
   const previousDiagnosesAvailable = Boolean(latestPreviousNote?.diagnoses.length);
   const previousMedicationsAvailable = Boolean(latestPreviousNote?.medications.length);
+  const previousInvestigationsAvailable = Boolean(latestPreviousNote?.labOrders.length);
+  const previousAdviceAvailable = Boolean(latestPreviousNote?.instructions || latestPreviousNote?.followUp);
   const clinicalFieldGroups = [
     {
       title: 'Symptoms & History',
@@ -468,6 +530,48 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       fields: clinicalFieldConfigs.filter(field => ['examination', 'assessment', 'plan', 'instructions', 'followUp'].includes(field.key)),
     },
   ] as const;
+
+  const applyDiagnosisSet = (setId: string) => {
+    const set = diagnosisSets.find(item => item.id === setId);
+    if (!set) return;
+    setDiagnoses(prev => {
+      const existing = new Set(prev.map(item => `${item.code}:${item.name}`));
+      const additions = set.diagnoses
+        .filter(item => !existing.has(`${item.code}:${item.name}`))
+        .map(item => ({ ...item, id: `dx-set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }));
+      return [...prev, ...additions];
+    });
+    markUnsaved(patientId, true);
+    toast.success(`${set.name} diagnosis set applied`);
+  };
+
+  const applyInvestigationSet = (setId: string) => {
+    const set = investigationSets.find(item => item.id === setId);
+    if (!set) return;
+    setLabOrders(prev => {
+      const existing = new Set(prev.map(item => `${item.testName}:${item.category}`));
+      const additions = set.labOrders
+        .filter(item => !existing.has(`${item.testName}:${item.category}`))
+        .map(item => ({
+          ...item,
+          id: `lab-set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          status: 'ordered',
+          date: getLocalDateKey(),
+        }));
+      return [...prev, ...additions];
+    });
+    markUnsaved(patientId, true);
+    toast.success(`${set.name} investigation set applied`);
+  };
+
+  const applyAdviceTemplate = (templateId: string) => {
+    const template = adviceTemplates.find(item => item.id === templateId);
+    if (!template) return;
+    setInstructions(prev => prev || template.instructions);
+    setFollowUp(prev => prev || template.followUp);
+    markUnsaved(patientId, true);
+    toast.success(`${template.name} advice applied`);
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -521,6 +625,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 <Button variant="outline" size="sm" className="h-8" onClick={reusePreviousMedications} disabled={!previousMedicationsAvailable}>
                   Reuse Medications
                 </Button>
+                <Button variant="outline" size="sm" className="h-8" onClick={reusePreviousInvestigations} disabled={!previousInvestigationsAvailable}>
+                  Reuse Investigations
+                </Button>
+                <Button variant="outline" size="sm" className="h-8" onClick={reusePreviousAdvice} disabled={!previousAdviceAvailable}>
+                  Reuse Advice
+                </Button>
                 <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setLastVisitExpanded(current => !current)}>
                   <ChevronRight className={`w-4 h-4 transition-transform ${lastVisitExpanded ? 'rotate-90' : ''}`} />
                   {lastVisitExpanded ? 'Hide Details' : 'View Details'}
@@ -528,7 +638,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
               </div>
             </div>
             {lastVisitExpanded && (
-              <div className="mt-3 grid gap-3 border-t border-border/70 pt-3 lg:grid-cols-[1fr_1fr_1fr]">
+              <div className="mt-3 grid gap-3 border-t border-border/70 pt-3 lg:grid-cols-[1fr_1fr_1fr_1fr]">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Diagnoses</p>
                   <p className="text-sm text-foreground">{latestPreviousNote.diagnoses.slice(0, 3).map(dx => dx.name).join(', ') || '-'}</p>
@@ -536,6 +646,10 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Medications</p>
                   <p className="text-sm text-foreground">{latestPreviousNote.medications.slice(0, 3).map(med => med.name).join(', ') || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Investigations</p>
+                  <p className="text-sm text-foreground">{latestPreviousNote.labOrders.slice(0, 3).map(order => order.testName).join(', ') || '-'}</p>
                 </div>
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Previous Follow-up</p>
@@ -661,6 +775,80 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                   )}
                 </CardContent>
               </Card>
+
+              <div className="grid gap-4 xl:grid-cols-3">
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-4 space-y-3">
+                    <div>
+                      <h3 className="font-semibold text-foreground flex items-center gap-2">
+                        <NotebookTabs className="w-4 h-4 text-primary" /> Diagnosis Sets
+                      </h3>
+                      <p className="text-xs text-muted-foreground">Apply saved diagnosis bundles in one click.</p>
+                    </div>
+                    {templatesLoading ? (
+                      <p className="text-sm text-muted-foreground">Loading diagnosis sets...</p>
+                    ) : diagnosisSets.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No diagnosis sets saved yet. Create them in Settings.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {diagnosisSets.map(item => (
+                          <Button key={item.id} type="button" variant="outline" size="sm" className="h-8" onClick={() => applyDiagnosisSet(item.id)}>
+                            {item.name}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-4 space-y-3">
+                    <div>
+                      <h3 className="font-semibold text-foreground flex items-center gap-2">
+                        <FlaskConical className="w-4 h-4 text-warning" /> Investigation Sets
+                      </h3>
+                      <p className="text-xs text-muted-foreground">Apply saved workups without re-adding tests manually.</p>
+                    </div>
+                    {templatesLoading ? (
+                      <p className="text-sm text-muted-foreground">Loading investigation sets...</p>
+                    ) : investigationSets.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No investigation sets saved yet. Create them in Settings.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {investigationSets.map(item => (
+                          <Button key={item.id} type="button" variant="outline" size="sm" className="h-8" onClick={() => applyInvestigationSet(item.id)}>
+                            {item.name}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-4 space-y-3">
+                    <div>
+                      <h3 className="font-semibold text-foreground flex items-center gap-2">
+                        <MessageSquareQuote className="w-4 h-4 text-info" /> Advice Templates
+                      </h3>
+                      <p className="text-xs text-muted-foreground">Fill instructions and follow-up text faster for repeat scenarios.</p>
+                    </div>
+                    {templatesLoading ? (
+                      <p className="text-sm text-muted-foreground">Loading advice templates...</p>
+                    ) : adviceTemplates.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No advice templates saved yet. Create them in Settings.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {adviceTemplates.map(item => (
+                          <Button key={item.id} type="button" variant="outline" size="sm" className="h-8" onClick={() => applyAdviceTemplate(item.id)}>
+                            {item.name}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <Card className="border-0 shadow-sm">

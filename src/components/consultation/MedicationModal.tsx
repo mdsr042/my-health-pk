@@ -95,7 +95,7 @@ function toMedication(entry: MedicationCatalogEntry): Medication {
 
 export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, prescribedMedications }: MedicationModalProps) {
   const [search, setSearch] = useState('');
-  const [showFavorites, setShowFavorites] = useState(true);
+  const [sourceMode, setSourceMode] = useState<'favorites' | 'recent' | 'browse'>('favorites');
   const [selected, setSelected] = useState<Medication | null>(null);
   const [dosePattern, setDosePattern] = useState('');
   const [customFrequency, setCustomFrequency] = useState('');
@@ -148,7 +148,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   }, [open]);
 
   useEffect(() => {
-    if (showFavorites || search.trim().length < 2) {
+    if (sourceMode !== 'browse' || search.trim().length < 2) {
       setCatalogResults([]);
       setCatalogLoading(false);
       setCatalogHasMore(false);
@@ -182,14 +182,52 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [search, showFavorites]);
+  }, [search, sourceMode]);
 
   const favoriteEntries = useMemo(
     () => favorites.map(item => toMedication(item.medicine)),
     [favorites]
   );
 
-  const filtered = showFavorites ? favoriteEntries : catalogResults.map(toMedication);
+  const recentEntries = useMemo(() => {
+    return preferences
+      .slice(0, 12)
+      .map((item, index) => {
+        const payload = item.payload as Partial<Medication>;
+        const name = typeof payload.name === 'string' && payload.name.trim()
+          ? payload.name
+          : item.medicationKey.startsWith('name:')
+            ? item.medicationKey.replace(/^name:/, '').replace(/\b\w/g, char => char.toUpperCase())
+            : '';
+
+        if (!name.trim()) return null;
+
+        return {
+          id: item.registrationNo ? `cat-${item.registrationNo}` : `recent-${index}-${item.medicationKey}`,
+          name,
+          nameUrdu: String(payload.nameUrdu ?? ''),
+          generic: String(payload.generic ?? ''),
+          strength: String(payload.strength ?? ''),
+          form: String(payload.form ?? ''),
+          route: String(payload.route ?? ''),
+          languageMode: inferLanguageMode(payload),
+          dosePattern: String(payload.dosePattern ?? ''),
+          frequency: String(payload.frequency ?? ''),
+          frequencyUrdu: String(payload.frequencyUrdu ?? ''),
+          duration: String(payload.duration ?? ''),
+          durationUrdu: String(payload.durationUrdu ?? ''),
+          instructions: String(payload.instructions ?? ''),
+          instructionsUrdu: String(payload.instructionsUrdu ?? ''),
+        } satisfies Medication;
+      })
+      .filter((item): item is Medication => Boolean(item));
+  }, [preferences]);
+
+  const filtered = sourceMode === 'favorites'
+    ? favoriteEntries
+    : sourceMode === 'recent'
+      ? recentEntries
+      : catalogResults.map(toMedication);
   const isCustomMedication = selected?.id.startsWith('custom-') ?? false;
   const selectedRegistrationNo = selected?.id.startsWith('cat-') ? selected.id.replace('cat-', '') : '';
   const isSelectedFavorite = Boolean(selectedRegistrationNo && favoriteKeys.has(selectedRegistrationNo));
@@ -219,6 +257,8 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
       medicationKey: getMedicationPreferenceKey(selected ?? medicationToSave),
       registrationNo: medicationToSave.id.startsWith('cat-') ? medicationToSave.id.replace('cat-', '') : '',
       payload: {
+        name: medicationToSave.name,
+        nameUrdu: medicationToSave.nameUrdu,
         generic: medicationToSave.generic,
         strength: medicationToSave.strength,
         form: medicationToSave.form,
@@ -402,7 +442,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   };
 
   const loadMore = async () => {
-    if (showFavorites || !catalogHasMore || catalogCursor === null || loadingMore) return;
+    if (sourceMode !== 'browse' || !catalogHasMore || catalogCursor === null || loadingMore) return;
     setLoadingMore(true);
     try {
       const result = await searchMedicationCatalog(search.trim(), 20, catalogCursor);
@@ -418,7 +458,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
     if (!o) {
       setSelected(null);
       setSearch('');
-      setShowFavorites(true);
+      setSourceMode('favorites');
       setDosePattern('');
       setCustomFrequency('');
       setCustomFrequencyUrdu('');
@@ -462,7 +502,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                 value={search}
                 onChange={e => {
                   setSearch(e.target.value);
-                  if (e.target.value) setShowFavorites(false);
+                  if (e.target.value) setSourceMode('browse');
                 }}
                 className="pl-9"
                 autoFocus
@@ -470,10 +510,13 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button variant={showFavorites ? 'default' : 'outline'} size="sm" className="gap-1.5 h-7 text-xs" onClick={() => { setShowFavorites(true); setSearch(''); }}>
+              <Button variant={sourceMode === 'favorites' ? 'default' : 'outline'} size="sm" className="gap-1.5 h-7 text-xs" onClick={() => { setSourceMode('favorites'); setSearch(''); }}>
                 <Star className="w-3 h-3" /> Favorites
               </Button>
-              <Button variant={!showFavorites ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setShowFavorites(false)}>
+              <Button variant={sourceMode === 'recent' ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => { setSourceMode('recent'); setSearch(''); }}>
+                Recent
+              </Button>
+              <Button variant={sourceMode === 'browse' ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setSourceMode('browse')}>
                 Browse All
               </Button>
               <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={handleCustomMedication}>
@@ -488,19 +531,22 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                 </h3>
               </div>
               <div className="max-h-[300px] overflow-y-auto space-y-1 p-2 scrollbar-thin">
-                {showFavorites && favoritesLoading && (
+                {sourceMode === 'favorites' && favoritesLoading && (
                   <p className="text-sm text-muted-foreground text-center py-3">Loading your favorite medicines...</p>
                 )}
-                {!showFavorites && catalogLoading && (
+                {sourceMode === 'browse' && catalogLoading && (
                   <p className="text-sm text-muted-foreground text-center py-3">Searching Pakistan medicine catalog...</p>
                 )}
-                {showFavorites && !favoritesLoading && filtered.length === 0 && (
+                {sourceMode === 'favorites' && !favoritesLoading && filtered.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-8">No favorite medicines yet. Search and star medicines to build your quick list.</p>
                 )}
-                {!showFavorites && search.trim().length < 2 && (
+                {sourceMode === 'recent' && filtered.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-8">No recent medicines yet. Once you prescribe medicines, your latest setups will appear here.</p>
+                )}
+                {sourceMode === 'browse' && search.trim().length < 2 && (
                   <p className="text-sm text-muted-foreground text-center py-8">Type at least 2 letters to search brands and generics from the Pakistan medicine catalog.</p>
                 )}
-                {!showFavorites && search.trim().length >= 2 && !catalogLoading && filtered.length === 0 && (
+                {sourceMode === 'browse' && search.trim().length >= 2 && !catalogLoading && filtered.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-8">No medicines found in the Pakistan catalog.</p>
                 )}
                 {filtered.map(med => {
@@ -533,7 +579,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                         <p className="text-xs text-muted-foreground">
                           {med.generic || 'Generic not listed'} • {med.form || 'Medicine'} • {med.strength || 'Strength not listed'}
                         </p>
-                        {!showFavorites && registrationNo && (
+                        {sourceMode === 'browse' && registrationNo && (
                           <p className="text-[11px] text-muted-foreground truncate">
                             {catalogResults.find(item => item.registrationNo === registrationNo)?.companyName || 'Company not listed'}
                           </p>
@@ -579,7 +625,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                     </div>
                   );
                 })}
-                {!showFavorites && filtered.length > 0 && catalogHasMore && (
+                {sourceMode === 'browse' && filtered.length > 0 && catalogHasMore && (
                   <div className="pt-2">
                     <Button variant="outline" size="sm" className="w-full" onClick={() => void loadMore()} disabled={loadingMore}>
                       {loadingMore ? 'Loading more...' : 'Load 20 more'}

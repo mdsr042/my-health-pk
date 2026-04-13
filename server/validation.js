@@ -123,6 +123,23 @@ export const treatmentTemplateSchema = z.object({
   labOrders: z.array(templateLabOrderSchema).max(25).default([]),
 });
 
+export const diagnosisSetSchema = z.object({
+  name: trimmedString('Diagnosis set name'),
+  diagnoses: z.array(templateDiagnosisSchema).max(25).default([]),
+});
+
+export const investigationSetSchema = z.object({
+  name: trimmedString('Investigation set name'),
+  labOrders: z.array(templateLabOrderSchema).max(25).default([]),
+});
+
+export const adviceTemplateSchema = z.object({
+  name: trimmedString('Advice template name'),
+  languageMode: z.enum(['en', 'ur', 'bilingual']).default('bilingual'),
+  instructions: z.string().trim().max(1000).default(''),
+  followUp: z.string().trim().max(500).default(''),
+});
+
 export function parseOrThrow(schema, value, code = 'INVALID_REQUEST') {
   const result = schema.safeParse(value);
   if (!result.success) {

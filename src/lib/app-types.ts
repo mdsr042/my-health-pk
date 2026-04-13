@@ -273,6 +273,54 @@ export interface TreatmentTemplatePayload {
   labOrders: TreatmentTemplateLabOrder[];
 }
 
+export interface DiagnosisSet {
+  id: string;
+  name: string;
+  diagnoses: TreatmentTemplateDiagnosis[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DiagnosisSetPayload {
+  name: string;
+  diagnoses: TreatmentTemplateDiagnosis[];
+}
+
+export interface InvestigationSet {
+  id: string;
+  name: string;
+  labOrders: TreatmentTemplateLabOrder[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InvestigationSetPayload {
+  name: string;
+  labOrders: TreatmentTemplateLabOrder[];
+}
+
+export interface AdviceTemplate {
+  id: string;
+  name: string;
+  languageMode: 'en' | 'ur' | 'bilingual';
+  instructions: string;
+  followUp: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdviceTemplatePayload {
+  name: string;
+  languageMode: 'en' | 'ur' | 'bilingual';
+  instructions: string;
+  followUp: string;
+}
+
+export interface MedicationLibraryFavorite {
+  favorite: MedicationFavorite;
+  preference: MedicationPreference | null;
+}
+
 export interface WalkInResult {
   patient: Patient;
   appointment: Appointment;
