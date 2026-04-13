@@ -28,6 +28,7 @@ import { createTreatmentTemplate, fetchTreatmentTemplates } from '@/lib/api';
 import { readStorage } from '@/lib/storage';
 import { getLocalDateKey } from '@/lib/date';
 import type { TreatmentTemplate, TreatmentTemplatePayload } from '@/lib/app-types';
+import { APP_NAVIGATE_EVENT, SETTINGS_TREATMENT_TEMPLATES_HASH } from '@/lib/app-defaults';
 
 function getTomorrowDateKey() {
   const next = new Date();
@@ -359,6 +360,11 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     toast.success('Treatment template created');
   };
 
+  const handleManageTemplates = () => {
+    window.location.hash = SETTINGS_TREATMENT_TEMPLATES_HASH;
+    window.dispatchEvent(new CustomEvent(APP_NAVIGATE_EVENT, { detail: { page: 'settings' } }));
+  };
+
   useEffect(() => {
     let cancelled = false;
     const hydrateTemplates = async () => {
@@ -626,6 +632,11 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                     </div>
                     <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setTemplateDialogOpen(true)}>
                       <Plus className="w-3.5 h-3.5" /> Add Template
+                    </Button>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button variant="outline" size="sm" className="h-8" onClick={handleManageTemplates}>
+                      Manage Templates
                     </Button>
                   </div>
                   {templatesLoading ? (

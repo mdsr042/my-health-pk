@@ -24,8 +24,8 @@ const defaultSignup = {
 export default function LoginPage() {
   const { login, openDemo, signup } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [email, setEmail] = useState('dr.ahmed@medcare.pk');
-  const [password, setPassword] = useState('password');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [signupForm, setSignupForm] = useState(defaultSignup);
   const [error, setError] = useState('');

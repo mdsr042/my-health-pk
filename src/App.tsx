@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { APP_NAVIGATE_EVENT } from '@/lib/app-defaults';
 import LoginPage from '@/pages/Login';
 import ClinicSelection from '@/pages/ClinicSelection';
 import AppLayout from '@/components/layout/AppLayout';
@@ -19,6 +20,7 @@ import Profile from '@/pages/Profile';
 import SettingsPage from '@/pages/Settings';
 import ClinicsPage from '@/pages/Clinics';
 import AdminDashboard from '@/pages/AdminDashboard';
+import { useEffect } from 'react';
 
 const queryClient = new QueryClient();
 
@@ -27,6 +29,18 @@ function AppContent() {
   const { openTab } = usePatientTabs();
   const { getPatient } = useData();
   const [currentPage, setCurrentPage] = useState('dashboard');
+
+  useEffect(() => {
+    const handleNavigate = (event: Event) => {
+      const detail = (event as CustomEvent<{ page?: string }>).detail;
+      if (detail?.page) {
+        setCurrentPage(detail.page);
+      }
+    };
+
+    window.addEventListener(APP_NAVIGATE_EVENT, handleNavigate);
+    return () => window.removeEventListener(APP_NAVIGATE_EVENT, handleNavigate);
+  }, []);
 
   const handleOpenPatient = (patientId: string) => {
     const patient = getPatient(patientId);

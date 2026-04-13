@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { Settings2, Bell, Globe, Shield, Palette, Plus, PencilLine, Copy, Trash2, LayoutTemplate } from 'lucide-react';
 import { readStorage, writeStorage } from '@/lib/storage';
-import { mergeAppSettings, SETTINGS_STORAGE_KEY, SETTINGS_UPDATED_EVENT } from '@/lib/app-defaults';
+import { mergeAppSettings, SETTINGS_STORAGE_KEY, SETTINGS_TREATMENT_TEMPLATES_HASH, SETTINGS_UPDATED_EVENT } from '@/lib/app-defaults';
 import { changePassword, createTreatmentTemplate, deleteTreatmentTemplate, fetchSettings, fetchTreatmentTemplates, importStarterTreatmentTemplates, persistSettings, updateTreatmentTemplate } from '@/lib/api';
 import type { AppSettings, TreatmentTemplate, TreatmentTemplatePayload } from '@/lib/app-types';
 import TreatmentTemplateDialog from '@/components/settings/TreatmentTemplateDialog';
@@ -33,6 +33,7 @@ export default function SettingsPage() {
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<TreatmentTemplate | null>(null);
+  const templateSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +83,14 @@ export default function SettingsPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (window.location.hash !== SETTINGS_TREATMENT_TEMPLATES_HASH) return;
+    const timer = window.setTimeout(() => {
+      templateSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, [templatesLoading]);
 
   const handleSave = async () => {
     const nextSettings = mergeAppSettings({
@@ -242,7 +251,7 @@ export default function SettingsPage() {
       })}
 
       {/* Language & Regional */}
-      <Card className="border-0 shadow-sm">
+      <Card className="border-0 shadow-sm" id="treatment-templates" ref={templateSectionRef}>
         <CardContent className="p-5 space-y-4">
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-2">
             <Globe className="w-4 h-4 text-primary" /> Language & Regional
