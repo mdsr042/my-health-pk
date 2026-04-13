@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useData } from '@/contexts/DataContext';
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Search, Filter, UserPlus, Play, MoreHorizontal } from 'lucide-react';
 import WalkInModal from '@/components/consultation/WalkInModal';
+import { getLocalDateKey } from '@/lib/date';
 
 interface PatientQueueProps {
   onOpenPatient: (patientId: string) => void;
@@ -21,15 +22,50 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [walkInOpen, setWalkInOpen] = useState(false);
+  const todayKey = getLocalDateKey(new Date());
 
   const clinicAppointments = getAppointmentsForClinic(activeClinic?.id || '');
 
-  const filtered = clinicAppointments.filter(apt => {
-    const pat = getPatient(apt.patientId);
-    const matchSearch = !search || pat?.name.toLowerCase().includes(search.toLowerCase()) || pat?.mrn.toLowerCase().includes(search.toLowerCase()) || pat?.phone.includes(search);
-    const matchStatus = statusFilter === 'all' || apt.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
+  const filtered = useMemo(() => {
+    const statusPriority = (status: string, date: string) => {
+      const isToday = date === todayKey;
+      if (isToday && status === 'in-consultation') return 0;
+      if (isToday && status === 'waiting') return 1;
+      if (isToday && status === 'completed') return 2;
+      if (isToday && status === 'scheduled') return 3;
+      if (isToday && status === 'cancelled') return 4;
+      if (isToday && status === 'no-show') return 5;
+      return 10;
+    };
+
+    return clinicAppointments
+      .filter(apt => {
+        const pat = getPatient(apt.patientId);
+        const normalizedSearch = search.toLowerCase();
+        const matchSearch = !search
+          || pat?.name.toLowerCase().includes(normalizedSearch)
+          || pat?.mrn.toLowerCase().includes(normalizedSearch)
+          || pat?.phone.includes(search);
+        const matchStatus = statusFilter === 'all' || apt.status === statusFilter;
+        return matchSearch && matchStatus;
+      })
+      .sort((a, b) => {
+        if (statusFilter === 'all') {
+          const priorityDiff = statusPriority(a.status, a.date) - statusPriority(b.status, b.date);
+          if (priorityDiff !== 0) return priorityDiff;
+        }
+
+        if (a.date !== b.date) {
+          if (a.date === todayKey) return -1;
+          if (b.date === todayKey) return 1;
+          return b.date.localeCompare(a.date);
+        }
+
+        const timeDiff = a.time.localeCompare(b.time);
+        if (timeDiff !== 0) return timeDiff;
+        return a.tokenNumber - b.tokenNumber;
+      });
+  }, [clinicAppointments, getPatient, search, statusFilter, todayKey]);
 
   const statusColor = (s: string) => {
     switch (s) {

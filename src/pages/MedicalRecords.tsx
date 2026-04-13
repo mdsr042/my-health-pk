@@ -137,15 +137,18 @@ export default function MedicalRecords() {
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_220px_180px_minmax(0,1fr)]">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by name, MRN, phone, or CNIC..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="pl-9"
-          />
+      <div className="grid items-end gap-3 lg:grid-cols-[minmax(0,1.2fr)_220px_180px_minmax(0,1fr)]">
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Patient Search</Label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by name, MRN, phone, or CNIC..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">Clinic</Label>
