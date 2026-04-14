@@ -26,6 +26,8 @@ interface MedicationModalProps {
   onAdd: (med: Medication) => void;
   onRemove: (medicationId: string) => void;
   prescribedMedications: Medication[];
+  mode?: 'prescription' | 'favorites';
+  onFavoriteSaved?: () => void;
 }
 
 const instructionPresets = [
@@ -93,7 +95,15 @@ function toMedication(entry: MedicationCatalogEntry): Medication {
   };
 }
 
-export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, prescribedMedications }: MedicationModalProps) {
+export default function MedicationModal({
+  open,
+  onOpenChange,
+  onAdd,
+  onRemove,
+  prescribedMedications,
+  mode = 'prescription',
+  onFavoriteSaved,
+}: MedicationModalProps) {
   const [search, setSearch] = useState('');
   const [sourceMode, setSourceMode] = useState<'favorites' | 'recent' | 'browse'>('favorites');
   const [selected, setSelected] = useState<Medication | null>(null);
@@ -337,6 +347,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
   }, [dosePattern, parsedPattern]);
   const requiredDosePatternError = selected && !dosePattern.trim() ? 'Dose pattern is required before adding this medication.' : '';
   const canSubmitMedication = Boolean(selected && selected.name.trim() && dosePattern.trim() && parsedPattern);
+  const canSaveFavoriteFromSettings = Boolean(canSubmitMedication && selectedRegistrationNo);
 
   const handleDosePatternChange = (value: string) => {
     setDosePattern(value);
@@ -385,6 +396,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
         setFavorites(current => [favorite, ...current.filter(item => item.registrationNo !== selectedRegistrationNo)]);
         setFavoriteKeys(current => new Set(current).add(selectedRegistrationNo));
       }
+      onFavoriteSaved?.();
     } finally {
       setSavingFavorite(false);
     }
@@ -486,11 +498,15 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
           if (!target) return;
           if (target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') return;
           event.preventDefault();
+          if (mode === 'favorites') {
+            void handleSaveFavorite();
+            return;
+          }
           handleAdd();
         }}
       >
         <DialogHeader>
-          <DialogTitle>Add Medication</DialogTitle>
+          <DialogTitle>{mode === 'favorites' ? 'Add Favorite Medicine' : 'Add Medication'}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-5 lg:grid-cols-[1.1fr,0.9fr]">
@@ -519,9 +535,11 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
               <Button variant={sourceMode === 'browse' ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setSourceMode('browse')}>
                 Browse All
               </Button>
-              <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={handleCustomMedication}>
-                <Plus className="w-3 h-3" /> Add Custom Medicine
-              </Button>
+              {mode !== 'favorites' && (
+                <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={handleCustomMedication}>
+                  <Plus className="w-3 h-3" /> Add Custom Medicine
+                </Button>
+              )}
             </div>
 
             <div className="rounded-lg border border-border overflow-hidden">
@@ -901,7 +919,7 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
 
                     <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap gap-2 justify-end items-stretch sm:items-center">
                       <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => setSelected(null)}>Clear</Button>
-                      {!isCustomMedication && selectedRegistrationNo ? (
+                      {mode !== 'favorites' && !isCustomMedication && selectedRegistrationNo ? (
                         <Button
                           variant="outline"
                           size="sm"
@@ -913,9 +931,24 @@ export default function MedicationModal({ open, onOpenChange, onAdd, onRemove, p
                           {savingFavorite ? 'Saving...' : isSelectedFavorite ? 'Update Favorite Setup' : 'Save to Favorites'}
                         </Button>
                       ) : null}
-                      <Button size="sm" className="gap-1.5 w-full sm:w-auto" onClick={handleAdd} disabled={!canSubmitMedication}>
+                      <Button
+                        size="sm"
+                        className="gap-1.5 w-full sm:w-auto"
+                        onClick={() => {
+                          if (mode === 'favorites') {
+                            void handleSaveFavorite();
+                            return;
+                          }
+                          handleAdd();
+                        }}
+                        disabled={mode === 'favorites' ? !canSaveFavoriteFromSettings || savingFavorite : !canSubmitMedication}
+                      >
                         <Plus className="w-4 h-4" />
-                        {prescribedMedications.some(med => med.id === selected.id) ? 'Update Prescription' : 'Add to Prescription'}
+                        {mode === 'favorites'
+                          ? 'Save Favorite'
+                          : prescribedMedications.some(med => med.id === selected.id)
+                              ? 'Update Prescription'
+                              : 'Add to Prescription'}
                       </Button>
                     </div>
                   </div>

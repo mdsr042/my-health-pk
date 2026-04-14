@@ -4,10 +4,10 @@ import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
 import { readStorage, writeStorage } from '@/lib/storage';
-import { mergeAppSettings, SETTINGS_STORAGE_KEY, SETTINGS_UPDATED_EVENT } from '@/lib/app-defaults';
+import { mergeAppSettings, SETTINGS_SECTION_OVERVIEW, SETTINGS_STORAGE_KEY, SETTINGS_UPDATED_EVENT } from '@/lib/app-defaults';
 import {
   LayoutDashboard, Users, CalendarDays, FileText, Settings, LogOut,
-  Stethoscope, ChevronDown, Bell, Search, Menu, X, FolderOpen, PanelLeftClose, PanelLeftOpen
+  Stethoscope, ChevronDown, Bell, Search, Menu, X, FolderOpen, PanelLeftClose, PanelLeftOpen, UserCircle2
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
@@ -16,7 +16,7 @@ import {
 interface AppLayoutProps {
   children: ReactNode;
   currentPage: string;
-  onNavigate: (page: string) => void;
+  onNavigate: (page: string, settingsSection?: string) => void;
   onOpenPatient: (patientId: string) => void;
 }
 
@@ -143,18 +143,50 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
         </nav>
 
         {/* Doctor info */}
-        <div className={`border-t border-sidebar-border ${sidebarCollapsed ? 'p-3' : 'p-4'}`}>
-          <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center' : ''}`}>
-            <div className="w-9 h-9 rounded-full bg-sidebar-primary/20 flex items-center justify-center text-sm font-semibold text-sidebar-primary">
-              {doctor?.name.split(' ').slice(-2).map(n => n[0]).join('')}
-            </div>
-            {!sidebarCollapsed && (
-              <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-sidebar-foreground truncate">{doctor?.name}</p>
-              <p className="text-xs text-sidebar-muted truncate">{doctor?.specialization}</p>
-              </div>
-            )}
-          </div>
+        <div className={`border-t border-sidebar-border space-y-3 ${sidebarCollapsed ? 'p-3' : 'p-4'}`}>
+          <Button
+            variant="ghost"
+            className={`w-full border border-sidebar-border/70 text-sidebar-foreground hover:bg-sidebar-accent/60 ${sidebarCollapsed ? 'h-10 justify-center px-0' : 'justify-start gap-3'}`}
+            aria-label="Settings"
+            title={sidebarCollapsed ? 'Settings' : undefined}
+            onClick={() => { onNavigate('settings', SETTINGS_SECTION_OVERVIEW); setSidebarOpen(false); }}
+          >
+            <Settings className="h-4 w-4" />
+            {!sidebarCollapsed && <span>Settings</span>}
+          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={`w-full rounded-lg transition-colors hover:bg-sidebar-accent/50 ${sidebarCollapsed ? 'flex justify-center p-2' : 'flex items-center gap-3 p-2 text-left'}`}
+                aria-label="Doctor menu"
+                title={sidebarCollapsed ? doctor?.name : undefined}
+              >
+                <div className="w-9 h-9 rounded-full bg-sidebar-primary/20 flex items-center justify-center text-sm font-semibold text-sidebar-primary">
+                  {doctor?.name.split(' ').slice(-2).map(n => n[0]).join('')}
+                </div>
+                {!sidebarCollapsed && (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-sidebar-foreground truncate">{doctor?.name}</p>
+                      <p className="text-xs text-sidebar-muted truncate">{doctor?.specialization}</p>
+                    </div>
+                    <ChevronDown className="h-4 w-4 text-sidebar-muted" />
+                  </>
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onNavigate('profile')}>
+                <UserCircle2 className="w-4 h-4 mr-2" /> Profile
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={logout} className="text-destructive">
+                <LogOut className="w-4 h-4 mr-2" /> Sign Out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </aside>
 
@@ -245,23 +277,6 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
             <Bell className="w-4.5 h-4.5" />
             <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-destructive" />
           </Button>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <Settings className="w-4.5 h-4.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onNavigate('profile')}>Profile</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onNavigate('clinics')}>Clinic Management</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onNavigate('settings')}>Settings</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={logout} className="text-destructive">
-                <LogOut className="w-4 h-4 mr-2" /> Sign Out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </header>
 
         {/* Patient tabs bar */}

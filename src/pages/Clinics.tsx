@@ -26,7 +26,11 @@ const defaultClinicForm = {
 
 const clinicIconOptions = ['🏥', '🏨', '🏩', '🩺', '🏪', '🏬', '🏢', '❤️', '🧑‍⚕️'];
 
-export default function ClinicsPage() {
+interface ClinicsPageProps {
+  embedded?: boolean;
+}
+
+export default function ClinicsPage({ embedded = false }: ClinicsPageProps) {
   const { activeClinic, doctorClinics, switchClinic, refreshSession } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingClinic, setEditingClinic] = useState<Clinic | null>(null);
@@ -91,10 +95,10 @@ export default function ClinicsPage() {
   };
 
   return (
-    <div className="p-4 lg:p-6 max-w-5xl mx-auto space-y-6 animate-fade-in">
+    <div className={embedded ? 'space-y-6' : 'p-4 lg:p-6 max-w-5xl mx-auto space-y-6 animate-fade-in'}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-foreground">Clinic Management</h1>
+          <h1 className={`${embedded ? 'text-lg' : 'text-xl'} font-bold text-foreground`}>Clinic Management</h1>
           <p className="text-sm text-muted-foreground">Manage existing clinics and add new practice locations.</p>
         </div>
         <Button onClick={openAddModal} className="gap-2">

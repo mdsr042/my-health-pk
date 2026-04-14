@@ -26,6 +26,7 @@ import {
 import { readStorage, writeStorage } from '@/lib/storage';
 import {
   mergeAppSettings,
+  SETTINGS_SECTION_CLINICS,
   SETTINGS_SECTION_FAVORITES,
   SETTINGS_SECTION_GENERAL,
   SETTINGS_SECTION_LIBRARY,
@@ -73,10 +74,13 @@ import type {
 } from '@/lib/app-types';
 import TreatmentTemplateDialog from '@/components/settings/TreatmentTemplateDialog';
 import ReusableContentDialog from '@/components/settings/ReusableContentDialog';
+import MedicationModal from '@/components/consultation/MedicationModal';
+import ClinicsPage from '@/pages/Clinics';
 
 type SettingsSection =
   | typeof SETTINGS_SECTION_OVERVIEW
   | typeof SETTINGS_SECTION_GENERAL
+  | typeof SETTINGS_SECTION_CLINICS
   | typeof SETTINGS_SECTION_TEMPLATES
   | typeof SETTINGS_SECTION_FAVORITES
   | typeof SETTINGS_SECTION_LIBRARY
@@ -97,6 +101,12 @@ const SETTINGS_SECTIONS: Array<{
     title: 'General',
     description: 'Notifications, consultation preferences, language, and appearance.',
     icon: Settings2,
+  },
+  {
+    id: SETTINGS_SECTION_CLINICS,
+    title: 'Clinic Management',
+    description: 'Manage locations, active clinic details, and new practice branches.',
+    icon: Globe,
   },
   {
     id: SETTINGS_SECTION_TEMPLATES,
@@ -127,6 +137,7 @@ const SETTINGS_SECTIONS: Array<{
 const isSettingsSection = (value?: string): value is SettingsSection =>
   value === SETTINGS_SECTION_OVERVIEW ||
   value === SETTINGS_SECTION_GENERAL ||
+  value === SETTINGS_SECTION_CLINICS ||
   value === SETTINGS_SECTION_TEMPLATES ||
   value === SETTINGS_SECTION_FAVORITES ||
   value === SETTINGS_SECTION_LIBRARY ||
@@ -192,6 +203,7 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [libraryDialogMode, setLibraryDialogMode] = useState<'diagnosis' | 'investigation' | 'advice'>('diagnosis');
   const [editingLibraryItem, setEditingLibraryItem] = useState<DiagnosisSet | InvestigationSet | AdviceTemplate | null>(null);
+  const [favoriteModalOpen, setFavoriteModalOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>(
     isSettingsSection(initialSection) ? initialSection : SETTINGS_SECTION_OVERVIEW,
   );
@@ -737,6 +749,11 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
       title="Medication Favorites"
       description="Saved favorites keep the full prescribing setup from your medication flow."
       onBack={() => setActiveSection(SETTINGS_SECTION_OVERVIEW)}
+      actions={
+        <Button onClick={() => setFavoriteModalOpen(true)} className="gap-1.5">
+          <Plus className="h-4 w-4" /> Add Favorite Medicine
+        </Button>
+      }
     >
       <Card className="border-0 shadow-sm">
         <CardContent className="p-5">
@@ -773,6 +790,20 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+    </SectionShell>
+  );
+
+  const renderClinics = () => (
+    <SectionShell
+      title="Clinic Management"
+      description="Manage your active practice locations from the same focused Settings workspace."
+      onBack={() => setActiveSection(SETTINGS_SECTION_OVERVIEW)}
+    >
+      <Card className="border-0 shadow-sm">
+        <CardContent className="p-5">
+          <ClinicsPage embedded />
         </CardContent>
       </Card>
     </SectionShell>
@@ -934,6 +965,7 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
 
         {activeSection === SETTINGS_SECTION_OVERVIEW && renderOverview()}
         {activeSection === SETTINGS_SECTION_GENERAL && renderGeneral()}
+        {activeSection === SETTINGS_SECTION_CLINICS && renderClinics()}
         {activeSection === SETTINGS_SECTION_TEMPLATES && renderTemplates()}
         {activeSection === SETTINGS_SECTION_FAVORITES && renderFavorites()}
         {activeSection === SETTINGS_SECTION_LIBRARY && renderLibrary()}
@@ -962,6 +994,23 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
         mode={libraryDialogMode}
         item={editingLibraryItem}
         onSave={handleLibrarySave}
+      />
+      <MedicationModal
+        open={favoriteModalOpen}
+        onOpenChange={setFavoriteModalOpen}
+        prescribedMedications={[]}
+        onAdd={() => {
+          // Favorites mode saves directly through the modal.
+        }}
+        onRemove={() => {
+          // No prescribed list in settings favorites mode.
+        }}
+        mode="favorites"
+        onFavoriteSaved={() => {
+          void fetchMedicationLibraryFavorites().then(setMedicationFavorites).catch(() => {
+            // Keep the current list if refresh fails.
+          });
+        }}
       />
     </div>
   );
