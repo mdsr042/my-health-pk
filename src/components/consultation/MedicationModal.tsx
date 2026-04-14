@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -142,6 +142,12 @@ export default function MedicationModal({
   const [detailLoadingRegNo, setDetailLoadingRegNo] = useState('');
   const [languageMode, setLanguageMode] = useState<'en' | 'ur' | 'bilingual'>('bilingual');
   const [savingFavorite, setSavingFavorite] = useState(false);
+  const [activeResultIndex, setActiveResultIndex] = useState(-1);
+  const [pendingRevealMedicationId, setPendingRevealMedicationId] = useState('');
+  const [highlightedPrescribedId, setHighlightedPrescribedId] = useState('');
+  const resultRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const prescribedContainerRef = useRef<HTMLDivElement | null>(null);
+  const prescribedItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     if (!open) return;
@@ -178,6 +184,7 @@ export default function MedicationModal({
       setCatalogLoading(false);
       setCatalogHasMore(false);
       setCatalogCursor(null);
+      setActiveResultIndex(-1);
       return;
     }
 
@@ -378,6 +385,60 @@ export default function MedicationModal({
   const selectedMatchCount = selected ? prescribedMedicationCounts.get(getMedicationMatchKey(selected)) ?? 0 : 0;
   const isEditingExistingMedication = Boolean(selected && selectedMatchCount > 0 && prescribedMedications.some(med => med.id === selected.id));
 
+  useEffect(() => {
+    if (filtered.length === 0) {
+      setActiveResultIndex(-1);
+      return;
+    }
+
+    setActiveResultIndex(current => {
+      if (current >= 0 && current < filtered.length) return current;
+      return sourceMode === 'browse' ? 0 : -1;
+    });
+  }, [filtered.length, sourceMode]);
+
+  useEffect(() => {
+    if (activeResultIndex < 0 || activeResultIndex >= filtered.length) return;
+    const activeMedication = filtered[activeResultIndex];
+    if (!activeMedication) return;
+    resultRefs.current[activeMedication.id]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [activeResultIndex, filtered]);
+
+  useEffect(() => {
+    if (!pendingRevealMedicationId) return;
+    const prescribedMedication = prescribedMedications.find(med => med.id === pendingRevealMedicationId);
+    if (!prescribedMedication) return;
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      prescribedItemRefs.current[pendingRevealMedicationId]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      if (prescribedContainerRef.current) {
+        prescribedContainerRef.current.scrollTo({
+          top: prescribedContainerRef.current.scrollHeight,
+          behavior: 'smooth',
+        });
+      }
+      setHighlightedPrescribedId(pendingRevealMedicationId);
+      window.setTimeout(() => setHighlightedPrescribedId(current => (current === pendingRevealMedicationId ? '' : current)), 1800);
+      setPendingRevealMedicationId('');
+    });
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [pendingRevealMedicationId, prescribedMedications]);
+
+  const clearSelectionState = () => {
+    setSelected(null);
+    setDosePattern('');
+    setCustomFrequency('');
+    setCustomFrequencyUrdu('');
+    setCustomDuration('');
+    setCustomInstructions('');
+    setCustomInstructionsUrdu('');
+    setInstructionPreset('select');
+    setLanguageMode('bilingual');
+    setCatalogDetail(null);
+    setDetailLoadingRegNo('');
+  };
+
   const handleDosePatternChange = (value: string) => {
     setDosePattern(value);
     if (!selected) return;
@@ -408,6 +469,8 @@ export default function MedicationModal({
     if (!medicationToSave) return;
 
     onAdd(medicationToSave);
+    setPendingRevealMedicationId(medicationToSave.id);
+    clearSelectionState();
     void persistMedicationPreference(medicationToSave).catch(() => {
       // Keep prescribing flow fast even if preference persistence fails.
     });
@@ -497,22 +560,13 @@ export default function MedicationModal({
 
   const handleClose = (o: boolean) => {
     if (!o) {
-      setSelected(null);
+      clearSelectionState();
       setSearch('');
       setSourceMode('favorites');
-      setDosePattern('');
-      setCustomFrequency('');
-      setCustomFrequencyUrdu('');
-      setCustomDuration('');
-      setCustomInstructions('');
-      setCustomInstructionsUrdu('');
-      setInstructionPreset('select');
-      setLanguageMode('bilingual');
       setCatalogResults([]);
       setCatalogHasMore(false);
       setCatalogCursor(null);
-      setCatalogDetail(null);
-      setDetailLoadingRegNo('');
+      setActiveResultIndex(-1);
     }
     onOpenChange(o);
   };
@@ -548,6 +602,29 @@ export default function MedicationModal({
                 onChange={e => {
                   setSearch(e.target.value);
                   if (e.target.value) setSourceMode('browse');
+                }}
+                onKeyDown={event => {
+                  if (!filtered.length) return;
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    setActiveResultIndex(current => (current + 1 + filtered.length) % filtered.length);
+                    return;
+                  }
+                  if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    setActiveResultIndex(current => {
+                      if (current <= 0) return filtered.length - 1;
+                      return current - 1;
+                    });
+                    return;
+                  }
+                  if (event.key === 'Enter' && !selected && activeResultIndex >= 0) {
+                    event.preventDefault();
+                    const activeMedication = filtered[activeResultIndex];
+                    if (activeMedication) {
+                      handleSelect(activeMedication);
+                    }
+                  }
                 }}
                 className="pl-9"
                 autoFocus
@@ -594,7 +671,15 @@ export default function MedicationModal({
                   <p className="text-sm text-muted-foreground text-center py-8">Type at least 2 letters to search brands and generics from the Pakistan medicine catalog.</p>
                 )}
                 {sourceMode === 'browse' && search.trim().length >= 2 && !catalogLoading && filtered.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-8">No medicines found in the Pakistan catalog.</p>
+                  <div className="py-6 space-y-3 text-center">
+                    <p className="text-sm text-muted-foreground">No medicines found in the Pakistan catalog.</p>
+                    {mode !== 'favorites' && (
+                      <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCustomMedication}>
+                        <Plus className="w-3.5 h-3.5" />
+                        {search.trim() ? `Enter "${search.trim()}" manually` : 'Enter custom medicine'}
+                      </Button>
+                    )}
+                  </div>
                 )}
                 {filtered.map(med => {
                   const registrationNo = med.id.startsWith('cat-') ? med.id.replace('cat-', '') : '';
@@ -605,6 +690,9 @@ export default function MedicationModal({
                   return (
                     <div
                       key={med.id}
+                      ref={node => {
+                        resultRefs.current[med.id] = node;
+                      }}
                       role="button"
                       tabIndex={0}
                       onClick={() => handleSelect(med)}
@@ -615,7 +703,11 @@ export default function MedicationModal({
                         }
                       }}
                       className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left cursor-pointer ${
-                        selected?.id === med.id ? 'bg-muted border border-border' : 'hover:bg-muted/50'
+                        selected?.id === med.id
+                          ? 'bg-muted border border-border'
+                          : activeResultIndex === filtered.findIndex(item => item.id === med.id)
+                            ? 'bg-primary/5 border border-primary/30'
+                            : 'hover:bg-muted/50'
                       }`}
                     >
                       <div className="flex-1 min-w-0">
@@ -699,12 +791,18 @@ export default function MedicationModal({
                   {prescribedMedications.length}
                 </Badge>
               </div>
-              <div className="max-h-[220px] sm:max-h-[180px] overflow-y-auto space-y-2 p-3 scrollbar-thin">
+              <div ref={prescribedContainerRef} className="min-h-[210px] max-h-[210px] sm:min-h-[240px] sm:max-h-[240px] overflow-y-auto space-y-2 p-3 scrollbar-thin">
                 {prescribedMedications.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">No medications added yet</p>
                 ) : (
                   prescribedMedications.map((med, index) => (
-                    <div key={med.id} className="rounded-lg bg-muted/50 p-3">
+                    <div
+                      key={med.id}
+                      ref={node => {
+                        prescribedItemRefs.current[med.id] = node;
+                      }}
+                      className={`rounded-lg p-3 transition-colors ${highlightedPrescribedId === med.id ? 'bg-emerald-50 ring-1 ring-emerald-200' : 'bg-muted/50'}`}
+                    >
                       <div className="flex items-start gap-2">
                         <span className="text-xs font-medium text-muted-foreground">{index + 1}.</span>
                         <div className="min-w-0 flex-1">
@@ -758,7 +856,7 @@ export default function MedicationModal({
                   <div className="p-3 space-y-4">
                     {isEditingExistingMedication && (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-                        This medicine is already in the prescription. Updating it will replace the current setup.
+                        This medicine is already prescribed in this visit. Review the configuration below and click <span className="font-semibold">Update Prescription</span> to replace the existing entry.
                       </div>
                     )}
                     <div className="bg-muted/50 rounded-lg p-3">
