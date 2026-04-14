@@ -1,0 +1,60 @@
+export const starterDiagnosisCatalog = [
+  { code: 'J06.9', name: 'Upper respiratory tract infection', isFavorite: true },
+  { code: 'K52.9', name: 'Acute gastroenteritis', isFavorite: true },
+  { code: 'A09', name: 'Acute diarrhea', isFavorite: true },
+  { code: 'I10', name: 'Essential hypertension', isFavorite: true },
+  { code: 'E11.9', name: 'Type 2 diabetes mellitus', isFavorite: true },
+  { code: 'R51.9', name: 'Headache', isFavorite: true },
+  { code: 'R50.9', name: 'Fever', isFavorite: true },
+  { code: 'J45.909', name: 'Bronchial asthma', isFavorite: false },
+  { code: 'N39.0', name: 'Urinary tract infection', isFavorite: false },
+  { code: 'M17.9', name: 'Knee osteoarthritis', isFavorite: false },
+  { code: 'A01.0', name: 'Enteric fever', isFavorite: false },
+  { code: 'B54', name: 'Malaria', isFavorite: false },
+];
+
+export const starterInvestigationCatalog = [
+  { name: 'Complete Blood Count (CBC)', category: 'Hematology', type: 'lab', isFavorite: true },
+  { name: 'HbA1c', category: 'Biochemistry', type: 'lab', isFavorite: true },
+  { name: 'Fasting Blood Glucose', category: 'Biochemistry', type: 'lab', isFavorite: true },
+  { name: 'Liver Function Tests (LFTs)', category: 'Biochemistry', type: 'lab', isFavorite: true },
+  { name: 'Renal Function Tests (RFTs)', category: 'Biochemistry', type: 'lab', isFavorite: true },
+  { name: 'Urine Complete Examination', category: 'Microbiology', type: 'lab', isFavorite: true },
+  { name: 'Urine Culture & Sensitivity', category: 'Microbiology', type: 'lab', isFavorite: false },
+  { name: 'Lipid Profile', category: 'Biochemistry', type: 'lab', isFavorite: true },
+  { name: 'ECG', category: 'Cardiology', type: 'lab', isFavorite: true },
+  { name: 'CRP', category: 'Biochemistry', type: 'lab', isFavorite: false },
+  { name: 'Chest X-Ray PA View', category: 'General Radiology', type: 'radiology', isFavorite: true },
+  { name: 'Ultrasound Abdomen & Pelvis', category: 'Ultrasound', type: 'radiology', isFavorite: true },
+  { name: 'Ultrasound KUB', category: 'Ultrasound', type: 'radiology', isFavorite: false },
+  { name: 'Echocardiography', category: 'Cardiology', type: 'radiology', isFavorite: true },
+  { name: 'CT Scan Head Plain', category: 'CT Scan', type: 'radiology', isFavorite: false },
+  { name: 'MRI Brain with Contrast', category: 'MRI', type: 'radiology', isFavorite: false },
+];
+
+export const starterReferralSpecialties = [
+  'Cardiology',
+  'Pulmonology',
+  'Gastroenterology',
+  'Nephrology',
+  'Neurology',
+  'Orthopedics',
+  'Dermatology',
+  'ENT',
+  'Ophthalmology',
+  'Psychiatry',
+  'Endocrinology',
+  'Oncology',
+  'Urology',
+  'Gynecology',
+  'Pediatrics',
+];
+
+export const starterReferralFacilities = [
+  { name: 'Jinnah Hospital', city: 'Lahore', phone: '' },
+  { name: 'Mayo Hospital', city: 'Lahore', phone: '' },
+  { name: 'Services Hospital', city: 'Lahore', phone: '' },
+  { name: 'Shaukat Khanum Memorial', city: 'Lahore', phone: '' },
+  { name: 'Hameed Latif Hospital', city: 'Lahore', phone: '' },
+  { name: 'National Hospital', city: 'Lahore', phone: '' },
+];

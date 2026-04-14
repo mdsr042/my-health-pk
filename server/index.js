@@ -19,12 +19,17 @@ import { createRateLimitMiddleware } from './rateLimit.js';
 import {
   adviceTemplateSchema,
   appointmentSchema,
+  careActionSchema,
+  diagnosisCatalogSchema,
   diagnosisSetSchema,
+  investigationCatalogSchema,
   investigationSetSchema,
   parseOrThrow,
   passwordChangeSchema,
   passwordResetSchema,
   patientSchema,
+  referralFacilitySchema,
+  referralSpecialtySchema,
   signupSchema,
   treatmentTemplateSchema,
   validatePasswordPolicy,
@@ -140,7 +145,63 @@ function mapClinicalNote(row, diagnosesByNote, medicationsByNote, labOrdersByNot
     diagnoses: diagnosesByNote[row.id] ?? [],
     medications: medicationsByNote[row.id] ?? [],
     labOrders: labOrdersByNote[row.id] ?? [],
+    careActions: row.care_actions ?? [],
     status: row.status,
+  };
+}
+
+function mapDiagnosisCatalogEntry(row) {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    isActive: row.is_active,
+  };
+}
+
+function mapInvestigationCatalogEntry(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    type: row.type,
+    isActive: row.is_active,
+  };
+}
+
+function mapReferralSpecialty(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    isActive: row.is_active,
+  };
+}
+
+function mapReferralFacility(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    city: row.city,
+    phone: row.phone,
+    isActive: row.is_active,
+  };
+}
+
+function mapCareAction(row) {
+  return {
+    id: row.id,
+    appointmentId: row.appointment_id ?? '',
+    patientId: row.patient_id,
+    clinicId: row.clinic_id,
+    doctorId: row.doctor_user_id,
+    type: row.type,
+    targetType: row.target_type,
+    targetId: row.target_id,
+    title: row.title,
+    notes: row.notes,
+    urgency: row.urgency,
+    actionDate: row.action_date,
+    createdAt: row.created_at,
   };
 }
 
@@ -237,7 +298,7 @@ async function getWorkspaceNotes(workspaceId, patientId = null) {
   if (notes.length === 0) return [];
 
   const noteIds = notes.map(note => note.id);
-  const [diagnosesResult, medicationsResult, labOrdersResult] = await Promise.all([
+  const [diagnosesResult, medicationsResult, labOrdersResult, careActionsResult] = await Promise.all([
     query(
       `
         SELECT *
@@ -259,6 +320,15 @@ async function getWorkspaceNotes(workspaceId, patientId = null) {
         SELECT *
         FROM lab_orders
         WHERE note_id = ANY($1::text[])
+      `,
+      [noteIds]
+    ),
+    query(
+      `
+        SELECT *
+        FROM care_actions
+        WHERE note_id = ANY($1::text[])
+        ORDER BY created_at DESC
       `,
       [noteIds]
     ),
@@ -311,7 +381,20 @@ async function getWorkspaceNotes(workspaceId, patientId = null) {
     return acc;
   }, {});
 
-  return notes.map(note => mapClinicalNote(note, diagnosesByNote, medicationsByNote, labOrdersByNote));
+  const careActionsByNote = careActionsResult.rows.reduce((acc, row) => {
+    acc[row.note_id] ??= [];
+    acc[row.note_id].push(mapCareAction(row));
+    return acc;
+  }, {});
+
+  return notes.map(note =>
+    mapClinicalNote(
+      { ...note, care_actions: careActionsByNote[note.id] ?? [] },
+      diagnosesByNote,
+      medicationsByNote,
+      labOrdersByNote
+    )
+  );
 }
 
 async function getWorkspaceDrafts(workspaceId) {
@@ -388,6 +471,312 @@ async function getDoctorMedicationPreferences(doctorUserId) {
     payload: row.payload ?? {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }));
+}
+
+async function searchDiagnosisCatalog(queryText, limit = 20) {
+  const normalized = String(queryText ?? '').trim().toLowerCase();
+  const { rows } = await query(
+    `
+      SELECT id, code, name, is_active
+      FROM diagnosis_catalog
+      WHERE is_active = TRUE
+        AND (
+          $1 = ''
+          OR LOWER(name) LIKE $2
+          OR LOWER(code) LIKE $2
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(name) = $1 THEN 0
+          WHEN LOWER(code) = $1 THEN 1
+          WHEN LOWER(name) LIKE $3 THEN 2
+          WHEN LOWER(code) LIKE $3 THEN 3
+          ELSE 4
+        END,
+        name ASC
+      LIMIT $4
+    `,
+    [normalized, `%${normalized}%`, `${normalized}%`, limit]
+  );
+
+  return rows.map(mapDiagnosisCatalogEntry);
+}
+
+async function searchInvestigationCatalog(queryText, type = '', limit = 20) {
+  const normalized = String(queryText ?? '').trim().toLowerCase();
+  const normalizedType = String(type ?? '').trim();
+  const { rows } = await query(
+    `
+      SELECT id, name, category, type, is_active
+      FROM investigation_catalog
+      WHERE is_active = TRUE
+        AND ($1 = '' OR type = $1)
+        AND (
+          $2 = ''
+          OR LOWER(name) LIKE $3
+          OR LOWER(category) LIKE $3
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(name) = $2 THEN 0
+          WHEN LOWER(name) LIKE $4 THEN 1
+          ELSE 2
+        END,
+        name ASC
+      LIMIT $5
+    `,
+    [normalizedType, normalized, `%${normalized}%`, `${normalized}%`, limit]
+  );
+
+  return rows.map(mapInvestigationCatalogEntry);
+}
+
+async function searchReferralSpecialtiesCatalog(queryText, limit = 20) {
+  const normalized = String(queryText ?? '').trim().toLowerCase();
+  const { rows } = await query(
+    `
+      SELECT id, name, is_active
+      FROM referral_specialties
+      WHERE is_active = TRUE
+        AND ($1 = '' OR LOWER(name) LIKE $2)
+      ORDER BY
+        CASE
+          WHEN LOWER(name) = $1 THEN 0
+          WHEN LOWER(name) LIKE $3 THEN 1
+          ELSE 2
+        END,
+        name ASC
+      LIMIT $4
+    `,
+    [normalized, `%${normalized}%`, `${normalized}%`, limit]
+  );
+  return rows.map(mapReferralSpecialty);
+}
+
+async function searchReferralFacilitiesCatalog(queryText, limit = 20) {
+  const normalized = String(queryText ?? '').trim().toLowerCase();
+  const { rows } = await query(
+    `
+      SELECT id, name, city, phone, is_active
+      FROM referral_facilities
+      WHERE is_active = TRUE
+        AND (
+          $1 = ''
+          OR LOWER(name) LIKE $2
+          OR LOWER(city) LIKE $2
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(name) = $1 THEN 0
+          WHEN LOWER(name) LIKE $3 THEN 1
+          ELSE 2
+        END,
+        name ASC
+      LIMIT $4
+    `,
+    [normalized, `%${normalized}%`, `${normalized}%`, limit]
+  );
+  return rows.map(mapReferralFacility);
+}
+
+async function listDiagnosisCatalogEntries() {
+  const { rows } = await query(
+    `
+      SELECT id, code, name, is_active
+      FROM diagnosis_catalog
+      ORDER BY is_active DESC, name ASC
+    `
+  );
+  return rows.map(mapDiagnosisCatalogEntry);
+}
+
+async function listInvestigationCatalogEntries() {
+  const { rows } = await query(
+    `
+      SELECT id, name, category, type, is_active
+      FROM investigation_catalog
+      ORDER BY is_active DESC, type ASC, name ASC
+    `
+  );
+  return rows.map(mapInvestigationCatalogEntry);
+}
+
+async function listReferralSpecialtiesCatalogEntries() {
+  const { rows } = await query(
+    `
+      SELECT id, name, is_active
+      FROM referral_specialties
+      ORDER BY is_active DESC, name ASC
+    `
+  );
+  return rows.map(mapReferralSpecialty);
+}
+
+async function listReferralFacilitiesCatalogEntries() {
+  const { rows } = await query(
+    `
+      SELECT id, name, city, phone, is_active
+      FROM referral_facilities
+      ORDER BY is_active DESC, name ASC
+    `
+  );
+  return rows.map(mapReferralFacility);
+}
+
+async function getDoctorDiagnosisFavorites(doctorUserId) {
+  const { rows } = await query(
+    `
+      SELECT dc.id, dc.code, dc.name, dc.is_active
+      FROM doctor_diagnosis_favorites fav
+      JOIN diagnosis_catalog dc ON dc.id = fav.diagnosis_catalog_id
+      WHERE fav.doctor_user_id = $1
+      ORDER BY fav.created_at DESC
+    `,
+    [doctorUserId]
+  );
+  return rows.map(mapDiagnosisCatalogEntry);
+}
+
+async function getDoctorRecentDiagnoses(doctorUserId) {
+  const { rows } = await query(
+    `
+      SELECT DISTINCT ON (LOWER(d.name), LOWER(d.code))
+        d.name, d.code
+      FROM diagnoses d
+      JOIN clinical_notes cn ON cn.id = d.note_id
+      WHERE cn.doctor_user_id = $1
+      ORDER BY LOWER(d.name), LOWER(d.code), cn.date DESC
+      LIMIT 20
+    `,
+    [doctorUserId]
+  );
+  return rows.map((row, index) => ({
+    id: `recent-diagnosis-${index}-${row.code || row.name}`,
+    code: row.code,
+    name: row.name,
+    isActive: true,
+  }));
+}
+
+async function getDoctorInvestigationFavorites(doctorUserId, type = '') {
+  const { rows } = await query(
+    `
+      SELECT ic.id, ic.name, ic.category, ic.type, ic.is_active
+      FROM doctor_investigation_favorites fav
+      JOIN investigation_catalog ic ON ic.id = fav.investigation_catalog_id
+      WHERE fav.doctor_user_id = $1
+        AND ($2 = '' OR ic.type = $2)
+      ORDER BY fav.created_at DESC
+    `,
+    [doctorUserId, type]
+  );
+  return rows.map(mapInvestigationCatalogEntry);
+}
+
+async function getDoctorRecentInvestigations(doctorUserId, type = '') {
+  const { rows } = await query(
+    `
+      SELECT DISTINCT ON (LOWER(lo.test_name), LOWER(lo.category))
+        lo.test_name,
+        lo.category
+      FROM lab_orders lo
+      JOIN clinical_notes cn ON cn.id = lo.note_id
+      WHERE cn.doctor_user_id = $1
+        AND (
+          $2 = ''
+          OR (
+            $2 = 'radiology'
+            AND (LOWER(lo.category) LIKE '%radiology%' OR LOWER(lo.category) LIKE '%ct%' OR LOWER(lo.category) LIKE '%mri%' OR LOWER(lo.category) LIKE '%ultrasound%')
+          )
+          OR (
+            $2 = 'lab'
+            AND NOT (LOWER(lo.category) LIKE '%radiology%' OR LOWER(lo.category) LIKE '%ct%' OR LOWER(lo.category) LIKE '%mri%' OR LOWER(lo.category) LIKE '%ultrasound%')
+          )
+        )
+      ORDER BY LOWER(lo.test_name), LOWER(lo.category), cn.date DESC
+      LIMIT 20
+    `,
+    [doctorUserId, type]
+  );
+  return rows.map((row, index) => ({
+    id: `recent-investigation-${index}-${row.test_name}`,
+    name: row.test_name,
+    category: row.category,
+    type: type || 'lab',
+    isActive: true,
+  }));
+}
+
+async function getDoctorReferralFavorites(doctorUserId, targetType) {
+  if (targetType === 'specialty') {
+    const { rows } = await query(
+      `
+        SELECT rs.id, rs.name, rs.is_active
+        FROM doctor_referral_favorites fav
+        JOIN referral_specialties rs ON rs.id = fav.target_id
+        WHERE fav.doctor_user_id = $1 AND fav.target_type = 'specialty'
+        ORDER BY fav.created_at DESC
+      `,
+      [doctorUserId]
+    );
+    return rows.map(mapReferralSpecialty);
+  }
+
+  const { rows } = await query(
+    `
+      SELECT rf.id, rf.name, rf.city, rf.phone, rf.is_active
+      FROM doctor_referral_favorites fav
+      JOIN referral_facilities rf ON rf.id = fav.target_id
+      WHERE fav.doctor_user_id = $1 AND fav.target_type = 'facility'
+      ORDER BY fav.created_at DESC
+    `,
+    [doctorUserId]
+  );
+  return rows.map(mapReferralFacility);
+}
+
+async function getDoctorRecentReferralTargets(doctorUserId, targetType) {
+  if (targetType === 'specialty') {
+    const { rows } = await query(
+      `
+        SELECT DISTINCT ON (LOWER(title)) title
+        FROM care_actions
+        WHERE doctor_user_id = $1
+          AND type = 'referral'
+          AND target_type = 'specialty'
+          AND title <> ''
+        ORDER BY LOWER(title), created_at DESC
+        LIMIT 20
+      `,
+      [doctorUserId]
+    );
+    return rows.map((row, index) => ({
+      id: `recent-specialty-${index}-${row.title}`,
+      name: row.title,
+      isActive: true,
+    }));
+  }
+
+  const { rows } = await query(
+    `
+      SELECT DISTINCT ON (LOWER(title)) title
+      FROM care_actions
+      WHERE doctor_user_id = $1
+        AND type IN ('admission', 'referral')
+        AND target_type = 'facility'
+        AND title <> ''
+      ORDER BY LOWER(title), created_at DESC
+      LIMIT 20
+    `,
+    [doctorUserId]
+  );
+  return rows.map((row, index) => ({
+    id: `recent-facility-${index}-${row.title}`,
+    name: row.title,
+    city: '',
+    phone: '',
+    isActive: true,
   }));
 }
 
@@ -649,6 +1038,166 @@ app.put('/api/medication-preferences', requireAuth, requireRole('doctor_owner'),
   const preferences = await getDoctorMedicationPreferences(req.auth.user.id);
   const preference = preferences.find(item => item.medicationKey === medicationKey);
   res.json({ data: preference });
+}));
+
+app.get('/api/diagnosis-catalog', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const items = await searchDiagnosisCatalog(String(req.query.q ?? ''), Number(req.query.limit ?? 20));
+  res.json({ data: items });
+}));
+
+app.get('/api/diagnosis-catalog/favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await getDoctorDiagnosisFavorites(req.auth.user.id) });
+}));
+
+app.get('/api/diagnosis-catalog/recents', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await getDoctorRecentDiagnoses(req.auth.user.id) });
+}));
+
+app.post('/api/diagnosis-catalog/favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const catalogId = String(req.body?.catalogId ?? '').trim();
+  if (!catalogId) return res.status(400).json({ error: 'Catalog entry is required', code: 'INVALID_DIAGNOSIS_FAVORITE' });
+  await query(
+    `INSERT INTO doctor_diagnosis_favorites (id, doctor_user_id, diagnosis_catalog_id) VALUES ($1, $2, $3)
+     ON CONFLICT (doctor_user_id, diagnosis_catalog_id) DO UPDATE SET updated_at = NOW()`,
+    [createId('doctor_diagnosis_favorite'), req.auth.user.id, catalogId]
+  );
+  res.status(201).json({ ok: true });
+}));
+
+app.delete('/api/diagnosis-catalog/favorites/:catalogId', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  await query(`DELETE FROM doctor_diagnosis_favorites WHERE doctor_user_id = $1 AND diagnosis_catalog_id = $2`, [req.auth.user.id, String(req.params.catalogId ?? '').trim()]);
+  res.json({ ok: true });
+}));
+
+app.get('/api/investigation-catalog', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const items = await searchInvestigationCatalog(String(req.query.q ?? ''), String(req.query.type ?? ''), Number(req.query.limit ?? 20));
+  res.json({ data: items });
+}));
+
+app.get('/api/investigation-catalog/favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await getDoctorInvestigationFavorites(req.auth.user.id, String(req.query.type ?? '')) });
+}));
+
+app.get('/api/investigation-catalog/recents', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await getDoctorRecentInvestigations(req.auth.user.id, String(req.query.type ?? '')) });
+}));
+
+app.post('/api/investigation-catalog/favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const catalogId = String(req.body?.catalogId ?? '').trim();
+  if (!catalogId) return res.status(400).json({ error: 'Catalog entry is required', code: 'INVALID_INVESTIGATION_FAVORITE' });
+  await query(
+    `INSERT INTO doctor_investigation_favorites (id, doctor_user_id, investigation_catalog_id) VALUES ($1, $2, $3)
+     ON CONFLICT (doctor_user_id, investigation_catalog_id) DO UPDATE SET updated_at = NOW()`,
+    [createId('doctor_investigation_favorite'), req.auth.user.id, catalogId]
+  );
+  res.status(201).json({ ok: true });
+}));
+
+app.delete('/api/investigation-catalog/favorites/:catalogId', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  await query(`DELETE FROM doctor_investigation_favorites WHERE doctor_user_id = $1 AND investigation_catalog_id = $2`, [req.auth.user.id, String(req.params.catalogId ?? '').trim()]);
+  res.json({ ok: true });
+}));
+
+app.get('/api/referral-specialties', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await searchReferralSpecialtiesCatalog(String(req.query.q ?? ''), Number(req.query.limit ?? 20)) });
+}));
+
+app.get('/api/referral-specialties/favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await getDoctorReferralFavorites(req.auth.user.id, 'specialty') });
+}));
+
+app.get('/api/referral-specialties/recents', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await getDoctorRecentReferralTargets(req.auth.user.id, 'specialty') });
+}));
+
+app.post('/api/referral-specialties/favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const targetId = String(req.body?.targetId ?? '').trim();
+  if (!targetId) return res.status(400).json({ error: 'Specialty is required', code: 'INVALID_REFERRAL_FAVORITE' });
+  await query(
+    `INSERT INTO doctor_referral_favorites (id, doctor_user_id, target_type, target_id) VALUES ($1, $2, 'specialty', $3)
+     ON CONFLICT (doctor_user_id, target_type, target_id) DO UPDATE SET updated_at = NOW()`,
+    [createId('doctor_referral_favorite'), req.auth.user.id, targetId]
+  );
+  res.status(201).json({ ok: true });
+}));
+
+app.delete('/api/referral-specialties/favorites/:targetId', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  await query(`DELETE FROM doctor_referral_favorites WHERE doctor_user_id = $1 AND target_type = 'specialty' AND target_id = $2`, [req.auth.user.id, String(req.params.targetId ?? '').trim()]);
+  res.json({ ok: true });
+}));
+
+app.get('/api/referral-facilities', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await searchReferralFacilitiesCatalog(String(req.query.q ?? ''), Number(req.query.limit ?? 20)) });
+}));
+
+app.get('/api/referral-facilities/favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await getDoctorReferralFavorites(req.auth.user.id, 'facility') });
+}));
+
+app.get('/api/referral-facilities/recents', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  res.json({ data: await getDoctorRecentReferralTargets(req.auth.user.id, 'facility') });
+}));
+
+app.post('/api/referral-facilities/favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const targetId = String(req.body?.targetId ?? '').trim();
+  if (!targetId) return res.status(400).json({ error: 'Facility is required', code: 'INVALID_REFERRAL_FAVORITE' });
+  await query(
+    `INSERT INTO doctor_referral_favorites (id, doctor_user_id, target_type, target_id) VALUES ($1, $2, 'facility', $3)
+     ON CONFLICT (doctor_user_id, target_type, target_id) DO UPDATE SET updated_at = NOW()`,
+    [createId('doctor_referral_favorite'), req.auth.user.id, targetId]
+  );
+  res.status(201).json({ ok: true });
+}));
+
+app.delete('/api/referral-facilities/favorites/:targetId', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  await query(`DELETE FROM doctor_referral_favorites WHERE doctor_user_id = $1 AND target_type = 'facility' AND target_id = $2`, [req.auth.user.id, String(req.params.targetId ?? '').trim()]);
+  res.json({ ok: true });
+}));
+
+app.get('/api/care-actions', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const patientId = String(req.query.patientId ?? '').trim();
+  if (patientId) {
+    const rows = await query(
+      `SELECT * FROM care_actions WHERE workspace_id = $1 AND patient_id = $2 ORDER BY created_at DESC`,
+      [req.auth.workspace.id, patientId]
+    );
+    return res.json({ data: rows.rows.map(mapCareAction) });
+  }
+  const rows = await query(
+    `SELECT * FROM care_actions WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 100`,
+    [req.auth.workspace.id]
+  );
+  res.json({ data: rows.rows.map(mapCareAction) });
+}));
+
+app.post('/api/care-actions', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(careActionSchema, req.body, 'INVALID_CARE_ACTION');
+  const appointmentCheck = await withTransaction(client => requireOwnedAppointment(client, req.auth.workspace.id, payload.appointmentId));
+  if (appointmentCheck.patient_id !== payload.patientId || appointmentCheck.clinic_id !== payload.clinicId) {
+    return res.status(400).json({ error: 'Care action does not match appointment context', code: 'INVALID_CARE_ACTION' });
+  }
+  const result = await query(
+    `INSERT INTO care_actions (
+      id, appointment_id, workspace_id, patient_id, clinic_id, doctor_user_id, type, target_type, target_id, title, notes, urgency, action_date
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     RETURNING *`,
+    [
+      createId('care_action'),
+      payload.appointmentId,
+      req.auth.workspace.id,
+      payload.patientId,
+      payload.clinicId,
+      req.auth.user.id,
+      payload.type,
+      payload.targetType,
+      payload.targetId,
+      payload.title,
+      payload.notes,
+      payload.urgency,
+      payload.actionDate,
+    ]
+  );
+  res.status(201).json({ data: mapCareAction(result.rows[0]) });
 }));
 
 app.get('/api/treatment-templates', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
@@ -1305,6 +1854,262 @@ app.get('/api/admin/doctors', requireAuth, requireRole('platform_admin'), asyncH
   });
 }));
 
+app.get('/api/admin/diagnosis-catalog', requireAuth, requireRole('platform_admin'), asyncHandler(async (_req, res) => {
+  res.json({ data: await listDiagnosisCatalogEntries() });
+}));
+
+app.post('/api/admin/diagnosis-catalog', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(diagnosisCatalogSchema, req.body ?? {}, 'INVALID_DIAGNOSIS_CATALOG_ENTRY');
+  const { rows } = await query(
+    `
+      INSERT INTO diagnosis_catalog (id, code, name, is_active)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, code, name, is_active
+    `,
+    [createId('diagnosis_catalog_entry'), payload.code.trim(), payload.name.trim(), payload.isActive]
+  );
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_diagnosis_created',
+    details: { diagnosisCatalogId: rows[0].id, code: rows[0].code, name: rows[0].name },
+  });
+
+  res.status(201).json({ data: mapDiagnosisCatalogEntry(rows[0]) });
+}));
+
+app.put('/api/admin/diagnosis-catalog/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(diagnosisCatalogSchema, req.body ?? {}, 'INVALID_DIAGNOSIS_CATALOG_ENTRY');
+  const { rows } = await query(
+    `
+      UPDATE diagnosis_catalog
+      SET code = $2, name = $3, is_active = $4, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, code, name, is_active
+    `,
+    [req.params.id, payload.code.trim(), payload.name.trim(), payload.isActive]
+  );
+
+  if (!rows[0]) {
+    return res.status(404).json({ error: 'Diagnosis catalog entry not found', code: 'DIAGNOSIS_CATALOG_NOT_FOUND' });
+  }
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_diagnosis_updated',
+    details: { diagnosisCatalogId: rows[0].id, code: rows[0].code, name: rows[0].name },
+  });
+
+  res.json({ data: mapDiagnosisCatalogEntry(rows[0]) });
+}));
+
+app.delete('/api/admin/diagnosis-catalog/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const { rowCount } = await query('DELETE FROM diagnosis_catalog WHERE id = $1', [req.params.id]);
+  if (rowCount === 0) {
+    return res.status(404).json({ error: 'Diagnosis catalog entry not found', code: 'DIAGNOSIS_CATALOG_NOT_FOUND' });
+  }
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_diagnosis_deleted',
+    details: { diagnosisCatalogId: req.params.id },
+  });
+
+  res.json({ ok: true });
+}));
+
+app.get('/api/admin/investigation-catalog', requireAuth, requireRole('platform_admin'), asyncHandler(async (_req, res) => {
+  res.json({ data: await listInvestigationCatalogEntries() });
+}));
+
+app.post('/api/admin/investigation-catalog', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(investigationCatalogSchema, req.body ?? {}, 'INVALID_INVESTIGATION_CATALOG_ENTRY');
+  const { rows } = await query(
+    `
+      INSERT INTO investigation_catalog (id, name, category, type, is_active)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, name, category, type, is_active
+    `,
+    [createId('investigation_catalog_entry'), payload.name.trim(), payload.category.trim(), payload.type, payload.isActive]
+  );
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_investigation_created',
+    details: { investigationCatalogId: rows[0].id, name: rows[0].name, type: rows[0].type },
+  });
+
+  res.status(201).json({ data: mapInvestigationCatalogEntry(rows[0]) });
+}));
+
+app.put('/api/admin/investigation-catalog/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(investigationCatalogSchema, req.body ?? {}, 'INVALID_INVESTIGATION_CATALOG_ENTRY');
+  const { rows } = await query(
+    `
+      UPDATE investigation_catalog
+      SET name = $2, category = $3, type = $4, is_active = $5, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, name, category, type, is_active
+    `,
+    [req.params.id, payload.name.trim(), payload.category.trim(), payload.type, payload.isActive]
+  );
+
+  if (!rows[0]) {
+    return res.status(404).json({ error: 'Investigation catalog entry not found', code: 'INVESTIGATION_CATALOG_NOT_FOUND' });
+  }
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_investigation_updated',
+    details: { investigationCatalogId: rows[0].id, name: rows[0].name, type: rows[0].type },
+  });
+
+  res.json({ data: mapInvestigationCatalogEntry(rows[0]) });
+}));
+
+app.delete('/api/admin/investigation-catalog/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const { rowCount } = await query('DELETE FROM investigation_catalog WHERE id = $1', [req.params.id]);
+  if (rowCount === 0) {
+    return res.status(404).json({ error: 'Investigation catalog entry not found', code: 'INVESTIGATION_CATALOG_NOT_FOUND' });
+  }
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_investigation_deleted',
+    details: { investigationCatalogId: req.params.id },
+  });
+
+  res.json({ ok: true });
+}));
+
+app.get('/api/admin/referral-specialties', requireAuth, requireRole('platform_admin'), asyncHandler(async (_req, res) => {
+  res.json({ data: await listReferralSpecialtiesCatalogEntries() });
+}));
+
+app.post('/api/admin/referral-specialties', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(referralSpecialtySchema, req.body ?? {}, 'INVALID_REFERRAL_SPECIALTY');
+  const { rows } = await query(
+    `
+      INSERT INTO referral_specialties (id, name, is_active)
+      VALUES ($1, $2, $3)
+      RETURNING id, name, is_active
+    `,
+    [createId('referral_specialty'), payload.name.trim(), payload.isActive]
+  );
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_referral_specialty_created',
+    details: { referralSpecialtyId: rows[0].id, name: rows[0].name },
+  });
+
+  res.status(201).json({ data: mapReferralSpecialty(rows[0]) });
+}));
+
+app.put('/api/admin/referral-specialties/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(referralSpecialtySchema, req.body ?? {}, 'INVALID_REFERRAL_SPECIALTY');
+  const { rows } = await query(
+    `
+      UPDATE referral_specialties
+      SET name = $2, is_active = $3, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, name, is_active
+    `,
+    [req.params.id, payload.name.trim(), payload.isActive]
+  );
+
+  if (!rows[0]) {
+    return res.status(404).json({ error: 'Referral specialty not found', code: 'REFERRAL_SPECIALTY_NOT_FOUND' });
+  }
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_referral_specialty_updated',
+    details: { referralSpecialtyId: rows[0].id, name: rows[0].name },
+  });
+
+  res.json({ data: mapReferralSpecialty(rows[0]) });
+}));
+
+app.delete('/api/admin/referral-specialties/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const { rowCount } = await query('DELETE FROM referral_specialties WHERE id = $1', [req.params.id]);
+  if (rowCount === 0) {
+    return res.status(404).json({ error: 'Referral specialty not found', code: 'REFERRAL_SPECIALTY_NOT_FOUND' });
+  }
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_referral_specialty_deleted',
+    details: { referralSpecialtyId: req.params.id },
+  });
+
+  res.json({ ok: true });
+}));
+
+app.get('/api/admin/referral-facilities', requireAuth, requireRole('platform_admin'), asyncHandler(async (_req, res) => {
+  res.json({ data: await listReferralFacilitiesCatalogEntries() });
+}));
+
+app.post('/api/admin/referral-facilities', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(referralFacilitySchema, req.body ?? {}, 'INVALID_REFERRAL_FACILITY');
+  const { rows } = await query(
+    `
+      INSERT INTO referral_facilities (id, name, city, phone, is_active)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, name, city, phone, is_active
+    `,
+    [createId('referral_facility'), payload.name.trim(), payload.city.trim(), payload.phone.trim(), payload.isActive]
+  );
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_referral_facility_created',
+    details: { referralFacilityId: rows[0].id, name: rows[0].name, city: rows[0].city },
+  });
+
+  res.status(201).json({ data: mapReferralFacility(rows[0]) });
+}));
+
+app.put('/api/admin/referral-facilities/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(referralFacilitySchema, req.body ?? {}, 'INVALID_REFERRAL_FACILITY');
+  const { rows } = await query(
+    `
+      UPDATE referral_facilities
+      SET name = $2, city = $3, phone = $4, is_active = $5, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, name, city, phone, is_active
+    `,
+    [req.params.id, payload.name.trim(), payload.city.trim(), payload.phone.trim(), payload.isActive]
+  );
+
+  if (!rows[0]) {
+    return res.status(404).json({ error: 'Referral facility not found', code: 'REFERRAL_FACILITY_NOT_FOUND' });
+  }
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_referral_facility_updated',
+    details: { referralFacilityId: rows[0].id, name: rows[0].name, city: rows[0].city },
+  });
+
+  res.json({ data: mapReferralFacility(rows[0]) });
+}));
+
+app.delete('/api/admin/referral-facilities/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const { rowCount } = await query('DELETE FROM referral_facilities WHERE id = $1', [req.params.id]);
+  if (rowCount === 0) {
+    return res.status(404).json({ error: 'Referral facility not found', code: 'REFERRAL_FACILITY_NOT_FOUND' });
+  }
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'clinical_catalog_referral_facility_deleted',
+    details: { referralFacilityId: req.params.id },
+  });
+
+  res.json({ ok: true });
+}));
+
 app.post('/api/admin/approval-requests/:id/approve', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
   const { id } = req.params;
 
@@ -1843,6 +2648,7 @@ app.post('/api/consultations/complete', requireAuth, requireRole('doctor_owner')
       diagnoses: payload.diagnoses || [],
       medications: payload.medications || [],
       labOrders: payload.labOrders || [],
+      careActions: payload.careActions || [],
       status: 'completed',
     },
   });

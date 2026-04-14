@@ -99,6 +99,22 @@ export interface LabOrder {
   date: string;
 }
 
+export interface CareAction {
+  id: string;
+  appointmentId?: string;
+  patientId: string;
+  clinicId: string;
+  doctorId: string;
+  type: 'referral' | 'admission' | 'followup';
+  targetType: 'specialty' | 'facility' | 'date';
+  targetId: string;
+  title: string;
+  notes: string;
+  urgency: 'routine' | 'urgent' | 'emergency';
+  actionDate: string;
+  createdAt?: string;
+}
+
 export interface ClinicalNote {
   id: string;
   appointmentId?: string;
@@ -119,6 +135,7 @@ export interface ClinicalNote {
   diagnoses: Diagnosis[];
   medications: Medication[];
   labOrders: LabOrder[];
+  careActions: CareAction[];
   status: 'draft' | 'completed';
 }
 

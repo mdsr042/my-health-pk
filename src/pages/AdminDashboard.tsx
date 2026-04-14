@@ -6,19 +6,49 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   approveDoctor,
+  createAdminDiagnosisCatalogEntry,
+  createAdminInvestigationCatalogEntry,
+  createAdminReferralFacility,
+  createAdminReferralSpecialty,
+  deleteAdminDiagnosisCatalogEntry,
+  deleteAdminInvestigationCatalogEntry,
+  deleteAdminReferralFacility,
+  deleteAdminReferralSpecialty,
   fetchAdminAuditLogs,
+  fetchAdminDiagnosisCatalog,
   fetchAdminDoctors,
+  fetchAdminInvestigationCatalog,
   fetchAdminOverview,
+  fetchAdminReferralFacilities,
+  fetchAdminReferralSpecialties,
   fetchApprovalRequests,
   rejectDoctor,
   resetDoctorPassword,
+  updateAdminDiagnosisCatalogEntry,
+  updateAdminInvestigationCatalogEntry,
+  updateAdminReferralFacility,
+  updateAdminReferralSpecialty,
   updateDoctorAccountStatus,
   updateWorkspaceSubscription,
 } from '@/lib/api';
-import type { AdminAuditLog, AdminDoctorAccount, AdminOverview, ApprovalRequest } from '@/lib/app-types';
-import { Users, ClipboardCheck, Building2, ActivitySquare } from 'lucide-react';
+import type {
+  AdminAuditLog,
+  AdminDoctorAccount,
+  AdminOverview,
+  ApprovalRequest,
+  DiagnosisCatalogEntry,
+  DiagnosisCatalogPayload,
+  InvestigationCatalogEntry,
+  InvestigationCatalogPayload,
+  ReferralFacilityEntry,
+  ReferralFacilityPayload,
+  ReferralSpecialtyEntry,
+  ReferralSpecialtyPayload,
+} from '@/lib/app-types';
+import { Users, ClipboardCheck, Building2, ActivitySquare, Stethoscope, FlaskConical, MapPinned, ArrowRightLeft } from 'lucide-react';
 
 const emptyOverview: AdminOverview = {
   pendingApprovals: 0,
@@ -28,6 +58,31 @@ const emptyOverview: AdminOverview = {
   clinics: 0,
   patients: 0,
   appointments: 0,
+};
+
+const emptyDiagnosisDraft: DiagnosisCatalogPayload = {
+  code: '',
+  name: '',
+  isActive: true,
+};
+
+const emptyInvestigationDraft: InvestigationCatalogPayload = {
+  name: '',
+  category: '',
+  type: 'lab',
+  isActive: true,
+};
+
+const emptyReferralSpecialtyDraft: ReferralSpecialtyPayload = {
+  name: '',
+  isActive: true,
+};
+
+const emptyReferralFacilityDraft: ReferralFacilityPayload = {
+  name: '',
+  city: '',
+  phone: '',
+  isActive: true,
 };
 
 function formatStatusLabel(value: string) {
@@ -72,24 +127,53 @@ export default function AdminDashboard() {
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const [doctors, setDoctors] = useState<AdminDoctorAccount[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
+  const [diagnosisCatalog, setDiagnosisCatalog] = useState<DiagnosisCatalogEntry[]>([]);
+  const [investigationCatalog, setInvestigationCatalog] = useState<InvestigationCatalogEntry[]>([]);
+  const [referralSpecialties, setReferralSpecialties] = useState<ReferralSpecialtyEntry[]>([]);
+  const [referralFacilities, setReferralFacilities] = useState<ReferralFacilityEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [planDrafts, setPlanDrafts] = useState<Record<string, { planName: string; status: AdminDoctorAccount['subscription']['status']; trialEndsAt: string }>>({});
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
+  const [diagnosisDraft, setDiagnosisDraft] = useState<DiagnosisCatalogPayload>(emptyDiagnosisDraft);
+  const [investigationDraft, setInvestigationDraft] = useState<InvestigationCatalogPayload>(emptyInvestigationDraft);
+  const [referralSpecialtyDraft, setReferralSpecialtyDraft] = useState<ReferralSpecialtyPayload>(emptyReferralSpecialtyDraft);
+  const [referralFacilityDraft, setReferralFacilityDraft] = useState<ReferralFacilityPayload>(emptyReferralFacilityDraft);
+  const [editingDiagnosisId, setEditingDiagnosisId] = useState<string | null>(null);
+  const [editingInvestigationId, setEditingInvestigationId] = useState<string | null>(null);
+  const [editingReferralSpecialtyId, setEditingReferralSpecialtyId] = useState<string | null>(null);
+  const [editingReferralFacilityId, setEditingReferralFacilityId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [nextOverview, nextApprovals, nextDoctors, nextAuditLogs] = await Promise.all([
+      const [
+        nextOverview,
+        nextApprovals,
+        nextDoctors,
+        nextAuditLogs,
+        nextDiagnosisCatalog,
+        nextInvestigationCatalog,
+        nextReferralSpecialties,
+        nextReferralFacilities,
+      ] = await Promise.all([
         fetchAdminOverview(),
         fetchApprovalRequests(),
         fetchAdminDoctors(),
         fetchAdminAuditLogs(),
+        fetchAdminDiagnosisCatalog(),
+        fetchAdminInvestigationCatalog(),
+        fetchAdminReferralSpecialties(),
+        fetchAdminReferralFacilities(),
       ]);
 
       setOverview(nextOverview);
       setApprovalRequests(nextApprovals);
       setDoctors(nextDoctors);
       setAuditLogs(nextAuditLogs);
+      setDiagnosisCatalog(nextDiagnosisCatalog);
+      setInvestigationCatalog(nextInvestigationCatalog);
+      setReferralSpecialties(nextReferralSpecialties);
+      setReferralFacilities(nextReferralFacilities);
       setPlanDrafts(
         Object.fromEntries(
           nextDoctors.map(doctor => [
@@ -170,6 +254,94 @@ export default function AdminDashboard() {
     await load();
   };
 
+  const resetDiagnosisEditor = () => {
+    setEditingDiagnosisId(null);
+    setDiagnosisDraft(emptyDiagnosisDraft);
+  };
+
+  const resetInvestigationEditor = () => {
+    setEditingInvestigationId(null);
+    setInvestigationDraft(emptyInvestigationDraft);
+  };
+
+  const resetReferralSpecialtyEditor = () => {
+    setEditingReferralSpecialtyId(null);
+    setReferralSpecialtyDraft(emptyReferralSpecialtyDraft);
+  };
+
+  const resetReferralFacilityEditor = () => {
+    setEditingReferralFacilityId(null);
+    setReferralFacilityDraft(emptyReferralFacilityDraft);
+  };
+
+  const handleSaveDiagnosisCatalog = async () => {
+    if (!diagnosisDraft.name.trim() || !diagnosisDraft.code.trim()) {
+      toast.error('Diagnosis code and name are required');
+      return;
+    }
+
+    if (editingDiagnosisId) {
+      await updateAdminDiagnosisCatalogEntry(editingDiagnosisId, diagnosisDraft);
+      toast.success('Diagnosis catalog entry updated');
+    } else {
+      await createAdminDiagnosisCatalogEntry(diagnosisDraft);
+      toast.success('Diagnosis catalog entry created');
+    }
+    resetDiagnosisEditor();
+    await load();
+  };
+
+  const handleSaveInvestigationCatalog = async () => {
+    if (!investigationDraft.name.trim() || !investigationDraft.category.trim()) {
+      toast.error('Investigation name and category are required');
+      return;
+    }
+
+    if (editingInvestigationId) {
+      await updateAdminInvestigationCatalogEntry(editingInvestigationId, investigationDraft);
+      toast.success('Investigation catalog entry updated');
+    } else {
+      await createAdminInvestigationCatalogEntry(investigationDraft);
+      toast.success('Investigation catalog entry created');
+    }
+    resetInvestigationEditor();
+    await load();
+  };
+
+  const handleSaveReferralSpecialty = async () => {
+    if (!referralSpecialtyDraft.name.trim()) {
+      toast.error('Referral specialty name is required');
+      return;
+    }
+
+    if (editingReferralSpecialtyId) {
+      await updateAdminReferralSpecialty(editingReferralSpecialtyId, referralSpecialtyDraft);
+      toast.success('Referral specialty updated');
+    } else {
+      await createAdminReferralSpecialty(referralSpecialtyDraft);
+      toast.success('Referral specialty created');
+    }
+    resetReferralSpecialtyEditor();
+    await load();
+  };
+
+  const handleSaveReferralFacility = async () => {
+    if (!referralFacilityDraft.name.trim() || !referralFacilityDraft.city.trim()) {
+      toast.error('Facility name and city are required');
+      return;
+    }
+
+    if (editingReferralFacilityId) {
+      await updateAdminReferralFacility(editingReferralFacilityId, referralFacilityDraft);
+      toast.success('Referral facility updated');
+    } else {
+      await createAdminReferralFacility(referralFacilityDraft);
+      toast.success('Referral facility created');
+    }
+    resetReferralFacilityEditor();
+    await load();
+  };
+
   const kpis = [
     { label: 'Pending Approvals', value: overview.pendingApprovals, icon: ClipboardCheck },
     { label: 'Active Doctors', value: overview.activeDoctors, icon: Users },
@@ -240,6 +412,223 @@ export default function AdminDashboard() {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-0 shadow-sm">
+        <CardContent className="p-5 space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Clinical Master Catalogs</h2>
+            <p className="text-xs text-muted-foreground">Maintain the shared diagnosis, investigation, and referral directories that doctors search from.</p>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-border p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <Stethoscope className="w-4 h-4 text-primary" />
+                <h3 className="text-sm font-semibold text-foreground">Diagnosis Catalog</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-[120px_1fr_auto] gap-3">
+                <Input placeholder="Code" value={diagnosisDraft.code} onChange={event => setDiagnosisDraft(prev => ({ ...prev, code: event.target.value }))} />
+                <Input placeholder="Diagnosis name" value={diagnosisDraft.name} onChange={event => setDiagnosisDraft(prev => ({ ...prev, name: event.target.value }))} />
+                <div className="flex items-center justify-between rounded-md border border-border px-3">
+                  <Label className="text-xs">Active</Label>
+                  <Switch checked={diagnosisDraft.isActive} onCheckedChange={checked => setDiagnosisDraft(prev => ({ ...prev, isActive: checked }))} />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => void handleSaveDiagnosisCatalog()}>
+                  {editingDiagnosisId ? 'Update Entry' : 'Add Entry'}
+                </Button>
+                {editingDiagnosisId && (
+                  <Button variant="outline" size="sm" onClick={resetDiagnosisEditor}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {diagnosisCatalog.map(entry => (
+                  <div key={entry.id} className="rounded-lg border border-border px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{entry.name}</p>
+                        <p className="text-xs text-muted-foreground">{entry.code || 'No code'}</p>
+                      </div>
+                      <Badge variant="outline" className={entry.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-700'}>
+                        {entry.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <Button variant="outline" size="sm" onClick={() => {
+                        setEditingDiagnosisId(entry.id);
+                        setDiagnosisDraft({ code: entry.code, name: entry.name, isActive: entry.isActive });
+                      }}>
+                        Edit
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void deleteAdminDiagnosisCatalogEntry(entry.id).then(() => { toast.success('Diagnosis catalog entry deleted'); resetDiagnosisEditor(); return load(); })}>
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <FlaskConical className="w-4 h-4 text-primary" />
+                <h3 className="text-sm font-semibold text-foreground">Investigation Catalog</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Input placeholder="Investigation name" value={investigationDraft.name} onChange={event => setInvestigationDraft(prev => ({ ...prev, name: event.target.value }))} />
+                <Input placeholder="Category" value={investigationDraft.category} onChange={event => setInvestigationDraft(prev => ({ ...prev, category: event.target.value }))} />
+                <Select value={investigationDraft.type} onValueChange={value => setInvestigationDraft(prev => ({ ...prev, type: value as InvestigationCatalogPayload['type'] }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="lab">Lab</SelectItem>
+                    <SelectItem value="radiology">Radiology</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center justify-between rounded-md border border-border px-3">
+                  <Label className="text-xs">Active</Label>
+                  <Switch checked={investigationDraft.isActive} onCheckedChange={checked => setInvestigationDraft(prev => ({ ...prev, isActive: checked }))} />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => void handleSaveInvestigationCatalog()}>
+                  {editingInvestigationId ? 'Update Entry' : 'Add Entry'}
+                </Button>
+                {editingInvestigationId && (
+                  <Button variant="outline" size="sm" onClick={resetInvestigationEditor}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {investigationCatalog.map(entry => (
+                  <div key={entry.id} className="rounded-lg border border-border px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{entry.name}</p>
+                        <p className="text-xs text-muted-foreground">{entry.category} • {entry.type}</p>
+                      </div>
+                      <Badge variant="outline" className={entry.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-700'}>
+                        {entry.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <Button variant="outline" size="sm" onClick={() => {
+                        setEditingInvestigationId(entry.id);
+                        setInvestigationDraft({ name: entry.name, category: entry.category, type: entry.type, isActive: entry.isActive });
+                      }}>
+                        Edit
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void deleteAdminInvestigationCatalogEntry(entry.id).then(() => { toast.success('Investigation catalog entry deleted'); resetInvestigationEditor(); return load(); })}>
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <ArrowRightLeft className="w-4 h-4 text-primary" />
+                <h3 className="text-sm font-semibold text-foreground">Referral Specialties</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                <Input placeholder="Specialty name" value={referralSpecialtyDraft.name} onChange={event => setReferralSpecialtyDraft(prev => ({ ...prev, name: event.target.value }))} />
+                <div className="flex items-center justify-between rounded-md border border-border px-3">
+                  <Label className="text-xs">Active</Label>
+                  <Switch checked={referralSpecialtyDraft.isActive} onCheckedChange={checked => setReferralSpecialtyDraft(prev => ({ ...prev, isActive: checked }))} />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => void handleSaveReferralSpecialty()}>
+                  {editingReferralSpecialtyId ? 'Update Entry' : 'Add Entry'}
+                </Button>
+                {editingReferralSpecialtyId && (
+                  <Button variant="outline" size="sm" onClick={resetReferralSpecialtyEditor}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {referralSpecialties.map(entry => (
+                  <div key={entry.id} className="rounded-lg border border-border px-3 py-2 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{entry.name}</p>
+                      <p className="text-xs text-muted-foreground">{entry.isActive ? 'Active in doctor search' : 'Hidden from doctor search'}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => {
+                        setEditingReferralSpecialtyId(entry.id);
+                        setReferralSpecialtyDraft({ name: entry.name, isActive: entry.isActive });
+                      }}>
+                        Edit
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void deleteAdminReferralSpecialty(entry.id).then(() => { toast.success('Referral specialty deleted'); resetReferralSpecialtyEditor(); return load(); })}>
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <MapPinned className="w-4 h-4 text-primary" />
+                <h3 className="text-sm font-semibold text-foreground">Referral Facilities</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Input placeholder="Facility name" value={referralFacilityDraft.name} onChange={event => setReferralFacilityDraft(prev => ({ ...prev, name: event.target.value }))} />
+                <Input placeholder="City" value={referralFacilityDraft.city} onChange={event => setReferralFacilityDraft(prev => ({ ...prev, city: event.target.value }))} />
+                <Input placeholder="Phone" value={referralFacilityDraft.phone} onChange={event => setReferralFacilityDraft(prev => ({ ...prev, phone: event.target.value }))} />
+                <div className="flex items-center justify-between rounded-md border border-border px-3">
+                  <Label className="text-xs">Active</Label>
+                  <Switch checked={referralFacilityDraft.isActive} onCheckedChange={checked => setReferralFacilityDraft(prev => ({ ...prev, isActive: checked }))} />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => void handleSaveReferralFacility()}>
+                  {editingReferralFacilityId ? 'Update Entry' : 'Add Entry'}
+                </Button>
+                {editingReferralFacilityId && (
+                  <Button variant="outline" size="sm" onClick={resetReferralFacilityEditor}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {referralFacilities.map(entry => (
+                  <div key={entry.id} className="rounded-lg border border-border px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{entry.name}</p>
+                        <p className="text-xs text-muted-foreground">{entry.city}{entry.phone ? ` • ${entry.phone}` : ''}</p>
+                      </div>
+                      <Badge variant="outline" className={entry.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-700'}>
+                        {entry.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <Button variant="outline" size="sm" onClick={() => {
+                        setEditingReferralFacilityId(entry.id);
+                        setReferralFacilityDraft({ name: entry.name, city: entry.city, phone: entry.phone, isActive: entry.isActive });
+                      }}>
+                        Edit
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void deleteAdminReferralFacility(entry.id).then(() => { toast.success('Referral facility deleted'); resetReferralFacilityEditor(); return load(); })}>
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

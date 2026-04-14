@@ -140,6 +140,40 @@ export const adviceTemplateSchema = z.object({
   followUp: z.string().trim().max(500).default(''),
 });
 
+export const diagnosisCatalogSchema = z.object({
+  code: z.string().trim().max(50).default(''),
+  name: trimmedString('Diagnosis name'),
+});
+
+export const investigationCatalogSchema = z.object({
+  name: trimmedString('Investigation name'),
+  category: trimmedString('Category', 120),
+  type: z.enum(['lab', 'radiology']),
+});
+
+export const referralSpecialtySchema = z.object({
+  name: trimmedString('Specialty name'),
+});
+
+export const referralFacilitySchema = z.object({
+  name: trimmedString('Facility name'),
+  city: z.string().trim().max(120).default(''),
+  phone: z.string().trim().max(40).default(''),
+});
+
+export const careActionSchema = z.object({
+  appointmentId: z.string().trim().min(1, 'Appointment is required'),
+  patientId: z.string().trim().min(1, 'Patient is required'),
+  clinicId: z.string().trim().min(1, 'Clinic is required'),
+  type: z.enum(['referral', 'admission', 'followup']),
+  targetType: z.enum(['specialty', 'facility', 'date']).default('date'),
+  targetId: z.string().trim().max(120).default(''),
+  title: trimmedString('Title'),
+  notes: z.string().trim().max(1000).default(''),
+  urgency: z.enum(['routine', 'urgent', 'emergency']).default('routine'),
+  actionDate: z.string().trim().max(40).default(''),
+});
+
 export function parseOrThrow(schema, value, code = 'INVALID_REQUEST') {
   const result = schema.safeParse(value);
   if (!result.success) {

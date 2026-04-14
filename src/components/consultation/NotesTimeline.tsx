@@ -117,6 +117,21 @@ export default function NotesTimeline({ notes }: NotesTimelineProps) {
                     </div>
                   </div>
                 )}
+
+                {note.careActions.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Care Actions</p>
+                    <div className="space-y-1">
+                      {note.careActions.map(action => (
+                        <div key={action.id} className="flex items-center gap-2 text-sm">
+                          <span className="text-foreground">{action.title}</span>
+                          <Badge variant="outline" className="text-[10px]">{action.type}</Badge>
+                          {action.notes && <span className="text-xs text-muted-foreground">• {action.notes}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             )}
           </Card>

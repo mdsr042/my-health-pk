@@ -1,5 +1,11 @@
 import bcrypt from 'bcryptjs';
 import pg from 'pg';
+import {
+  starterDiagnosisCatalog,
+  starterInvestigationCatalog,
+  starterReferralFacilities,
+  starterReferralSpecialties,
+} from './clinicalCatalogs.js';
 import { cleanupExpiredDemoSessions } from './demoSeed.js';
 import { createId, hasExpectedPrefix } from './id.js';
 
@@ -190,6 +196,71 @@ async function createBaseSchema(client) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS diagnosis_catalog (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS investigation_catalog (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL CHECK (type IN ('lab', 'radiology')),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS referral_specialties (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS referral_facilities (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      city TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS doctor_diagnosis_favorites (
+      id TEXT PRIMARY KEY,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      diagnosis_catalog_id TEXT NOT NULL REFERENCES diagnosis_catalog(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (doctor_user_id, diagnosis_catalog_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS doctor_investigation_favorites (
+      id TEXT PRIMARY KEY,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      investigation_catalog_id TEXT NOT NULL REFERENCES investigation_catalog(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (doctor_user_id, investigation_catalog_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS doctor_referral_favorites (
+      id TEXT PRIMARY KEY,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_type TEXT NOT NULL CHECK (target_type IN ('specialty', 'facility')),
+      target_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (doctor_user_id, target_type, target_id)
+    );
+
     CREATE TABLE IF NOT EXISTS clinics (
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -320,6 +391,25 @@ async function createBaseSchema(client) {
       status TEXT NOT NULL CHECK (status IN ('ordered', 'collected', 'resulted')),
       result TEXT NOT NULL DEFAULT '',
       date TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS care_actions (
+      id TEXT PRIMARY KEY,
+      note_id TEXT REFERENCES clinical_notes(id) ON DELETE SET NULL,
+      appointment_id TEXT REFERENCES appointments(id) ON DELETE SET NULL,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+      clinic_id TEXT NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('referral', 'admission', 'followup')),
+      target_type TEXT NOT NULL DEFAULT '',
+      target_id TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      urgency TEXT NOT NULL DEFAULT 'routine',
+      action_date TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -922,6 +1012,157 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_diagnosis_sets_workspace_doctor', 'diagnosis_sets', '(workspace_id, doctor_user_id)');
     await ensureIndex(client, 'idx_investigation_sets_workspace_doctor', 'investigation_sets', '(workspace_id, doctor_user_id)');
     await ensureIndex(client, 'idx_advice_templates_workspace_doctor', 'advice_templates', '(workspace_id, doctor_user_id)');
+  });
+
+  await runMigration(client, '010_clinical_knowledge_layer', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS diagnosis_catalog (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS investigation_catalog (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '',
+        type TEXT NOT NULL CHECK (type IN ('lab', 'radiology')),
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS referral_specialties (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS referral_facilities (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        city TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS doctor_diagnosis_favorites (
+        id TEXT PRIMARY KEY,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        diagnosis_catalog_id TEXT NOT NULL REFERENCES diagnosis_catalog(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (doctor_user_id, diagnosis_catalog_id)
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS doctor_investigation_favorites (
+        id TEXT PRIMARY KEY,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        investigation_catalog_id TEXT NOT NULL REFERENCES investigation_catalog(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (doctor_user_id, investigation_catalog_id)
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS doctor_referral_favorites (
+        id TEXT PRIMARY KEY,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        target_type TEXT NOT NULL CHECK (target_type IN ('specialty', 'facility')),
+        target_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (doctor_user_id, target_type, target_id)
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS care_actions (
+        id TEXT PRIMARY KEY,
+        note_id TEXT REFERENCES clinical_notes(id) ON DELETE SET NULL,
+        appointment_id TEXT REFERENCES appointments(id) ON DELETE SET NULL,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+        clinic_id TEXT NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        type TEXT NOT NULL CHECK (type IN ('referral', 'admission', 'followup')),
+        target_type TEXT NOT NULL DEFAULT '',
+        target_id TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        urgency TEXT NOT NULL DEFAULT 'routine',
+        action_date TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await ensureAuditColumns(client, 'diagnosis_catalog');
+    await ensureAuditColumns(client, 'investigation_catalog');
+    await ensureAuditColumns(client, 'referral_specialties');
+    await ensureAuditColumns(client, 'referral_facilities');
+    await ensureAuditColumns(client, 'doctor_diagnosis_favorites');
+    await ensureAuditColumns(client, 'doctor_investigation_favorites');
+    await ensureAuditColumns(client, 'doctor_referral_favorites');
+    await ensureAuditColumns(client, 'care_actions');
+    await ensureIndex(client, 'idx_diagnosis_catalog_name', 'diagnosis_catalog', '(LOWER(name))');
+    await ensureIndex(client, 'idx_diagnosis_catalog_code', 'diagnosis_catalog', '(LOWER(code))');
+    await ensureIndex(client, 'idx_investigation_catalog_name', 'investigation_catalog', '(LOWER(name))');
+    await ensureIndex(client, 'idx_investigation_catalog_type', 'investigation_catalog', '(type, LOWER(name))');
+    await ensureIndex(client, 'idx_referral_specialties_name', 'referral_specialties', '(LOWER(name))');
+    await ensureIndex(client, 'idx_referral_facilities_name', 'referral_facilities', '(LOWER(name))');
+    await ensureIndex(client, 'idx_care_actions_patient_created', 'care_actions', '(patient_id, created_at DESC)');
+
+    const diagnosisCount = await client.query(`SELECT COUNT(*)::int AS count FROM diagnosis_catalog`);
+    if ((diagnosisCount.rows[0]?.count ?? 0) === 0) {
+      for (const item of starterDiagnosisCatalog) {
+        await client.query(
+          `INSERT INTO diagnosis_catalog (id, code, name, is_active) VALUES ($1, $2, $3, TRUE)`,
+          [createId('diagnosis_catalog_entry'), item.code, item.name]
+        );
+      }
+    }
+
+    const investigationCount = await client.query(`SELECT COUNT(*)::int AS count FROM investigation_catalog`);
+    if ((investigationCount.rows[0]?.count ?? 0) === 0) {
+      for (const item of starterInvestigationCatalog) {
+        await client.query(
+          `INSERT INTO investigation_catalog (id, name, category, type, is_active) VALUES ($1, $2, $3, $4, TRUE)`,
+          [createId('investigation_catalog_entry'), item.name, item.category, item.type]
+        );
+      }
+    }
+
+    const specialtyCount = await client.query(`SELECT COUNT(*)::int AS count FROM referral_specialties`);
+    if ((specialtyCount.rows[0]?.count ?? 0) === 0) {
+      for (const item of starterReferralSpecialties) {
+        await client.query(
+          `INSERT INTO referral_specialties (id, name, is_active) VALUES ($1, $2, TRUE)`,
+          [createId('referral_specialty'), item]
+        );
+      }
+    }
+
+    const facilityCount = await client.query(`SELECT COUNT(*)::int AS count FROM referral_facilities`);
+    if ((facilityCount.rows[0]?.count ?? 0) === 0) {
+      for (const item of starterReferralFacilities) {
+        await client.query(
+          `INSERT INTO referral_facilities (id, name, city, phone, is_active) VALUES ($1, $2, $3, $4, TRUE)`,
+          [createId('referral_facility'), item.name, item.city, item.phone]
+        );
+      }
+    }
   });
 }
 

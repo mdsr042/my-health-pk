@@ -107,6 +107,7 @@ export default function MedicalRecords() {
           note.followUp,
           ...note.diagnoses.map(dx => dx.name),
           ...note.medications.map(med => med.name),
+          ...note.careActions.map(action => action.title),
         ].join(' ').toLowerCase();
         const keywordMatches = !keywordQuery || noteSearchBlob.includes(keywordQuery);
         return clinicMatches && dateMatches && keywordMatches;
@@ -204,6 +205,7 @@ export default function MedicalRecords() {
                 note.followUp,
                 ...note.diagnoses.map(dx => dx.name),
                 ...note.medications.map(med => med.name),
+                ...note.careActions.map(action => action.title),
               ].join(' ').toLowerCase();
               const keywordMatches = !keyword.trim() || noteSearchBlob.includes(keyword.trim().toLowerCase());
               const now = new Date();

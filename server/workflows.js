@@ -435,6 +435,34 @@ export async function completeConsultationEncounter(client, { workspaceId, docto
     );
   }
 
+  for (const action of payload.careActions ?? []) {
+    await client.query(
+      `
+        INSERT INTO care_actions (
+          id, note_id, appointment_id, workspace_id, patient_id, clinic_id, doctor_user_id,
+          type, target_type, target_id, title, notes, urgency, action_date
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      `,
+      [
+        action.id || createId('care_action'),
+        noteId,
+        payload.appointmentId,
+        workspaceId,
+        payload.patientId,
+        payload.clinicId,
+        doctorUserId,
+        action.type,
+        action.targetType || '',
+        action.targetId || '',
+        action.title || '',
+        action.notes || '',
+        action.urgency || 'routine',
+        action.actionDate || '',
+      ]
+    );
+  }
+
   await client.query(
     `
       DELETE FROM consultation_drafts

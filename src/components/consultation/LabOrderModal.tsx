@@ -1,12 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  addFavoriteInvestigation,
+  fetchFavoriteInvestigations,
+  fetchRecentInvestigations,
+  removeFavoriteInvestigation,
+  searchInvestigationCatalog,
+} from '@/lib/api';
 import { Search, Star, Plus, FlaskConical, Scan } from 'lucide-react';
 import type { LabOrder } from '@/data/mockData';
+import type { InvestigationCatalogEntry } from '@/lib/app-types';
 
 interface LabOrderModalProps {
   open: boolean;
@@ -15,83 +23,111 @@ interface LabOrderModalProps {
   type: 'lab' | 'radiology';
 }
 
-const labTests = [
-  { name: 'Complete Blood Count (CBC)', category: 'Hematology', favorite: true },
-  { name: 'HbA1c', category: 'Biochemistry', favorite: true },
-  { name: 'Fasting Blood Glucose', category: 'Biochemistry', favorite: true },
-  { name: 'Liver Function Tests (LFTs)', category: 'Biochemistry', favorite: true },
-  { name: 'Renal Function Tests (RFTs)', category: 'Biochemistry', favorite: true },
-  { name: 'Serum Electrolytes', category: 'Biochemistry', favorite: false },
-  { name: 'Lipid Profile', category: 'Biochemistry', favorite: true },
-  { name: 'Thyroid Profile (T3, T4, TSH)', category: 'Endocrinology', favorite: false },
-  { name: 'Urine Complete Examination', category: 'Microbiology', favorite: true },
-  { name: 'Urine Culture & Sensitivity', category: 'Microbiology', favorite: false },
-  { name: 'Troponin I', category: 'Cardiology', favorite: false },
-  { name: 'ECG', category: 'Cardiology', favorite: true },
-  { name: 'ESR', category: 'Hematology', favorite: false },
-  { name: 'CRP', category: 'Biochemistry', favorite: false },
-  { name: 'Serum Uric Acid', category: 'Biochemistry', favorite: false },
-  { name: 'Prothrombin Time (PT/INR)', category: 'Hematology', favorite: false },
-  { name: 'Blood Group & Rh', category: 'Hematology', favorite: false },
-  { name: 'Vitamin D Level', category: 'Biochemistry', favorite: false },
-  { name: 'Vitamin B12 Level', category: 'Biochemistry', favorite: false },
-  { name: 'Serum Ferritin', category: 'Biochemistry', favorite: false },
-];
-
-const radiologyTests = [
-  { name: 'Chest X-Ray PA View', category: 'General Radiology', favorite: true },
-  { name: 'X-Ray Lumbar Spine AP/Lateral', category: 'General Radiology', favorite: false },
-  { name: 'X-Ray Both Knees AP/Lateral', category: 'General Radiology', favorite: false },
-  { name: 'Ultrasound Abdomen & Pelvis', category: 'Ultrasound', favorite: true },
-  { name: 'Ultrasound KUB', category: 'Ultrasound', favorite: false },
-  { name: 'Echocardiography', category: 'Cardiology', favorite: true },
-  { name: 'CT Scan Head Plain', category: 'CT Scan', favorite: false },
-  { name: 'CT Scan Chest (HRCT)', category: 'CT Scan', favorite: false },
-  { name: 'MRI Brain with Contrast', category: 'MRI', favorite: false },
-  { name: 'MRI Lumbar Spine', category: 'MRI', favorite: false },
-  { name: 'Doppler Ultrasound Lower Limbs', category: 'Ultrasound', favorite: false },
-  { name: 'Mammography', category: 'General Radiology', favorite: false },
-];
-
 export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOrderModalProps) {
   const [search, setSearch] = useState('');
-  const [showFavorites, setShowFavorites] = useState(true);
+  const [sourceMode, setSourceMode] = useState<'favorites' | 'recent' | 'browse'>('favorites');
   const [priority, setPriority] = useState<'routine' | 'urgent' | 'stat'>('routine');
   const [clinicalNotes, setClinicalNotes] = useState('');
-  const [selectedTest, setSelectedTest] = useState<{ name: string; category: string } | null>(null);
+  const [selectedTest, setSelectedTest] = useState<InvestigationCatalogEntry | null>(null);
+  const [catalogResults, setCatalogResults] = useState<InvestigationCatalogEntry[]>([]);
+  const [favorites, setFavorites] = useState<InvestigationCatalogEntry[]>([]);
+  const [recents, setRecents] = useState<InvestigationCatalogEntry[]>([]);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
 
-  const tests = type === 'lab' ? labTests : radiologyTests;
   const today = new Date().toISOString().split('T')[0];
+  const isLab = type === 'lab';
 
   useEffect(() => {
     if (!open) {
       setSearch('');
-      setShowFavorites(true);
+      setSourceMode('favorites');
       setPriority('routine');
       setClinicalNotes('');
       setSelectedTest(null);
+      setCatalogResults([]);
+      return;
     }
-  }, [open]);
 
-  const filtered = tests.filter(t => {
-    if (!search) return showFavorites ? t.favorite : true;
-    return t.name.toLowerCase().includes(search.toLowerCase()) || t.category.toLowerCase().includes(search.toLowerCase());
-  });
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [favoriteData, recentData] = await Promise.all([
+          fetchFavoriteInvestigations(type),
+          fetchRecentInvestigations(type),
+        ]);
+        if (cancelled) return;
+        setFavorites(favoriteData);
+        setRecents(recentData);
+        setFavoriteIds(new Set(favoriteData.map(item => item.id)));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, type]);
 
-  const handleAdd = (testName: string, category: string) => {
+  useEffect(() => {
+    if (!open || sourceMode !== 'browse') return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      try {
+        const results = await searchInvestigationCatalog(search.trim(), type, 20);
+        if (!cancelled) setCatalogResults(results);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, search, sourceMode, type]);
+
+  const filtered = useMemo(() => {
+    if (sourceMode === 'favorites') return favorites;
+    if (sourceMode === 'recent') return recents;
+    return catalogResults;
+  }, [catalogResults, favorites, recents, sourceMode]);
+
+  const handleAdd = (entry: InvestigationCatalogEntry) => {
     const order: LabOrder = {
       id: `order-${Date.now()}`,
-      testName,
-      category,
+      testName: entry.name,
+      category: entry.category,
       priority,
       status: 'ordered',
       date: today,
+      result: clinicalNotes || '',
     };
     onAdd(order);
-    setSelectedTest({ name: testName, category });
+    setSelectedTest(entry);
   };
 
-  const isLab = type === 'lab';
+  const handleToggleFavorite = async (catalogId: string) => {
+    const wasFavorite = favoriteIds.has(catalogId);
+    const next = new Set(favoriteIds);
+    if (wasFavorite) next.delete(catalogId);
+    else next.add(catalogId);
+    setFavoriteIds(next);
+    try {
+      if (wasFavorite) {
+        await removeFavoriteInvestigation(catalogId);
+        setFavorites(current => current.filter(item => item.id !== catalogId));
+      } else {
+        await addFavoriteInvestigation(catalogId);
+        const match = catalogResults.find(item => item.id === catalogId) ?? recents.find(item => item.id === catalogId);
+        if (match) setFavorites(current => [match, ...current.filter(item => item.id !== catalogId)]);
+      }
+    } catch {
+      setFavoriteIds(new Set(favorites.map(item => item.id)));
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -102,7 +138,7 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
           const target = event.target as HTMLElement | null;
           if (!target || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') return;
           event.preventDefault();
-          handleAdd(selectedTest.name, selectedTest.category);
+          handleAdd(selectedTest);
         }}
       >
         <DialogHeader>
@@ -118,7 +154,10 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
             <Input
               placeholder={`Search ${isLab ? 'lab tests' : 'radiology exams'}...`}
               value={search}
-              onChange={e => { setSearch(e.target.value); if (e.target.value) setShowFavorites(false); }}
+              onChange={e => {
+                setSearch(e.target.value);
+                if (e.target.value) setSourceMode('browse');
+              }}
               className="pl-9"
               autoFocus
             />
@@ -126,20 +165,13 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
 
           <div className="flex items-center gap-3">
             <div className="flex gap-2">
-              <Button
-                variant={showFavorites ? 'default' : 'outline'}
-                size="sm"
-                className="gap-1.5 h-7 text-xs"
-                onClick={() => { setShowFavorites(true); setSearch(''); }}
-              >
+              <Button variant={sourceMode === 'favorites' ? 'default' : 'outline'} size="sm" className="gap-1.5 h-7 text-xs" onClick={() => { setSourceMode('favorites'); setSearch(''); }}>
                 <Star className="w-3 h-3" /> Favorites
               </Button>
-              <Button
-                variant={!showFavorites ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setShowFavorites(false)}
-              >
+              <Button variant={sourceMode === 'recent' ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => { setSourceMode('recent'); setSearch(''); }}>
+                Recent
+              </Button>
+              <Button variant={sourceMode === 'browse' ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setSourceMode('browse')}>
                 Browse All
               </Button>
             </div>
@@ -158,37 +190,47 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
           </div>
 
           <div className="max-h-[280px] overflow-y-auto space-y-1 scrollbar-thin">
-            {filtered.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-8">No tests found</p>
+            {loading && <p className="text-sm text-muted-foreground text-center py-3">Loading investigations...</p>}
+            {!loading && filtered.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-8">No investigations found</p>
             )}
             {filtered.map(test => (
               <div
-                key={test.name}
+                key={test.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => setSelectedTest({ name: test.name, category: test.category })}
+                onClick={() => setSelectedTest(test)}
                 onKeyDown={event => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    setSelectedTest({ name: test.name, category: test.category });
+                    setSelectedTest(test);
                   }
                 }}
-                className={`flex items-center gap-3 p-3 rounded-lg transition-colors group cursor-pointer ${
-                  selectedTest?.name === test.name ? 'bg-muted border border-border' : 'hover:bg-muted/50'
-                }`}
+                className={`flex items-center gap-3 p-3 rounded-lg transition-colors group cursor-pointer ${selectedTest?.id === test.id ? 'bg-muted border border-border' : 'hover:bg-muted/50'}`}
               >
                 <div className="flex-1">
                   <p className="text-sm font-medium text-foreground">{test.name}</p>
                   <p className="text-xs text-muted-foreground">{test.category}</p>
                 </div>
-                {test.favorite && <Star className="w-3 h-3 text-warning fill-warning" />}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 border border-primary/20 p-0 hover:border-primary/45"
+                  onClick={event => {
+                    event.stopPropagation();
+                    void handleToggleFavorite(test.id);
+                  }}
+                >
+                  <Star className={`w-4 h-4 ${favoriteIds.has(test.id) ? 'text-warning fill-warning' : 'text-muted-foreground'}`} />
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-7 text-xs gap-1"
                   onClick={event => {
                     event.stopPropagation();
-                    handleAdd(test.name, test.category);
+                    handleAdd(test);
                   }}
                 >
                   <Plus className="w-3 h-3" /> Order

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import { useData } from '@/contexts/DataContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { sampleVitals, type Diagnosis, type Medication, type LabOrder } from '@/data/mockData';
+import { sampleVitals, type CareAction, type Diagnosis, type Medication, type LabOrder } from '@/data/mockData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -152,6 +152,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>(draft?.diagnoses || []);
   const [medications, setMedications] = useState<Medication[]>(draft?.medications || []);
   const [labOrders, setLabOrders] = useState<LabOrder[]>(draft?.labOrders || []);
+  const [careActions, setCareActions] = useState<CareAction[]>(draft?.careActions || []);
 
   const handleFieldChange = useCallback((setter: Function) => (value: string) => {
     setter(value);
@@ -320,6 +321,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       diagnoses,
       medications,
       labOrders,
+      careActions,
     }),
     appointmentId: activeAppointment?.id || draft?.appointmentId || '',
     patientId,
@@ -338,12 +340,26 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     hpi,
     instructions,
     labOrders,
+    careActions,
     medications,
     pastHistory,
     patientId,
     plan,
     vitals,
   ]);
+
+  const addCareAction = useCallback((action: Omit<CareAction, 'id' | 'doctorId' | 'appointmentId' | 'patientId' | 'clinicId'>) => {
+    const nextAction: CareAction = {
+      ...action,
+      id: `care-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      appointmentId: activeAppointment?.id || draft?.appointmentId || '',
+      patientId,
+      clinicId: activeClinic?.id || activeAppointment?.clinicId || 'clinic-1',
+      doctorId: user?.id || 'doctor',
+    };
+    setCareActions(prev => [nextAction, ...prev]);
+    markUnsaved(patientId, true);
+  }, [activeAppointment?.clinicId, activeAppointment?.id, activeClinic?.id, draft?.appointmentId, markUnsaved, patientId, user?.id]);
 
     const handleSaveDraft = async () => {
     if (!activeAppointment?.id) {
@@ -1021,7 +1037,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
             )}
 
             {activeView === 'notes' && <NotesTimeline notes={patientNotes} />}
-            {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} previousNotes={patientNotes} />}
+            {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} activeCareActions={careActions} previousNotes={patientNotes} />}
             {activeView === 'documents' && (
               <div className="p-6 text-center text-muted-foreground">
                 <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
@@ -1099,7 +1115,13 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         prescribedMedications={medications}
       />
       <LabOrderModal open={labOrderOpen} onOpenChange={setLabOrderOpen} onAdd={addLabOrder} type={labOrderType} />
-      <ReferralModal open={referralOpen} onOpenChange={setReferralOpen} type={referralType} patientName={patient.name} />
+      <ReferralModal
+        open={referralOpen}
+        onOpenChange={setReferralOpen}
+        type={referralType}
+        patientName={patient.name}
+        onSave={addCareAction}
+      />
       <AppointmentBookingDialog
         open={bookingOpen}
         onOpenChange={setBookingOpen}

@@ -7,8 +7,12 @@ import type {
   ApprovalRequest,
   AppSettings,
   ConsultationDraft,
+  DiagnosisCatalogPayload,
   DiagnosisSet,
+  DiagnosisCatalogEntry,
   DiagnosisSetPayload,
+  InvestigationCatalogEntry,
+  InvestigationCatalogPayload,
   InvestigationSet,
   InvestigationSetPayload,
   MedicationCatalogEntry,
@@ -19,12 +23,16 @@ import type {
   MedicationPreference,
   SessionPayload,
   SignupPayload,
+  ReferralFacilityEntry,
+  ReferralFacilityPayload,
+  ReferralSpecialtyEntry,
+  ReferralSpecialtyPayload,
   TreatmentTemplate,
   TreatmentTemplatePayload,
   WalkInPayload,
   WalkInResult,
 } from '@/lib/app-types';
-import type { Appointment, Clinic, ClinicalNote, Patient } from '@/data/mockData';
+import type { Appointment, CareAction, Clinic, ClinicalNote, Patient } from '@/data/mockData';
 
 const API_BASE = '/api';
 const AUTH_TOKEN_KEY = 'my-health/auth-token';
@@ -312,6 +320,137 @@ export async function fetchMedicationPreferences() {
   return result.data;
 }
 
+export async function searchDiagnosisCatalog(query: string, limit = 20) {
+  const result = await request<{ data: DiagnosisCatalogEntry[] }>(`/diagnosis-catalog?q=${encodeURIComponent(query)}&limit=${limit}`);
+  return result.data;
+}
+
+export async function fetchFavoriteDiagnoses() {
+  const result = await request<{ data: DiagnosisCatalogEntry[] }>('/diagnosis-catalog/favorites');
+  return result.data;
+}
+
+export async function fetchRecentDiagnoses() {
+  const result = await request<{ data: DiagnosisCatalogEntry[] }>('/diagnosis-catalog/recents');
+  return result.data;
+}
+
+export async function addFavoriteDiagnosis(catalogId: string) {
+  await request<{ ok: true }>('/diagnosis-catalog/favorites', {
+    method: 'POST',
+    body: JSON.stringify({ catalogId }),
+  });
+}
+
+export async function removeFavoriteDiagnosis(catalogId: string) {
+  await request<{ ok: true }>(`/diagnosis-catalog/favorites/${encodeURIComponent(catalogId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function searchInvestigationCatalog(query: string, type: 'lab' | 'radiology', limit = 20) {
+  const result = await request<{ data: InvestigationCatalogEntry[] }>(`/investigation-catalog?q=${encodeURIComponent(query)}&type=${type}&limit=${limit}`);
+  return result.data;
+}
+
+export async function fetchFavoriteInvestigations(type: 'lab' | 'radiology') {
+  const result = await request<{ data: InvestigationCatalogEntry[] }>(`/investigation-catalog/favorites?type=${type}`);
+  return result.data;
+}
+
+export async function fetchRecentInvestigations(type: 'lab' | 'radiology') {
+  const result = await request<{ data: InvestigationCatalogEntry[] }>(`/investigation-catalog/recents?type=${type}`);
+  return result.data;
+}
+
+export async function addFavoriteInvestigation(catalogId: string) {
+  await request<{ ok: true }>('/investigation-catalog/favorites', {
+    method: 'POST',
+    body: JSON.stringify({ catalogId }),
+  });
+}
+
+export async function removeFavoriteInvestigation(catalogId: string) {
+  await request<{ ok: true }>(`/investigation-catalog/favorites/${encodeURIComponent(catalogId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function searchReferralSpecialties(query: string, limit = 20) {
+  const result = await request<{ data: ReferralSpecialtyEntry[] }>(`/referral-specialties?q=${encodeURIComponent(query)}&limit=${limit}`);
+  return result.data;
+}
+
+export async function fetchFavoriteReferralSpecialties() {
+  const result = await request<{ data: ReferralSpecialtyEntry[] }>('/referral-specialties/favorites');
+  return result.data;
+}
+
+export async function fetchRecentReferralSpecialties() {
+  const result = await request<{ data: ReferralSpecialtyEntry[] }>('/referral-specialties/recents');
+  return result.data;
+}
+
+export async function addFavoriteReferralSpecialty(targetId: string) {
+  await request<{ ok: true }>('/referral-specialties/favorites', {
+    method: 'POST',
+    body: JSON.stringify({ targetId }),
+  });
+}
+
+export async function removeFavoriteReferralSpecialty(targetId: string) {
+  await request<{ ok: true }>(`/referral-specialties/favorites/${encodeURIComponent(targetId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function searchReferralFacilities(query: string, limit = 20) {
+  const result = await request<{ data: ReferralFacilityEntry[] }>(`/referral-facilities?q=${encodeURIComponent(query)}&limit=${limit}`);
+  return result.data;
+}
+
+export async function fetchFavoriteReferralFacilities() {
+  const result = await request<{ data: ReferralFacilityEntry[] }>('/referral-facilities/favorites');
+  return result.data;
+}
+
+export async function fetchRecentReferralFacilities() {
+  const result = await request<{ data: ReferralFacilityEntry[] }>('/referral-facilities/recents');
+  return result.data;
+}
+
+export async function addFavoriteReferralFacility(targetId: string) {
+  await request<{ ok: true }>('/referral-facilities/favorites', {
+    method: 'POST',
+    body: JSON.stringify({ targetId }),
+  });
+}
+
+export async function removeFavoriteReferralFacility(targetId: string) {
+  await request<{ ok: true }>(`/referral-facilities/favorites/${encodeURIComponent(targetId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function createCareAction(payload: {
+  appointmentId: string;
+  patientId: string;
+  clinicId: string;
+  type: 'referral' | 'admission' | 'followup';
+  targetType: 'specialty' | 'facility' | 'date';
+  targetId: string;
+  title: string;
+  notes: string;
+  urgency: 'routine' | 'urgent' | 'emergency';
+  actionDate: string;
+}) {
+  const result = await request<{ data: CareAction }>('/care-actions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
 export async function saveMedicationPreference(payload: {
   medicationKey: string;
   registrationNo?: string;
@@ -473,4 +612,104 @@ export async function updateWorkspaceSubscription(
     method: 'PUT',
     body: JSON.stringify(payload),
   });
+}
+
+export async function fetchAdminDiagnosisCatalog() {
+  const result = await request<{ data: DiagnosisCatalogEntry[] }>('/admin/diagnosis-catalog');
+  return result.data;
+}
+
+export async function createAdminDiagnosisCatalogEntry(payload: DiagnosisCatalogPayload) {
+  const result = await request<{ data: DiagnosisCatalogEntry }>('/admin/diagnosis-catalog', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function updateAdminDiagnosisCatalogEntry(id: string, payload: DiagnosisCatalogPayload) {
+  const result = await request<{ data: DiagnosisCatalogEntry }>(`/admin/diagnosis-catalog/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function deleteAdminDiagnosisCatalogEntry(id: string) {
+  await request<{ ok: true }>(`/admin/diagnosis-catalog/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchAdminInvestigationCatalog() {
+  const result = await request<{ data: InvestigationCatalogEntry[] }>('/admin/investigation-catalog');
+  return result.data;
+}
+
+export async function createAdminInvestigationCatalogEntry(payload: InvestigationCatalogPayload) {
+  const result = await request<{ data: InvestigationCatalogEntry }>('/admin/investigation-catalog', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function updateAdminInvestigationCatalogEntry(id: string, payload: InvestigationCatalogPayload) {
+  const result = await request<{ data: InvestigationCatalogEntry }>(`/admin/investigation-catalog/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function deleteAdminInvestigationCatalogEntry(id: string) {
+  await request<{ ok: true }>(`/admin/investigation-catalog/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchAdminReferralSpecialties() {
+  const result = await request<{ data: ReferralSpecialtyEntry[] }>('/admin/referral-specialties');
+  return result.data;
+}
+
+export async function createAdminReferralSpecialty(payload: ReferralSpecialtyPayload) {
+  const result = await request<{ data: ReferralSpecialtyEntry }>('/admin/referral-specialties', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function updateAdminReferralSpecialty(id: string, payload: ReferralSpecialtyPayload) {
+  const result = await request<{ data: ReferralSpecialtyEntry }>(`/admin/referral-specialties/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function deleteAdminReferralSpecialty(id: string) {
+  await request<{ ok: true }>(`/admin/referral-specialties/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchAdminReferralFacilities() {
+  const result = await request<{ data: ReferralFacilityEntry[] }>('/admin/referral-facilities');
+  return result.data;
+}
+
+export async function createAdminReferralFacility(payload: ReferralFacilityPayload) {
+  const result = await request<{ data: ReferralFacilityEntry }>('/admin/referral-facilities', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function updateAdminReferralFacility(id: string, payload: ReferralFacilityPayload) {
+  const result = await request<{ data: ReferralFacilityEntry }>(`/admin/referral-facilities/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function deleteAdminReferralFacility(id: string) {
+  await request<{ ok: true }>(`/admin/referral-facilities/${id}`, { method: 'DELETE' });
 }

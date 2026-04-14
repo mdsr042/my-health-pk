@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { FlaskConical, Scan, Stethoscope, ArrowRightLeft, Plus, Building2, CalendarPlus } from 'lucide-react';
-import type { ClinicalNote, LabOrder } from '@/data/mockData';
+import type { CareAction, ClinicalNote, LabOrder } from '@/data/mockData';
 
 const orderCategories = [
   { id: 'lab', label: 'Laboratory', icon: FlaskConical, color: 'text-warning' },
@@ -15,10 +15,11 @@ const orderCategories = [
 
 interface OrdersPanelProps {
   activeOrders: LabOrder[];
+  activeCareActions: CareAction[];
   previousNotes: ClinicalNote[];
 }
 
-export default function OrdersPanel({ activeOrders, previousNotes }: OrdersPanelProps) {
+export default function OrdersPanel({ activeOrders, activeCareActions, previousNotes }: OrdersPanelProps) {
   const historicalOrders = previousNotes.flatMap(note =>
     note.labOrders.map(order => ({
       ...order,
@@ -26,7 +27,10 @@ export default function OrdersPanel({ activeOrders, previousNotes }: OrdersPanel
     }))
   );
 
+  const historicalCareActions = previousNotes.flatMap(note => note.careActions ?? []);
+
   const orders = [...activeOrders, ...historicalOrders];
+  const careActions = [...activeCareActions, ...historicalCareActions];
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
@@ -42,6 +46,32 @@ export default function OrdersPanel({ activeOrders, previousNotes }: OrdersPanel
             </Button>
           );
         })}
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="font-semibold text-foreground text-sm">Care Actions</h3>
+        {careActions.length === 0 ? (
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-6 text-center text-sm text-muted-foreground">
+              No referrals, admissions, or follow-up actions yet
+            </CardContent>
+          </Card>
+        ) : (
+          careActions.map(action => (
+            <Card key={action.id} className="border-0 shadow-sm">
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${action.type === 'referral' ? 'bg-destructive/10' : action.type === 'admission' ? 'bg-muted/50' : 'bg-primary/10'}`}>
+                  {action.type === 'referral' ? <ArrowRightLeft className="w-4 h-4 text-destructive" /> : action.type === 'admission' ? <Building2 className="w-4 h-4 text-muted-foreground" /> : <CalendarPlus className="w-4 h-4 text-primary" />}
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">{action.title}</p>
+                  <p className="text-xs text-muted-foreground">{action.notes || action.actionDate || action.type}</p>
+                </div>
+                <Badge variant="outline" className="text-[10px]">{action.urgency}</Badge>
+              </CardContent>
+            </Card>
+          ))
+        )}
       </div>
 
       {/* Orders list */}

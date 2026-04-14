@@ -7,6 +7,7 @@ import type {
   LabOrder,
   Medication,
   Patient,
+  CareAction,
   Vitals,
 } from '@/data/mockData';
 
@@ -27,6 +28,7 @@ export interface ConsultationDraft {
   diagnoses: Diagnosis[];
   medications: Medication[];
   labOrders: LabOrder[];
+  careActions: CareAction[];
   savedAt: string;
 }
 
@@ -217,6 +219,60 @@ export interface MedicationPreference {
   createdAt: string;
   updatedAt: string;
   payload: Record<string, unknown>;
+}
+
+export interface DiagnosisCatalogEntry {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface DiagnosisCatalogPayload {
+  code: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface InvestigationCatalogEntry {
+  id: string;
+  name: string;
+  category: string;
+  type: 'lab' | 'radiology';
+  isActive: boolean;
+}
+
+export interface InvestigationCatalogPayload {
+  name: string;
+  category: string;
+  type: 'lab' | 'radiology';
+  isActive: boolean;
+}
+
+export interface ReferralSpecialtyEntry {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface ReferralSpecialtyPayload {
+  name: string;
+  isActive: boolean;
+}
+
+export interface ReferralFacilityEntry {
+  id: string;
+  name: string;
+  city: string;
+  phone: string;
+  isActive: boolean;
+}
+
+export interface ReferralFacilityPayload {
+  name: string;
+  city: string;
+  phone: string;
+  isActive: boolean;
 }
 
 export interface TreatmentTemplateDiagnosis {
