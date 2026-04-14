@@ -5,9 +5,20 @@ import { Separator } from '@/components/ui/separator';
 import { User, Mail, Phone, Stethoscope, Award, Building2, Clock, MapPin } from 'lucide-react';
 
 export default function Profile() {
-  const { doctor, doctorClinics } = useAuth();
+  const { doctor, doctorClinics, user } = useAuth();
 
-  if (!doctor) return null;
+  const profileName = doctor?.name?.trim() || user?.email || 'Doctor Profile';
+  const profileSpecialization = doctor?.specialization?.trim() || 'Doctor account';
+  const profileQualifications = doctor?.qualifications?.trim() || 'Qualifications not added yet';
+  const profilePhone = doctor?.phone?.trim() || 'Phone not added yet';
+  const profileEmail = doctor?.email?.trim() || user?.email || 'Email not available';
+  const profilePmcNumber = doctor?.pmcNumber?.trim() || 'Not added yet';
+  const profileInitials = profileName
+    .split(' ')
+    .filter(Boolean)
+    .slice(-2)
+    .map(part => part[0]?.toUpperCase() ?? '')
+    .join('') || 'DR';
 
   return (
     <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-6 animate-fade-in">
@@ -18,13 +29,13 @@ export default function Profile() {
         <CardContent className="p-6">
           <div className="flex items-start gap-5">
             <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center text-2xl font-bold text-primary shrink-0">
-              {doctor.name.split(' ').slice(-2).map(n => n[0]).join('')}
+              {profileInitials}
             </div>
             <div className="flex-1 space-y-1">
-              <h2 className="text-lg font-bold text-foreground">{doctor.name}</h2>
-              <p className="text-sm text-muted-foreground">{doctor.specialization}</p>
-              <p className="text-sm text-muted-foreground">{doctor.qualifications}</p>
-              <Badge variant="outline" className="mt-2 text-xs">PMC Reg: {doctor.pmcNumber}</Badge>
+              <h2 className="text-lg font-bold text-foreground">{profileName}</h2>
+              <p className="text-sm text-muted-foreground">{profileSpecialization}</p>
+              <p className="text-sm text-muted-foreground">{profileQualifications}</p>
+              <Badge variant="outline" className="mt-2 text-xs">PMC Reg: {profilePmcNumber}</Badge>
             </div>
           </div>
 
@@ -32,10 +43,10 @@ export default function Profile() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
-              { icon: Mail, label: 'Email', value: doctor.email },
-              { icon: Phone, label: 'Phone', value: doctor.phone },
-              { icon: Stethoscope, label: 'Specialization', value: doctor.specialization },
-              { icon: Award, label: 'Qualifications', value: doctor.qualifications },
+              { icon: Mail, label: 'Email', value: profileEmail },
+              { icon: Phone, label: 'Phone', value: profilePhone },
+              { icon: Stethoscope, label: 'Specialization', value: profileSpecialization },
+              { icon: Award, label: 'Qualifications', value: profileQualifications },
             ].map(item => (
               <div key={item.label} className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
