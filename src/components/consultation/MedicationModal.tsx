@@ -58,6 +58,21 @@ function normalizeMedicationKey(value: string) {
     .trim();
 }
 
+function getMedicationMatchKey(medication: Partial<Medication>) {
+  const medicationId = String(medication.id ?? '');
+  if (medicationId.startsWith('cat-')) {
+    return `catalog:${medicationId.replace('cat-', '')}`;
+  }
+
+  return [
+    'custom',
+    normalizeMedicationKey(String(medication.name ?? '')),
+    normalizeMedicationKey(String(medication.strength ?? '')),
+    normalizeMedicationKey(String(medication.form ?? '')),
+    normalizeMedicationKey(String(medication.route ?? '')),
+  ].join('|');
+}
+
 function getMedicationPreferenceKey(medication: Medication) {
   if (medication.id.startsWith('cat-')) {
     return medication.id.replace('cat-', '');
@@ -199,6 +214,15 @@ export default function MedicationModal({
     [favorites]
   );
 
+  const prescribedMedicationCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    prescribedMedications.forEach(medication => {
+      const key = getMedicationMatchKey(medication);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+    return counts;
+  }, [prescribedMedications]);
+
   const recentEntries = useMemo(() => {
     return preferences
       .slice(0, 12)
@@ -288,9 +312,12 @@ export default function MedicationModal({
   };
 
   const handleSelect = (med: Medication) => {
+    const existingMedication = prescribedMedications.find(item => getMedicationMatchKey(item) === getMedicationMatchKey(med));
     const preference = preferences.find(item => item.medicationKey === getMedicationPreferenceKey(med));
     const preferred = preference?.payload as Partial<Medication> | undefined;
-    const nextMedication: Medication = preferred
+    const nextMedication: Medication = existingMedication
+      ? existingMedication
+      : preferred
       ? {
           ...med,
           ...preferred,
@@ -348,6 +375,8 @@ export default function MedicationModal({
   const requiredDosePatternError = selected && !dosePattern.trim() ? 'Dose pattern is required before adding this medication.' : '';
   const canSubmitMedication = Boolean(selected && selected.name.trim() && dosePattern.trim() && parsedPattern);
   const canSaveFavoriteFromSettings = Boolean(canSubmitMedication && selectedRegistrationNo);
+  const selectedMatchCount = selected ? prescribedMedicationCounts.get(getMedicationMatchKey(selected)) ?? 0 : 0;
+  const isEditingExistingMedication = Boolean(selected && selectedMatchCount > 0 && prescribedMedications.some(med => med.id === selected.id));
 
   const handleDosePatternChange = (value: string) => {
     setDosePattern(value);
@@ -570,6 +599,8 @@ export default function MedicationModal({
                 {filtered.map(med => {
                   const registrationNo = med.id.startsWith('cat-') ? med.id.replace('cat-', '') : '';
                   const isFavorite = registrationNo ? favoriteKeys.has(registrationNo) : false;
+                  const prescribedCount = prescribedMedicationCounts.get(getMedicationMatchKey(med)) ?? 0;
+                  const alreadyAdded = prescribedCount > 0;
 
                   return (
                     <div
@@ -590,8 +621,10 @@ export default function MedicationModal({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-medium text-foreground truncate">{med.name}</p>
-                          {prescribedMedications.some(item => item.name === med.name) && (
-                            <Badge variant="outline" className="text-[10px]">Added</Badge>
+                          {alreadyAdded && (
+                            <Badge variant="outline" className="text-[10px] border-emerald-200 bg-emerald-50 text-emerald-700">
+                              {prescribedCount > 1 ? `Added x${prescribedCount}` : 'Added'}
+                            </Badge>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">
@@ -639,7 +672,13 @@ export default function MedicationModal({
                           <Info className="w-4 h-4 text-muted-foreground" />
                         </Button>
                       ) : null}
-                      <Plus className="w-4 h-4 text-muted-foreground" />
+                      <div className="w-8 flex justify-center">
+                        {alreadyAdded ? (
+                          <span className="text-[10px] font-medium text-muted-foreground">Added</span>
+                        ) : (
+                          <Plus className="w-4 h-4 text-muted-foreground" />
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -717,6 +756,11 @@ export default function MedicationModal({
                     </h3>
                   </div>
                   <div className="p-3 space-y-4">
+                    {isEditingExistingMedication && (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                        This medicine is already in the prescription. Updating it will replace the current setup.
+                      </div>
+                    )}
                     <div className="bg-muted/50 rounded-lg p-3">
                       {isCustomMedication ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -946,7 +990,7 @@ export default function MedicationModal({
                         <Plus className="w-4 h-4" />
                         {mode === 'favorites'
                           ? 'Save Favorite'
-                          : prescribedMedications.some(med => med.id === selected.id)
+                          : isEditingExistingMedication
                               ? 'Update Prescription'
                               : 'Add to Prescription'}
                       </Button>

@@ -705,52 +705,260 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
           <div className="flex-1">
             {activeView === 'consultation' && (
               <div className="p-4 lg:p-6 space-y-5">
-              {/* Vitals */}
+              <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-4 space-y-4">
+                    <h3 className="font-semibold text-foreground">Symptoms & History</h3>
+                    {clinicalFieldGroups[0].fields.map(field => {
+                      const fieldState = {
+                        chiefComplaint: { value: chiefComplaint, setter: setChiefComplaint },
+                        hpi: { value: hpi, setter: setHpi },
+                        pastHistory: { value: pastHistory, setter: setPastHistory },
+                        allergies: { value: allergies, setter: setAllergies },
+                      }[field.key];
+
+                      return (
+                        <div key={field.label} className="space-y-1.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <label className="text-sm font-medium text-foreground">{field.label}</label>
+                            <span className="text-[11px] text-muted-foreground">Tap a quick note to insert</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {field.suggestions.map(suggestion => (
+                              <button
+                                key={suggestion}
+                                type="button"
+                                onClick={() => appendSnippet(fieldState.setter, fieldState.value, suggestion)}
+                                className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              >
+                                {suggestion}
+                              </button>
+                            ))}
+                          </div>
+                          <Textarea
+                            value={fieldState.value}
+                            onChange={e => handleFieldChange(fieldState.setter)(e.target.value)}
+                            onInput={e => {
+                              const target = e.currentTarget;
+                              target.style.height = 'auto';
+                              target.style.height = `${Math.max(target.scrollHeight, 56)}px`;
+                            }}
+                            placeholder={`Enter ${field.label.toLowerCase()}...`}
+                            rows={field.rows}
+                            className="min-h-[56px] resize-none"
+                          />
+                        </div>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+
+                <div className="space-y-4">
+                  <Card className="border-0 shadow-sm">
+                    <CardContent className="p-4">
+                      <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-primary" /> Vitals
+                      </h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        {[
+                          { label: 'BP', value: vitals.bp, unit: 'mmHg' },
+                          { label: 'Pulse', value: vitals.pulse, unit: 'bpm' },
+                          { label: 'Temp', value: vitals.temp, unit: '°F' },
+                          { label: 'SpO₂', value: vitals.spo2, unit: '%' },
+                          { label: 'Weight', value: vitals.weight, unit: 'kg' },
+                          { label: 'Height', value: vitals.height, unit: 'cm' },
+                          { label: 'BMI', value: vitals.bmi, unit: '' },
+                          { label: 'RR', value: vitals.respiratoryRate, unit: '/min' },
+                        ].map(v => (
+                          <div key={v.label} className="bg-muted/50 rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground mb-1">{v.label}</p>
+                            <div className="flex items-baseline gap-1">
+                              <Input
+                                value={v.value}
+                                onChange={e => {
+                                  const keyMap = {
+                                    BP: 'bp',
+                                    Pulse: 'pulse',
+                                    Temp: 'temp',
+                                    'SpO₂': 'spo2',
+                                    Weight: 'weight',
+                                    Height: 'height',
+                                    BMI: 'bmi',
+                                    RR: 'respiratoryRate',
+                                  } as const;
+
+                                  setVitals(prev => ({ ...prev, [keyMap[v.label as keyof typeof keyMap]]: e.target.value }));
+                                  markUnsaved(patientId, true);
+                                }}
+                                className="h-7 bg-transparent border-0 p-0 text-lg font-semibold text-foreground focus-visible:ring-0 w-16"
+                              />
+                              <span className="text-xs text-muted-foreground">{v.unit}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-0 shadow-sm">
+                    <CardContent className="p-4 space-y-4">
+                      <h3 className="font-semibold text-foreground">Assessment & Plan</h3>
+                      {clinicalFieldGroups[1].fields.map(field => {
+                        const fieldState = {
+                          examination: { value: examination, setter: setExamination },
+                          assessment: { value: assessment, setter: setAssessment },
+                          plan: { value: plan, setter: setPlan },
+                          instructions: { value: instructions, setter: setInstructions },
+                          followUp: { value: followUp, setter: setFollowUp },
+                        }[field.key];
+
+                        return (
+                          <div key={field.label} className="space-y-1.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <label className="text-sm font-medium text-foreground">{field.label}</label>
+                              <span className="text-[11px] text-muted-foreground">Tap a quick note to insert</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {field.suggestions.map(suggestion => (
+                                <button
+                                  key={suggestion}
+                                  type="button"
+                                  onClick={() => appendSnippet(fieldState.setter, fieldState.value, suggestion)}
+                                  className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                >
+                                  {suggestion}
+                                </button>
+                              ))}
+                            </div>
+                            <Textarea
+                              value={fieldState.value}
+                              onChange={e => handleFieldChange(fieldState.setter)(e.target.value)}
+                              onInput={e => {
+                                const target = e.currentTarget;
+                                target.style.height = 'auto';
+                                target.style.height = `${Math.max(target.scrollHeight, 56)}px`;
+                              }}
+                              placeholder={`Enter ${field.label.toLowerCase()}...`}
+                              rows={field.rows}
+                              className="min-h-[56px] resize-none"
+                            />
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+
               <Card className="border-0 shadow-sm">
                 <CardContent className="p-4">
-                  <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-primary" /> Vitals
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {[
-                      { label: 'BP', value: vitals.bp, icon: Heart, unit: 'mmHg' },
-                      { label: 'Pulse', value: vitals.pulse, icon: Activity, unit: 'bpm' },
-                      { label: 'Temp', value: vitals.temp, icon: Thermometer, unit: '°F' },
-                      { label: 'SpO₂', value: vitals.spo2, icon: Wind, unit: '%' },
-                      { label: 'Weight', value: vitals.weight, icon: Scale, unit: 'kg' },
-                      { label: 'Height', value: vitals.height, icon: Ruler, unit: 'cm' },
-                      { label: 'BMI', value: vitals.bmi, icon: Scale, unit: '' },
-                      { label: 'RR', value: vitals.respiratoryRate, icon: Wind, unit: '/min' },
-                    ].map(v => (
-                      <div key={v.label} className="bg-muted/50 rounded-lg p-3">
-                        <p className="text-xs text-muted-foreground mb-1">{v.label}</p>
-                        <div className="flex items-baseline gap-1">
-                          <Input
-                            value={v.value}
-                            onChange={e => {
-                              const keyMap = {
-                                BP: 'bp',
-                                Pulse: 'pulse',
-                                Temp: 'temp',
-                                'SpO₂': 'spo2',
-                                Weight: 'weight',
-                                Height: 'height',
-                                BMI: 'bmi',
-                                RR: 'respiratoryRate',
-                              } as const;
-
-                              setVitals(prev => ({ ...prev, [keyMap[v.label as keyof typeof keyMap]]: e.target.value }));
-                              markUnsaved(patientId, true);
-                            }}
-                            className="h-7 bg-transparent border-0 p-0 text-lg font-semibold text-foreground focus-visible:ring-0 w-16"
-                          />
-                          <span className="text-xs text-muted-foreground">{v.unit}</span>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-foreground">Diagnoses</h3>
+                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDiagnosisOpen(true)}>
+                    <Plus className="w-3 h-3" /> Add
+                  </Button>
+                </div>
+                {diagnoses.length === 0 ? (
+                  <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No diagnoses added yet</p>
+                ) : (
+                  <div className="space-y-2">
+                    {diagnoses.map(dx => (
+                      <div key={dx.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                        <div className="flex-1">
+                          <span className="font-medium text-foreground text-sm">{dx.name}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{dx.code}</span>
                         </div>
+                        {dx.isPrimary && <Badge className="bg-primary/10 text-primary text-[10px]">Primary</Badge>}
+                        <button onClick={() => removeDiagnosis(dx.id)} className="text-xs text-destructive hover:underline">Remove</button>
                       </div>
                     ))}
                   </div>
+                )}
                 </CardContent>
               </Card>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="font-semibold text-foreground flex items-center gap-2">
+                          <Pill className="w-4 h-4 text-success" /> Medications
+                        </h3>
+                        <p className="text-xs text-muted-foreground">Prescribe without scrolling to the bottom of the note.</p>
+                      </div>
+                      <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setMedicationOpen(true)}>
+                        <Plus className="w-3.5 h-3.5" /> Add
+                      </Button>
+                    </div>
+                    {medications.length === 0 ? (
+                      <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No medications prescribed yet</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {medications.map(med => (
+                          <div key={med.id} className="bg-muted/50 rounded-lg p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-foreground text-sm">{med.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {med.form} • {med.route} • {med.frequency || med.frequencyUrdu || 'Frequency not set'} • {med.duration}
+                                </p>
+                                {med.frequencyUrdu && <p className="text-xs text-muted-foreground" dir="rtl">{med.frequencyUrdu}</p>}
+                                {med.instructions && <p className="text-xs text-muted-foreground mt-1">{med.instructions}</p>}
+                                {med.instructionsUrdu && <p className="text-xs text-muted-foreground" dir="rtl">{med.instructionsUrdu}</p>}
+                              </div>
+                              <button onClick={() => removeMedication(med.id)} className="text-xs text-destructive hover:underline">Remove</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="font-semibold text-foreground flex items-center gap-2">
+                          <FlaskConical className="w-4 h-4 text-warning" /> Investigations
+                        </h3>
+                        <p className="text-xs text-muted-foreground">Order labs and radiology from the first screen area.</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openLabModal('lab')}>
+                          <Plus className="w-3.5 h-3.5" /> Lab
+                        </Button>
+                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openLabModal('radiology')}>
+                          <Plus className="w-3.5 h-3.5" /> Radiology
+                        </Button>
+                      </div>
+                    </div>
+                    {labOrders.length === 0 ? (
+                      <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No investigations ordered yet</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {labOrders.map(order => (
+                          <div key={order.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                            <div className={`w-7 h-7 rounded-md flex items-center justify-center ${order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI') ? 'bg-info/10' : 'bg-warning/10'}`}>
+                              {order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI')
+                                ? <Scan className="w-3.5 h-3.5 text-info" />
+                                : <FlaskConical className="w-3.5 h-3.5 text-warning" />}
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-foreground">{order.testName}</p>
+                              <p className="text-xs text-muted-foreground">{order.category}</p>
+                            </div>
+                            <Badge variant="outline" className={`text-[10px] ${order.priority === 'stat' ? 'border-destructive/30 text-destructive' : order.priority === 'urgent' ? 'border-warning/30 text-warning' : ''}`}>
+                              {order.priority}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
 
               <Card className="border-0 shadow-sm">
                 <CardContent className="p-4 space-y-3">
@@ -759,7 +967,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                       <h3 className="font-semibold text-foreground flex items-center gap-2">
                         <LayoutTemplate className="w-4 h-4 text-primary" /> Treatment Templates
                       </h3>
-                      <p className="text-xs text-muted-foreground">Use your saved editable starter sets for frequent OPD conditions.</p>
+                      <p className="text-xs text-muted-foreground">Use your saved editable starter sets after you finish the main history and assessment.</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setTemplateDialogOpen(true)}>
@@ -867,172 +1075,6 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 </Card>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-2">
-                <Card className="border-0 shadow-sm">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <h3 className="font-semibold text-foreground flex items-center gap-2">
-                          <Pill className="w-4 h-4 text-success" /> Medications
-                        </h3>
-                        <p className="text-xs text-muted-foreground">Prescribe without scrolling to the bottom of the note.</p>
-                      </div>
-                      <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setMedicationOpen(true)}>
-                        <Plus className="w-3.5 h-3.5" /> Add
-                      </Button>
-                    </div>
-                    {medications.length === 0 ? (
-                      <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No medications prescribed yet</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {medications.map(med => (
-                          <div key={med.id} className="bg-muted/50 rounded-lg p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <p className="font-medium text-foreground text-sm">{med.name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {med.form} • {med.route} • {med.frequency || med.frequencyUrdu || 'Frequency not set'} • {med.duration}
-                                </p>
-                                {med.frequencyUrdu && <p className="text-xs text-muted-foreground" dir="rtl">{med.frequencyUrdu}</p>}
-                                {med.instructions && <p className="text-xs text-muted-foreground mt-1">{med.instructions}</p>}
-                                {med.instructionsUrdu && <p className="text-xs text-muted-foreground" dir="rtl">{med.instructionsUrdu}</p>}
-                              </div>
-                              <button onClick={() => removeMedication(med.id)} className="text-xs text-destructive hover:underline">Remove</button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card className="border-0 shadow-sm">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <h3 className="font-semibold text-foreground flex items-center gap-2">
-                          <FlaskConical className="w-4 h-4 text-warning" /> Investigations
-                        </h3>
-                        <p className="text-xs text-muted-foreground">Order labs and radiology from the first screen area.</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openLabModal('lab')}>
-                          <Plus className="w-3.5 h-3.5" /> Lab
-                        </Button>
-                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openLabModal('radiology')}>
-                          <Plus className="w-3.5 h-3.5" /> Radiology
-                        </Button>
-                      </div>
-                    </div>
-                    {labOrders.length === 0 ? (
-                      <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No investigations ordered yet</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {labOrders.map(order => (
-                          <div key={order.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
-                            <div className={`w-7 h-7 rounded-md flex items-center justify-center ${order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI') ? 'bg-info/10' : 'bg-warning/10'}`}>
-                              {order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI')
-                                ? <Scan className="w-3.5 h-3.5 text-info" />
-                                : <FlaskConical className="w-3.5 h-3.5 text-warning" />}
-                            </div>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium text-foreground">{order.testName}</p>
-                              <p className="text-xs text-muted-foreground">{order.category}</p>
-                            </div>
-                            <Badge variant="outline" className={`text-[10px] ${order.priority === 'stat' ? 'border-destructive/30 text-destructive' : order.priority === 'urgent' ? 'border-warning/30 text-warning' : ''}`}>
-                              {order.priority}
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div className="grid gap-4 xl:grid-cols-2">
-                {clinicalFieldGroups.map(group => (
-                  <Card key={group.title} className="border-0 shadow-sm">
-                    <CardContent className="p-4 space-y-4">
-                      <h3 className="font-semibold text-foreground">{group.title}</h3>
-                      {group.fields.map(field => {
-                        const fieldState = {
-                          chiefComplaint: { value: chiefComplaint, setter: setChiefComplaint },
-                          hpi: { value: hpi, setter: setHpi },
-                          pastHistory: { value: pastHistory, setter: setPastHistory },
-                          allergies: { value: allergies, setter: setAllergies },
-                          examination: { value: examination, setter: setExamination },
-                          assessment: { value: assessment, setter: setAssessment },
-                          plan: { value: plan, setter: setPlan },
-                          instructions: { value: instructions, setter: setInstructions },
-                          followUp: { value: followUp, setter: setFollowUp },
-                        }[field.key];
-
-                        return (
-                          <div key={field.label} className="space-y-1.5">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <label className="text-sm font-medium text-foreground">{field.label}</label>
-                              <span className="text-[11px] text-muted-foreground">Tap a quick note to insert</span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {field.suggestions.map(suggestion => (
-                                <button
-                                  key={suggestion}
-                                  type="button"
-                                  onClick={() => appendSnippet(fieldState.setter, fieldState.value, suggestion)}
-                                  className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                >
-                                  {suggestion}
-                                </button>
-                              ))}
-                            </div>
-                            <Textarea
-                              value={fieldState.value}
-                              onChange={e => handleFieldChange(fieldState.setter)(e.target.value)}
-                              onInput={e => {
-                                const target = e.currentTarget;
-                                target.style.height = 'auto';
-                                target.style.height = `${Math.max(target.scrollHeight, 56)}px`;
-                              }}
-                              placeholder={`Enter ${field.label.toLowerCase()}...`}
-                              rows={field.rows}
-                              className="min-h-[56px] resize-none"
-                            />
-                          </div>
-                        );
-                      })}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium text-foreground">Diagnoses</h3>
-                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDiagnosisOpen(true)}>
-                    <Plus className="w-3 h-3" /> Add
-                  </Button>
-                </div>
-                {diagnoses.length === 0 ? (
-                  <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No diagnoses added yet</p>
-                ) : (
-                  <div className="space-y-2">
-                    {diagnoses.map(dx => (
-                      <div key={dx.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
-                        <div className="flex-1">
-                          <span className="font-medium text-foreground text-sm">{dx.name}</span>
-                          <span className="ml-2 text-xs text-muted-foreground">{dx.code}</span>
-                        </div>
-                        {dx.isPrimary && <Badge className="bg-primary/10 text-primary text-[10px]">Primary</Badge>}
-                        <button onClick={() => removeDiagnosis(dx.id)} className="text-xs text-destructive hover:underline">Remove</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                </CardContent>
-              </Card>
-
               </div>
             )}
 
@@ -1114,7 +1156,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         onRemove={removeMedication}
         prescribedMedications={medications}
       />
-      <LabOrderModal open={labOrderOpen} onOpenChange={setLabOrderOpen} onAdd={addLabOrder} type={labOrderType} />
+      <LabOrderModal open={labOrderOpen} onOpenChange={setLabOrderOpen} onAdd={addLabOrder} type={labOrderType} activeOrders={labOrders} />
       <ReferralModal
         open={referralOpen}
         onOpenChange={setReferralOpen}

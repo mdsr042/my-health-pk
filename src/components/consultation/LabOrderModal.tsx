@@ -21,9 +21,14 @@ interface LabOrderModalProps {
   onOpenChange: (open: boolean) => void;
   onAdd: (order: LabOrder) => void;
   type: 'lab' | 'radiology';
+  activeOrders: LabOrder[];
 }
 
-export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOrderModalProps) {
+function getInvestigationMatchKey(entry: Pick<InvestigationCatalogEntry, 'name' | 'category' | 'type'>) {
+  return `${entry.type}::${entry.category.trim().toLowerCase()}::${entry.name.trim().toLowerCase()}`;
+}
+
+export default function LabOrderModal({ open, onOpenChange, onAdd, type, activeOrders }: LabOrderModalProps) {
   const [search, setSearch] = useState('');
   const [sourceMode, setSourceMode] = useState<'favorites' | 'recent' | 'browse'>('favorites');
   const [priority, setPriority] = useState<'routine' | 'urgent' | 'stat'>('routine');
@@ -95,7 +100,22 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
     return catalogResults;
   }, [catalogResults, favorites, recents, sourceMode]);
 
+  const activeOrderKeys = useMemo(() => {
+    return new Set(
+      activeOrders.map(order =>
+        getInvestigationMatchKey({
+          name: order.testName,
+          category: order.category,
+          type,
+        })
+      )
+    );
+  }, [activeOrders, type]);
+
   const handleAdd = (entry: InvestigationCatalogEntry) => {
+    if (activeOrderKeys.has(getInvestigationMatchKey(entry))) {
+      return;
+    }
     const order: LabOrder = {
       id: `order-${Date.now()}`,
       testName: entry.name,
@@ -137,6 +157,7 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
           if (event.key !== 'Enter' || event.shiftKey || !selectedTest) return;
           const target = event.target as HTMLElement | null;
           if (!target || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') return;
+          if (activeOrderKeys.has(getInvestigationMatchKey(selectedTest))) return;
           event.preventDefault();
           handleAdd(selectedTest);
         }}
@@ -208,8 +229,19 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
                 }}
                 className={`flex items-center gap-3 p-3 rounded-lg transition-colors group cursor-pointer ${selectedTest?.id === test.id ? 'bg-muted border border-border' : 'hover:bg-muted/50'}`}
               >
+                {(() => {
+                  const alreadyAdded = activeOrderKeys.has(getInvestigationMatchKey(test));
+                  return (
+                    <>
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-foreground">{test.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-foreground">{test.name}</p>
+                    {alreadyAdded && (
+                      <Badge variant="outline" className="text-[10px] border-amber-200 bg-amber-50 text-amber-700">
+                        Already ordered
+                      </Badge>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">{test.category}</p>
                 </div>
                 <Button
@@ -228,13 +260,18 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
                   variant="outline"
                   size="sm"
                   className="h-7 text-xs gap-1"
+                  disabled={alreadyAdded}
                   onClick={event => {
                     event.stopPropagation();
+                    if (alreadyAdded) return;
                     handleAdd(test);
                   }}
                 >
-                  <Plus className="w-3 h-3" /> Order
+                  <Plus className="w-3 h-3" /> {alreadyAdded ? 'Added' : 'Order'}
                 </Button>
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -242,7 +279,11 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type }: LabOr
           {selectedTest && (
             <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
               Selected: <span className="font-medium text-foreground">{selectedTest.name}</span>
-              <span className="ml-2">Press Enter to order quickly.</span>
+              <span className="ml-2">
+                {activeOrderKeys.has(getInvestigationMatchKey(selectedTest))
+                  ? 'This investigation is already added in the current visit.'
+                  : 'Press Enter to order quickly.'}
+              </span>
             </div>
           )}
 
