@@ -82,6 +82,12 @@ async function recordAdminAudit(clientOrQuery, { actorUserId = null, targetUserI
 }
 
 function mapClinic(row) {
+  const specialties = Array.isArray(row.specialties)
+    ? row.specialties
+    : typeof row.specialties === 'string'
+      ? row.specialties.split(',').map(item => item.trim()).filter(Boolean)
+      : [];
+
   return {
     id: row.id,
     name: row.name,
@@ -89,7 +95,7 @@ function mapClinic(row) {
     city: row.city,
     phone: row.phone,
     timings: row.timings,
-    specialties: row.specialties ?? [],
+    specialties,
     logo: row.logo,
   };
 }

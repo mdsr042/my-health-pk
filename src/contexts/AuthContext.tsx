@@ -46,6 +46,17 @@ function writeStoredClinicId(clinicId: string) {
   }
 }
 
+function normalizeClinic(clinic: Clinic): Clinic {
+  return {
+    ...clinic,
+    specialties: Array.isArray(clinic.specialties)
+      ? clinic.specialties
+      : typeof clinic.specialties === 'string'
+        ? clinic.specialties.split(',').map(item => item.trim()).filter(Boolean)
+        : [],
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [session, setSession] = useState<SessionPayload | null>(null);
@@ -83,7 +94,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const doctorClinics = session?.clinics ?? [];
+  const doctorClinics = useMemo(
+    () => (session?.clinics ?? []).map(normalizeClinic),
+    [session?.clinics]
+  );
 
   const activeClinic = useMemo(() => {
     if (!doctorClinics.length) return null;

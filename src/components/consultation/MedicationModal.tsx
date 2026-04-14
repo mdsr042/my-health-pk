@@ -58,6 +58,16 @@ function normalizeMedicationKey(value: string) {
     .trim();
 }
 
+function getCatalogDisplayKey(entry: MedicationCatalogEntry) {
+  return [
+    normalizeMedicationKey(entry.brandName),
+    normalizeMedicationKey(entry.genericName),
+    normalizeMedicationKey(entry.strengthText),
+    normalizeMedicationKey(entry.dosageForm),
+    normalizeMedicationKey(entry.companyName),
+  ].join('|');
+}
+
 function getMedicationMatchKey(medication: Partial<Medication>) {
   const medicationId = String(medication.id ?? '');
   if (medicationId.startsWith('cat-')) {
@@ -108,6 +118,16 @@ function toMedication(entry: MedicationCatalogEntry): Medication {
     instructions: '',
     instructionsUrdu: '',
   };
+}
+
+function dedupeMedications<T extends Medication>(items: T[]) {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const key = getMedicationMatchKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export default function MedicationModal({
@@ -217,7 +237,7 @@ export default function MedicationModal({
   }, [search, sourceMode]);
 
   const favoriteEntries = useMemo(
-    () => favorites.map(item => toMedication(item.medicine)),
+    () => dedupeMedications(favorites.map(item => toMedication(item.medicine))),
     [favorites]
   );
 
@@ -231,7 +251,7 @@ export default function MedicationModal({
   }, [prescribedMedications]);
 
   const recentEntries = useMemo(() => {
-    return preferences
+    return dedupeMedications(preferences
       .slice(0, 12)
       .map((item, index) => {
         const payload = item.payload as Partial<Medication>;
@@ -261,14 +281,24 @@ export default function MedicationModal({
           instructionsUrdu: String(payload.instructionsUrdu ?? ''),
         } satisfies Medication;
       })
-      .filter((item): item is Medication => Boolean(item));
+      .filter((item): item is Medication => Boolean(item)));
   }, [preferences]);
+
+  const dedupedCatalogResults = useMemo(() => {
+    const seen = new Set<string>();
+    return catalogResults.filter(entry => {
+      const key = getCatalogDisplayKey(entry);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [catalogResults]);
 
   const filtered = sourceMode === 'favorites'
     ? favoriteEntries
     : sourceMode === 'recent'
       ? recentEntries
-      : catalogResults.map(toMedication);
+      : dedupedCatalogResults.map(toMedication);
   const isCustomMedication = selected?.id.startsWith('custom-') ?? false;
   const selectedRegistrationNo = selected?.id.startsWith('cat-') ? selected.id.replace('cat-', '') : '';
   const isSelectedFavorite = Boolean(selectedRegistrationNo && favoriteKeys.has(selectedRegistrationNo));
@@ -384,6 +414,27 @@ export default function MedicationModal({
   const canSaveFavoriteFromSettings = Boolean(canSubmitMedication && selectedRegistrationNo);
   const selectedMatchCount = selected ? prescribedMedicationCounts.get(getMedicationMatchKey(selected)) ?? 0 : 0;
   const isEditingExistingMedication = Boolean(selected && selectedMatchCount > 0 && prescribedMedications.some(med => med.id === selected.id));
+  const groupedPrescribedMedications = useMemo(() => {
+    const groups = new Map<string, { medication: Medication; count: number; ids: string[] }>();
+
+    prescribedMedications.forEach(medication => {
+      const key = getMedicationMatchKey(medication);
+      const current = groups.get(key);
+      if (current) {
+        current.count += 1;
+        current.ids.push(medication.id);
+        current.medication = medication;
+      } else {
+        groups.set(key, {
+          medication,
+          count: 1,
+          ids: [medication.id],
+        });
+      }
+    });
+
+    return Array.from(groups.values());
+  }, [prescribedMedications]);
 
   useEffect(() => {
     if (filtered.length === 0) {
@@ -724,7 +775,7 @@ export default function MedicationModal({
                         </p>
                         {sourceMode === 'browse' && registrationNo && (
                           <p className="text-[11px] text-muted-foreground truncate">
-                            {catalogResults.find(item => item.registrationNo === registrationNo)?.companyName || 'Company not listed'}
+                            {dedupedCatalogResults.find(item => item.registrationNo === registrationNo)?.companyName || 'Company not listed'}
                           </p>
                         )}
                       </div>
@@ -788,16 +839,18 @@ export default function MedicationModal({
               <div className="bg-muted px-3 py-2 border-b border-border flex items-center justify-between">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Already Prescribed</h3>
                 <Badge variant="outline" className="text-[10px]">
-                  {prescribedMedications.length}
+                  {groupedPrescribedMedications.length}
                 </Badge>
               </div>
               <div ref={prescribedContainerRef} className="min-h-[210px] max-h-[210px] sm:min-h-[240px] sm:max-h-[240px] overflow-y-auto space-y-2 p-3 scrollbar-thin">
-                {prescribedMedications.length === 0 ? (
+                {groupedPrescribedMedications.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">No medications added yet</p>
                 ) : (
-                  prescribedMedications.map((med, index) => (
+                  groupedPrescribedMedications.map((group, index) => {
+                    const med = group.medication;
+                    return (
                     <div
-                      key={med.id}
+                      key={group.ids.join('|')}
                       ref={node => {
                         prescribedItemRefs.current[med.id] = node;
                       }}
@@ -806,7 +859,14 @@ export default function MedicationModal({
                       <div className="flex items-start gap-2">
                         <span className="text-xs font-medium text-muted-foreground">{index + 1}.</span>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-foreground">{med.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium text-foreground">{med.name}</p>
+                            {group.count > 1 && (
+                              <Badge variant="outline" className="text-[10px] border-amber-200 bg-amber-50 text-amber-700">
+                                x{group.count} duplicates
+                              </Badge>
+                            )}
+                          </div>
                           <p className="text-xs text-muted-foreground">
                             {(med.frequency || med.frequencyUrdu || 'Frequency not set')} • {med.duration} • {med.route}
                           </p>
@@ -830,15 +890,16 @@ export default function MedicationModal({
                             variant="ghost"
                             size="sm"
                             className="h-7 w-7 p-0 text-destructive"
-                            title="Remove medication"
-                            onClick={() => onRemove(med.id)}
+                            title={group.count > 1 ? 'Remove all duplicate entries' : 'Remove medication'}
+                            onClick={() => group.ids.forEach(id => onRemove(id))}
                           >
                             <Trash2 className="w-3 h-3" />
                           </Button>
                         </div>
                       </div>
                     </div>
-                  ))
+                  );
+                  })
                 )}
               </div>
             </div>
