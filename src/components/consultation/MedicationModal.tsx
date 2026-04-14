@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -162,6 +172,7 @@ export default function MedicationModal({
   const [detailLoadingRegNo, setDetailLoadingRegNo] = useState('');
   const [languageMode, setLanguageMode] = useState<'en' | 'ur' | 'bilingual'>('bilingual');
   const [savingFavorite, setSavingFavorite] = useState(false);
+  const [duplicateConfirmOpen, setDuplicateConfirmOpen] = useState(false);
   const [activeResultIndex, setActiveResultIndex] = useState(-1);
   const [pendingRevealMedicationId, setPendingRevealMedicationId] = useState('');
   const [highlightedPrescribedId, setHighlightedPrescribedId] = useState('');
@@ -515,7 +526,7 @@ export default function MedicationModal({
     }
   };
 
-  const handleAdd = () => {
+  const commitMedicationAdd = () => {
     const medicationToSave = buildMedicationFromForm();
     if (!medicationToSave) return;
 
@@ -525,6 +536,14 @@ export default function MedicationModal({
     void persistMedicationPreference(medicationToSave).catch(() => {
       // Keep prescribing flow fast even if preference persistence fails.
     });
+  };
+
+  const handleAdd = () => {
+    if (isEditingExistingMedication) {
+      setDuplicateConfirmOpen(true);
+      return;
+    }
+    commitMedicationAdd();
   };
 
   const handleSaveFavorite = async () => {
@@ -1176,6 +1195,28 @@ export default function MedicationModal({
           </div>
         </div>
       </DialogContent>
+
+      <AlertDialog open={duplicateConfirmOpen} onOpenChange={setDuplicateConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Medicine already prescribed</AlertDialogTitle>
+            <AlertDialogDescription>
+              This medicine is already in the current prescription. If you continue, the existing prescribed entry will be updated with the configuration you have entered now.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep current prescription</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                commitMedicationAdd();
+                setDuplicateConfirmOpen(false);
+              }}
+            >
+              Update existing medicine
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
