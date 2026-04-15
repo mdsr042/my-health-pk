@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useData } from '@/contexts/DataContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import AppointmentBookingDialog from '@/components/appointments/AppointmentBookingDialog';
 import PatientDetailsDialog from '@/components/patients/PatientDetailsDialog';
 import { Search, FileText, Calendar, User, ChevronDown, ChevronUp, CalendarPlus, PencilLine } from 'lucide-react';
@@ -29,9 +30,38 @@ function formatVisitDate(date: string) {
   });
 }
 
+function getStatusBadgeClasses(status: string) {
+  switch (status) {
+    case 'completed':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'in-consultation':
+      return 'border-blue-200 bg-blue-50 text-blue-700';
+    case 'waiting':
+      return 'border-amber-200 bg-amber-50 text-amber-700';
+    default:
+      return 'border-border bg-background text-muted-foreground';
+  }
+}
+
+function formatStatusLabel(status: string) {
+  switch (status) {
+    case 'in-consultation':
+      return 'In Consultation';
+    case 'completed':
+      return 'Completed';
+    case 'waiting':
+      return 'Waiting';
+    case 'scheduled':
+      return 'Scheduled';
+    default:
+      return status ? status.replace(/-/g, ' ') : 'Unknown';
+  }
+}
+
 export default function MedicalRecords() {
   const { patients, getPatientNotes, upsertAppointment, updatePatient, searchPatients } = useData();
   const { activeClinic, doctorClinics, user } = useAuth();
+  const { tabs } = usePatientTabs();
   const [search, setSearch] = useState('');
   const [keyword, setKeyword] = useState('');
   const [clinicFilter, setClinicFilter] = useState<string>('all');
@@ -196,6 +226,7 @@ export default function MedicalRecords() {
         ) : (
           patientsWithNotes.map(patient => {
             const notes = getPatientNotes(patient.id);
+            const isOpenInWorkspace = tabs.some(tab => tab.patientId === patient.id);
             const filteredNotes = notes.filter(note => {
               const clinicMatches = clinicFilter === 'all' || note.clinicId === clinicFilter;
               const noteSearchBlob = [
@@ -223,6 +254,7 @@ export default function MedicalRecords() {
             const latestNote = filteredNotes[0] ?? notes[0] ?? null;
             const olderNotes = latestNote ? filteredNotes.filter(note => note.id !== latestNote.id) : filteredNotes;
             const latestVisitExpanded = latestNote ? expandedVisitIds[patient.id] === latestNote.id : false;
+            const latestVisitStatus = isOpenInWorkspace ? 'in-consultation' : (latestNote?.status || '');
             return (
               <Card key={patient.id} className="border-0 shadow-sm hover:shadow-md transition-shadow">
                 <CardContent className="p-0">
@@ -311,7 +343,11 @@ export default function MedicalRecords() {
                               <div className="rounded-lg border border-border/60 bg-background/80 p-3">
                                 <p className="text-[11px] font-medium text-muted-foreground">Latest Visit</p>
                                 <p className="text-sm font-medium text-foreground">{latestNote ? formatVisitDate(latestNote.date) : '-'}</p>
-                                <p className="text-xs text-muted-foreground">{latestNote?.status || 'No visit status'}</p>
+                                <div className="mt-1">
+                                  <Badge variant="outline" className={`text-[10px] ${getStatusBadgeClasses(latestVisitStatus)}`}>
+                                    {latestVisitStatus ? formatStatusLabel(latestVisitStatus) : 'No visit status'}
+                                  </Badge>
+                                </div>
                               </div>
                               <div className="rounded-lg border border-border/60 bg-background/80 p-3">
                                 <p className="text-[11px] font-medium text-muted-foreground">Primary Diagnosis</p>
@@ -336,7 +372,9 @@ export default function MedicalRecords() {
                                 <p className="text-sm text-muted-foreground">{latestNote.chiefComplaint || 'No chief complaint recorded'}</p>
                               </div>
                               <div className="flex flex-wrap items-center gap-2">
-                                <Badge variant="outline" className="text-[10px]">{latestNote.status}</Badge>
+                                <Badge variant="outline" className={`text-[10px] ${getStatusBadgeClasses(latestVisitStatus)}`}>
+                                  {formatStatusLabel(latestVisitStatus)}
+                                </Badge>
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -508,7 +546,9 @@ export default function MedicalRecords() {
                                     <div className="min-w-0 flex-1">
                                       <div className="flex flex-wrap items-center gap-2">
                                         <p className="text-sm font-medium text-foreground">{visitLabel}</p>
-                                        <Badge variant="outline" className="text-[10px]">{note.status}</Badge>
+                                        <Badge variant="outline" className={`text-[10px] ${getStatusBadgeClasses(note.status)}`}>
+                                          {formatStatusLabel(note.status)}
+                                        </Badge>
                                       </div>
                                       <p className="text-sm text-foreground">{note.chiefComplaint || 'No chief complaint recorded'}</p>
                                       <p className="mt-0.5 text-xs text-muted-foreground">{primaryDiagnosis} • {medicationSummary}</p>
