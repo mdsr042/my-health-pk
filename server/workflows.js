@@ -83,20 +83,22 @@ async function findMatchingPatientForWalkIn(client, workspaceId, payload) {
   }
 
   const normalizedPhone = String(payload.phone ?? '').trim();
-  if (normalizedPhone) {
+  const normalizedName = String(payload.name ?? '').trim();
+  if (normalizedPhone && normalizedName) {
     const result = await client.query(
       `
         SELECT id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
         FROM patients
-        WHERE workspace_id = $1 AND phone = $2
+        WHERE workspace_id = $1
+          AND phone = $2
+          AND LOWER(name) = LOWER($3)
         LIMIT 1
       `,
-      [workspaceId, normalizedPhone]
+      [workspaceId, normalizedPhone, normalizedName]
     );
     if (result.rowCount > 0) return { patient: result.rows[0], matchedBy: 'phone' };
   }
 
-  const normalizedName = String(payload.name ?? '').trim();
   const age = Number(payload.age ?? 0);
   if (normalizedName && age > 0) {
     const result = await client.query(
@@ -260,7 +262,7 @@ export async function createWalkInEncounter(client, { workspaceId, doctorUserId,
       `,
       [patient.id, workspaceId]
     );
-    matchedPatient = result.rowCount > 0 ? { patient: result.rows[0], matchedBy: 'phone' } : null;
+    matchedPatient = result.rowCount > 0 ? { patient: result.rows[0], matchedBy: 'selected' } : null;
   } else {
     matchedPatient = await findMatchingPatientForWalkIn(client, workspaceId, payload);
   }

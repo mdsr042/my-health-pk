@@ -398,7 +398,7 @@ export interface WalkInResult {
   patient: Patient;
   appointment: Appointment;
   reusedPatient: boolean;
-  matchedBy: 'cnic' | 'phone' | 'name_age' | null;
+  matchedBy: 'selected' | 'cnic' | 'phone' | 'name_age' | null;
 }
 
 export interface WalkInPayload {

@@ -355,6 +355,69 @@ describe('server encounter workflows', () => {
     expect(nameAgeResult.matchedBy).toBe('name_age');
   });
 
+  it('creates a new patient when the same phone number is used with a different name', async () => {
+    const client = createClient([
+      { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
+      { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
+      { rowCount: 1, rows: [{ next_token: 7 }] },
+      { rowCount: 0, rows: [] },
+      { rowCount: 0, rows: [] },
+      {
+        rowCount: 1,
+        rows: [{
+          id: 'pt_new_phone',
+          mrn: 'MRN-00000007',
+          name: 'Different Name',
+          phone: '03331234567',
+          age: 22,
+          gender: 'Female',
+          cnic: '',
+          address: '',
+          blood_group: '',
+          emergency_contact: '',
+        }],
+      },
+      {
+        rowCount: 1,
+        rows: [{
+          id: 'apt_new_phone',
+          patient_id: 'pt_new_phone',
+          clinic_id: 'cl_1',
+          doctor_user_id: 'usr_1',
+          date: '2026-04-10',
+          time: '12:00',
+          status: 'waiting',
+          type: 'new',
+          chief_complaint: 'Walk-in',
+          token_number: 7,
+        }],
+      },
+    ]);
+
+    const result = await createWalkInEncounter(client, {
+      workspaceId: 'ws_1',
+      doctorUserId: 'usr_1',
+      clinicId: 'cl_1',
+      payload: {
+        name: 'Different Name',
+        phone: '03331234567',
+        age: 22,
+        gender: 'Female',
+        cnic: '',
+        address: '',
+        bloodGroup: '',
+        emergencyContact: '',
+        chiefComplaint: 'Walk-in',
+        date: '2026-04-10',
+        time: '12:00',
+      },
+    });
+
+    expect(result.patient.id).toBe('pt_new_phone');
+    expect(result.reusedPatient).toBe(false);
+    expect(result.appointment.type).toBe('new');
+  });
+
   it('reuses the explicitly selected patient id for walk-ins', async () => {
     const client = createClient([
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
