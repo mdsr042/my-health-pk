@@ -31,6 +31,7 @@ async function loadCatalog() {
     const indexedEntries = entries.map(entry => {
       const normalizedBrand = normalizeText(entry.brandName);
       const normalizedGeneric = normalizeText(entry.genericName);
+      const normalizedCompany = normalizeText(entry.companyName);
       const normalizedRegNo = normalizeText(entry.registrationNo);
       const searchText = normalizeText([
         entry.brandName,
@@ -47,6 +48,7 @@ async function loadCatalog() {
         ...entry,
         _normalizedBrand: normalizedBrand,
         _normalizedGeneric: normalizedGeneric,
+        _normalizedCompany: normalizedCompany,
         _normalizedRegNo: normalizedRegNo,
         _searchText: searchText,
       };
@@ -59,6 +61,7 @@ async function loadCatalog() {
         [
           ...entry._normalizedBrand.split(/[\s/+.-]+/),
           ...entry._normalizedGeneric.split(/[\s/+.-]+/),
+          ...entry._normalizedCompany.split(/[\s/+.-]+/),
           ...entry._normalizedRegNo.split(/[\s/+.-]+/),
         ]
           .map(token => token.trim())
@@ -114,9 +117,11 @@ function scoreEntry(entry, query) {
 
   if (entry._normalizedBrand === query) score += 120;
   if (entry._normalizedGeneric === query) score += 100;
+  if (entry._normalizedCompany === query) score += 95;
   if (entry._normalizedRegNo === query) score += 95;
   if (entry._normalizedBrand.startsWith(query)) score += 70;
   if (entry._normalizedGeneric.startsWith(query)) score += 55;
+  if (entry._normalizedCompany.startsWith(query)) score += 45;
   if (entry._normalizedRegNo.startsWith(query)) score += 50;
   if (entry._searchText.includes(query)) score += 20;
 
@@ -128,6 +133,7 @@ function toSummary(entry) {
     _searchText,
     _normalizedBrand,
     _normalizedGeneric,
+    _normalizedCompany,
     _normalizedRegNo,
     rawDisplayName,
     source,
@@ -138,7 +144,7 @@ function toSummary(entry) {
 }
 
 function toDetail(entry) {
-  const { _searchText, _normalizedBrand, _normalizedGeneric, _normalizedRegNo, ...detail } = entry;
+  const { _searchText, _normalizedBrand, _normalizedGeneric, _normalizedCompany, _normalizedRegNo, ...detail } = entry;
   return detail;
 }
 
