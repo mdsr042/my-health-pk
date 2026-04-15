@@ -7,7 +7,6 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useData } from '@/contexts/DataContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import AppointmentBookingDialog from '@/components/appointments/AppointmentBookingDialog';
 import PatientDetailsDialog from '@/components/patients/PatientDetailsDialog';
 import { Search, FileText, Calendar, User, ChevronDown, ChevronUp, CalendarPlus, PencilLine } from 'lucide-react';
@@ -59,9 +58,8 @@ function formatStatusLabel(status: string) {
 }
 
 export default function MedicalRecords() {
-  const { patients, getPatientNotes, upsertAppointment, updatePatient, searchPatients } = useData();
+  const { patients, appointments, getPatientNotes, upsertAppointment, updatePatient, searchPatients } = useData();
   const { activeClinic, doctorClinics, user } = useAuth();
-  const { tabs } = usePatientTabs();
   const [search, setSearch] = useState('');
   const [keyword, setKeyword] = useState('');
   const [clinicFilter, setClinicFilter] = useState<string>('all');
@@ -226,7 +224,19 @@ export default function MedicalRecords() {
         ) : (
           patientsWithNotes.map(patient => {
             const notes = getPatientNotes(patient.id);
-            const isOpenInWorkspace = tabs.some(tab => tab.patientId === patient.id);
+            const patientAppointments = appointments
+              .filter(appointment => appointment.patientId === patient.id)
+              .sort((a, b) => (
+                b.date.localeCompare(a.date)
+                || b.time.localeCompare(a.time)
+                || b.tokenNumber - a.tokenNumber
+              ));
+            const latestTrackedAppointment = patientAppointments.find(appointment =>
+              appointment.status === 'in-consultation'
+              || appointment.status === 'waiting'
+              || appointment.status === 'scheduled'
+              || appointment.status === 'completed'
+            ) ?? patientAppointments[0] ?? null;
             const filteredNotes = notes.filter(note => {
               const clinicMatches = clinicFilter === 'all' || note.clinicId === clinicFilter;
               const noteSearchBlob = [
@@ -254,7 +264,7 @@ export default function MedicalRecords() {
             const latestNote = filteredNotes[0] ?? notes[0] ?? null;
             const olderNotes = latestNote ? filteredNotes.filter(note => note.id !== latestNote.id) : filteredNotes;
             const latestVisitExpanded = latestNote ? expandedVisitIds[patient.id] === latestNote.id : false;
-            const latestVisitStatus = isOpenInWorkspace ? 'in-consultation' : (latestNote?.status || '');
+            const latestVisitStatus = latestTrackedAppointment?.status || latestNote?.status || '';
             return (
               <Card key={patient.id} className="border-0 shadow-sm hover:shadow-md transition-shadow">
                 <CardContent className="p-0">

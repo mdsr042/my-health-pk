@@ -118,7 +118,7 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
         : `Walk-in patient "${result.patient.name}" added to queue`,
       {
         description: result.reusedPatient
-          ? `Matched by ${result.matchedBy === 'name_age' ? 'name + age' : result.matchedBy === 'selected' ? 'selected patient' : result.matchedBy}`
+          ? 'Matched by selected patient'
           : 'New patient record created',
       }
     );

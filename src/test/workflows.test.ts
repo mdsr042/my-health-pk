@@ -54,6 +54,82 @@ describe('server encounter workflows', () => {
     expect(updateCall[1]).toEqual(['apt_1', 'ws_1']);
   });
 
+  it('dedupes medications and lab orders before storing a completed consultation', async () => {
+    const client = createClient([
+      { rowCount: 1, rows: [{ id: 'apt_1', patient_id: 'pt_1', clinic_id: 'cl_1', status: 'waiting' }] },
+      { rowCount: 1, rows: [] },
+      { rowCount: 1, rows: [] },
+      { rowCount: 1, rows: [] },
+      { rowCount: 1, rows: [] },
+      { rowCount: 1, rows: [] },
+      { rowCount: 1, rows: [] },
+    ]);
+
+    await completeConsultationEncounter(client, {
+      workspaceId: 'ws_1',
+      doctorUserId: 'usr_1',
+      payload: {
+        appointmentId: 'apt_1',
+        patientId: 'pt_1',
+        clinicId: 'cl_1',
+        chiefComplaint: 'Fever',
+        hpi: '',
+        pastHistory: '',
+        allergies: '',
+        examination: '',
+        assessment: '',
+        plan: '',
+        instructions: '',
+        followUp: '',
+        vitals: {},
+        diagnoses: [],
+        medications: [
+          {
+            id: 'cat-REG-1',
+            name: 'Panadol',
+            nameUrdu: '',
+            generic: 'Paracetamol',
+            strength: '500mg',
+            form: 'Tablet',
+            route: 'Oral',
+            dosePattern: '1+1',
+            frequency: 'Morning and night',
+            frequencyUrdu: '',
+            duration: '5 days',
+            durationUrdu: '',
+            instructions: 'After meals',
+            instructionsUrdu: '',
+          },
+          {
+            id: 'cat-REG-1',
+            name: 'Panadol',
+            nameUrdu: '',
+            generic: 'Paracetamol',
+            strength: '500mg',
+            form: 'Tablet',
+            route: 'Oral',
+            dosePattern: '1+1',
+            frequency: 'Morning and night',
+            frequencyUrdu: '',
+            duration: '5 days',
+            durationUrdu: '',
+            instructions: 'After meals',
+            instructionsUrdu: '',
+          },
+        ],
+        labOrders: [
+          { id: 'lab-1', testName: 'CBC', category: 'Hematology', priority: 'routine', status: 'ordered', result: '', date: '2026-04-10' },
+          { id: 'lab-2', testName: 'CBC', category: 'Hematology', priority: 'routine', status: 'ordered', result: '', date: '2026-04-10' },
+        ],
+      },
+    });
+
+    const medicationInsertCalls = client.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO medications'));
+    const labInsertCalls = client.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO lab_orders'));
+    expect(medicationInsertCalls).toHaveLength(1);
+    expect(labInsertCalls).toHaveLength(1);
+  });
+
   it('rejects draft save when appointment patient does not match payload patient', async () => {
     const client = createClient([
       { rowCount: 1, rows: [{ id: 'apt_1', patient_id: 'pt_other', clinic_id: 'cl_1', status: 'waiting' }] },
@@ -117,8 +193,6 @@ describe('server encounter workflows', () => {
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
       { rowCount: 1, rows: [{ next_token: 4 }] },
-      { rowCount: 0, rows: [] },
-      { rowCount: 0, rows: [] },
       {
         rowCount: 1,
         rows: [{
@@ -175,7 +249,7 @@ describe('server encounter workflows', () => {
     expect(result.reusedPatient).toBe(false);
   });
 
-  it('reuses an existing patient for walk-ins matched by CNIC', async () => {
+  it('creates a new patient when the same CNIC is entered without selecting an existing patient', async () => {
     const client = createClient([
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
@@ -183,7 +257,7 @@ describe('server encounter workflows', () => {
       {
         rowCount: 1,
         rows: [{
-          id: 'pt_existing',
+          id: 'pt_created',
           mrn: 'MRN-76543210',
           name: 'Existing Patient',
           phone: '0300',
@@ -199,13 +273,13 @@ describe('server encounter workflows', () => {
         rowCount: 1,
         rows: [{
           id: 'apt_created',
-          patient_id: 'pt_existing',
+          patient_id: 'pt_created',
           clinic_id: 'cl_1',
           doctor_user_id: 'usr_1',
           date: '2026-04-10',
           time: '10:00',
           status: 'waiting',
-          type: 'follow-up',
+          type: 'new',
           chief_complaint: 'Walk-in',
           token_number: 9,
         }],
@@ -231,13 +305,13 @@ describe('server encounter workflows', () => {
       },
     });
 
-    expect(result.patient.id).toBe('pt_existing');
-    expect(result.reusedPatient).toBe(true);
-    expect(result.matchedBy).toBe('cnic');
-    expect(result.appointment.type).toBe('follow-up');
+    expect(result.patient.id).toBe('pt_created');
+    expect(result.reusedPatient).toBe(false);
+    expect(result.matchedBy).toBe(null);
+    expect(result.appointment.type).toBe('new');
   });
 
-  it('falls back to phone and exact name plus age for returning walk-ins', async () => {
+  it('creates a new patient even if phone and name or name and age match when no patient is explicitly selected', async () => {
     const phoneClient = createClient([
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
@@ -245,7 +319,7 @@ describe('server encounter workflows', () => {
       {
         rowCount: 1,
         rows: [{
-          id: 'pt_phone',
+          id: 'pt_created_phone',
           mrn: 'MRN-00000002',
           name: 'Phone Match',
           phone: '03331234567',
@@ -261,13 +335,13 @@ describe('server encounter workflows', () => {
         rowCount: 1,
         rows: [{
           id: 'apt_phone',
-          patient_id: 'pt_phone',
+          patient_id: 'pt_created_phone',
           clinic_id: 'cl_1',
           doctor_user_id: 'usr_1',
           date: '2026-04-10',
           time: '10:00',
           status: 'waiting',
-          type: 'follow-up',
+          type: 'new',
           chief_complaint: 'Walk-in',
           token_number: 2,
         }],
@@ -293,8 +367,9 @@ describe('server encounter workflows', () => {
       },
     });
 
-    expect(phoneResult.reusedPatient).toBe(true);
-    expect(phoneResult.matchedBy).toBe('phone');
+    expect(phoneResult.reusedPatient).toBe(false);
+    expect(phoneResult.matchedBy).toBe(null);
+    expect(phoneResult.appointment.type).toBe('new');
 
     const nameAgeClient = createClient([
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
@@ -303,7 +378,7 @@ describe('server encounter workflows', () => {
       {
         rowCount: 1,
         rows: [{
-          id: 'pt_name_age',
+          id: 'pt_created_name_age',
           mrn: 'MRN-00000003',
           name: 'Name Age Match',
           phone: '',
@@ -319,13 +394,13 @@ describe('server encounter workflows', () => {
         rowCount: 1,
         rows: [{
           id: 'apt_name_age',
-          patient_id: 'pt_name_age',
+          patient_id: 'pt_created_name_age',
           clinic_id: 'cl_1',
           doctor_user_id: 'usr_1',
           date: '2026-04-10',
           time: '10:30',
           status: 'waiting',
-          type: 'follow-up',
+          type: 'new',
           chief_complaint: 'Walk-in',
           token_number: 3,
         }],
@@ -351,8 +426,9 @@ describe('server encounter workflows', () => {
       },
     });
 
-    expect(nameAgeResult.reusedPatient).toBe(true);
-    expect(nameAgeResult.matchedBy).toBe('name_age');
+    expect(nameAgeResult.reusedPatient).toBe(false);
+    expect(nameAgeResult.matchedBy).toBe(null);
+    expect(nameAgeResult.appointment.type).toBe('new');
   });
 
   it('creates a new patient when the same phone number is used with a different name', async () => {
@@ -360,8 +436,6 @@ describe('server encounter workflows', () => {
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
       { rowCount: 1, rows: [{ id: 'cl_1', workspace_id: 'ws_1' }] },
       { rowCount: 1, rows: [{ next_token: 7 }] },
-      { rowCount: 0, rows: [] },
-      { rowCount: 0, rows: [] },
       {
         rowCount: 1,
         rows: [{

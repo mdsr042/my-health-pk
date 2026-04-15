@@ -67,55 +67,50 @@ async function getNextTokenNumber(client, workspaceId, clinicId, date) {
   return result.rows[0]?.next_token ?? 1;
 }
 
-async function findMatchingPatientForWalkIn(client, workspaceId, payload) {
-  const normalizedCnic = String(payload.cnic ?? '').trim();
-  if (normalizedCnic) {
-    const result = await client.query(
-      `
-        SELECT id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
-        FROM patients
-        WHERE workspace_id = $1 AND cnic = $2
-        LIMIT 1
-      `,
-      [workspaceId, normalizedCnic]
-    );
-    if (result.rowCount > 0) return { patient: result.rows[0], matchedBy: 'cnic' };
+function normalizeLookupValue(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function getMedicationDedupKey(medication) {
+  const medicationId = String(medication?.id ?? '').trim();
+  if (medicationId.startsWith('cat-')) {
+    return `catalog:${medicationId.replace('cat-', '')}`;
   }
 
-  const normalizedPhone = String(payload.phone ?? '').trim();
-  const normalizedName = String(payload.name ?? '').trim();
-  if (normalizedPhone && normalizedName) {
-    const result = await client.query(
-      `
-        SELECT id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
-        FROM patients
-        WHERE workspace_id = $1
-          AND phone = $2
-          AND LOWER(name) = LOWER($3)
-        LIMIT 1
-      `,
-      [workspaceId, normalizedPhone, normalizedName]
-    );
-    if (result.rowCount > 0) return { patient: result.rows[0], matchedBy: 'phone' };
-  }
+  return [
+    'custom',
+    normalizeLookupValue(medication?.name),
+    normalizeLookupValue(medication?.strength),
+    normalizeLookupValue(medication?.form),
+    normalizeLookupValue(medication?.route),
+  ].join('|');
+}
 
-  const age = Number(payload.age ?? 0);
-  if (normalizedName && age > 0) {
-    const result = await client.query(
-      `
-        SELECT id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
-        FROM patients
-        WHERE workspace_id = $1
-          AND LOWER(name) = LOWER($2)
-          AND age = $3
-        LIMIT 1
-      `,
-      [workspaceId, normalizedName, age]
-    );
-    if (result.rowCount > 0) return { patient: result.rows[0], matchedBy: 'name_age' };
-  }
+function getLabOrderDedupKey(order) {
+  return [
+    normalizeLookupValue(order?.testName),
+    normalizeLookupValue(order?.category),
+  ].join('|');
+}
 
-  return null;
+function dedupeMedicationPayload(items = []) {
+  const seen = new Set();
+  return items.filter(item => {
+    const key = getMedicationDedupKey(item);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeLabOrderPayload(items = []) {
+  const seen = new Set();
+  return items.filter(item => {
+    const key = getLabOrderDedupKey(item);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function searchPatientsByPhone(client, workspaceId, phone) {
@@ -263,8 +258,6 @@ export async function createWalkInEncounter(client, { workspaceId, doctorUserId,
       [patient.id, workspaceId]
     );
     matchedPatient = result.rowCount > 0 ? { patient: result.rows[0], matchedBy: 'selected' } : null;
-  } else {
-    matchedPatient = await findMatchingPatientForWalkIn(client, workspaceId, payload);
   }
 
   let patientRow = matchedPatient?.patient ?? null;
@@ -388,7 +381,8 @@ export async function completeConsultationEncounter(client, { workspaceId, docto
     );
   }
 
-  for (const medication of payload.medications ?? []) {
+  const dedupedMedications = dedupeMedicationPayload(payload.medications ?? []);
+  for (const medication of dedupedMedications) {
     await client.query(
       `
         INSERT INTO medications (
@@ -418,7 +412,8 @@ export async function completeConsultationEncounter(client, { workspaceId, docto
     );
   }
 
-  for (const order of payload.labOrders ?? []) {
+  const dedupedLabOrders = dedupeLabOrderPayload(payload.labOrders ?? []);
+  for (const order of dedupedLabOrders) {
     await client.query(
       `
         INSERT INTO lab_orders (id, note_id, test_name, category, priority, status, result, date)

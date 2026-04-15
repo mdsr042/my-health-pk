@@ -418,6 +418,80 @@ async function getWorkspaceNotes(workspaceId, patientId = null) {
   );
 }
 
+async function getWorkspaceNoteById(workspaceId, noteId) {
+  const { rows } = await query(
+    `
+      SELECT *
+      FROM clinical_notes
+      WHERE workspace_id = $1 AND id = $2
+      LIMIT 1
+    `,
+    [workspaceId, noteId]
+  );
+
+  if (!rows[0]) return null;
+
+  const [diagnosesResult, medicationsResult, labOrdersResult, careActionsResult] = await Promise.all([
+    query(`SELECT * FROM diagnoses WHERE note_id = $1`, [noteId]),
+    query(`SELECT * FROM medications WHERE note_id = $1`, [noteId]),
+    query(`SELECT * FROM lab_orders WHERE note_id = $1`, [noteId]),
+    query(
+      `
+        SELECT *
+        FROM care_actions
+        WHERE note_id = $1
+        ORDER BY created_at DESC
+      `,
+      [noteId]
+    ),
+  ]);
+
+  return mapClinicalNote(
+    {
+      ...rows[0],
+      care_actions: careActionsResult.rows.map(mapCareAction),
+    },
+    {
+      [noteId]: diagnosesResult.rows.map(row => ({
+        id: row.id,
+        code: row.code,
+        name: row.name,
+        isPrimary: row.is_primary,
+      })),
+    },
+    {
+      [noteId]: medicationsResult.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        nameUrdu: row.name_urdu,
+        generic: row.generic_name,
+        strength: row.strength,
+        form: row.form,
+        route: row.route,
+        dosePattern: row.dose_pattern || '',
+        frequency: row.frequency,
+        frequencyUrdu: row.frequency_urdu,
+        duration: row.duration,
+        durationUrdu: row.duration_urdu,
+        instructions: row.instructions,
+        instructionsUrdu: row.instructions_urdu,
+        diagnosisId: row.diagnosis_id || undefined,
+      })),
+    },
+    {
+      [noteId]: labOrdersResult.rows.map(row => ({
+        id: row.id,
+        testName: row.test_name,
+        category: row.category,
+        priority: row.priority,
+        status: row.status,
+        result: row.result,
+        date: row.date,
+      })),
+    }
+  );
+}
+
 async function getWorkspaceDrafts(workspaceId) {
   const { rows } = await query(
     `
@@ -2773,7 +2847,6 @@ app.get('/api/clinical-notes', requireAuth, requireRole('doctor_owner'), asyncHa
 
 app.post('/api/consultations/complete', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   const payload = req.body ?? {};
-  const completedAt = new Date().toISOString();
   const { noteId } = await withTransaction(client =>
     completeConsultationEncounter(client, {
       workspaceId: req.auth.workspace.id,
@@ -2782,30 +2855,13 @@ app.post('/api/consultations/complete', requireAuth, requireRole('doctor_owner')
     })
   );
 
+  const note = await getWorkspaceNoteById(req.auth.workspace.id, noteId);
+  if (!note) {
+    throw createHttpError('Completed note could not be loaded', 'CONSULTATION_READBACK_FAILED', 500);
+  }
+
   res.status(201).json({
-    data: {
-      id: noteId,
-      appointmentId: payload.appointmentId,
-      patientId: payload.patientId,
-      clinicId: payload.clinicId,
-      doctorId: req.auth.user.id,
-      date: completedAt,
-      chiefComplaint: payload.chiefComplaint || '',
-      hpi: payload.hpi || '',
-      pastHistory: payload.pastHistory || '',
-      allergies: payload.allergies || '',
-      examination: payload.examination || '',
-      assessment: payload.assessment || '',
-      plan: payload.plan || '',
-      instructions: payload.instructions || '',
-      followUp: payload.followUp || '',
-      vitals: payload.vitals || {},
-      diagnoses: payload.diagnoses || [],
-      medications: payload.medications || [],
-      labOrders: payload.labOrders || [],
-      careActions: payload.careActions || [],
-      status: 'completed',
-    },
+    data: note,
   });
 }));
 
