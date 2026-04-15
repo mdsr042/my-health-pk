@@ -948,30 +948,8 @@ export default function MedicationModal({
                   </div>
                   <div className="p-3 space-y-4">
                     {isEditingExistingMedication && (
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 space-y-2">
-                        <p>
-                          This medicine is already prescribed in this visit. Review the configuration below and click <span className="font-semibold">Update Prescription</span> to replace the existing entry.
-                        </p>
-                        {updateConfirmationArmed && (
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-[11px] text-emerald-700/90">Do you want to update the existing prescribed medicine?</span>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
-                              onClick={() => setUpdateConfirmationArmed(false)}
-                            >
-                              Keep current prescription
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white"
-                              onClick={commitMedicationAdd}
-                            >
-                              Update existing medicine
-                            </Button>
-                          </div>
-                        )}
+                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                        This medicine is already prescribed in the current visit.
                       </div>
                     )}
                     <div className="bg-muted/50 rounded-lg p-3">
@@ -1187,24 +1165,7 @@ export default function MedicationModal({
               {(actionFeedback || updateConfirmationArmed) && (
                 <div className="mb-3 rounded-lg border px-3 py-2 text-xs">
                   {updateConfirmationArmed ? (
-                    <div className="flex flex-wrap items-center gap-2 text-emerald-700">
-                      <span>Do you want to update the existing prescribed medicine?</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
-                        onClick={() => setUpdateConfirmationArmed(false)}
-                      >
-                        Keep current prescription
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white"
-                        onClick={commitMedicationAdd}
-                      >
-                        Update existing medicine
-                      </Button>
-                    </div>
+                    <p className="text-amber-700">This medicine is already prescribed. Choose an action below to keep the current entry or update it.</p>
                   ) : (
                     <p className="text-emerald-700">{actionFeedback}</p>
                   )}
@@ -1225,25 +1186,47 @@ export default function MedicationModal({
                       {savingFavorite ? 'Saving...' : isSelectedFavorite ? 'Update Favorite Setup' : 'Save to Favorites'}
                     </Button>
                   ) : null}
-                  <Button
-                    size="sm"
-                    className="gap-1.5 w-full sm:w-auto"
-                    onClick={() => {
-                      if (mode === 'favorites') {
-                        void handleSaveFavorite();
-                        return;
-                      }
-                      handleAdd();
-                    }}
-                    disabled={mode === 'favorites' ? !canSaveFavoriteFromSettings || savingFavorite : !canSubmitMedication}
-                  >
-                    <Plus className="w-4 h-4" />
-                    {mode === 'favorites'
-                      ? 'Save Favorite'
-                      : isEditingExistingMedication
-                          ? (updateConfirmationArmed ? 'Confirm Update' : 'Update Prescription')
-                          : 'Add to Prescription'}
-                  </Button>
+                  {mode === 'favorites' ? (
+                    <Button
+                      size="sm"
+                      className="gap-1.5 w-full sm:w-auto"
+                      onClick={() => void handleSaveFavorite()}
+                      disabled={!canSaveFavoriteFromSettings || savingFavorite}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Save Favorite
+                    </Button>
+                  ) : updateConfirmationArmed ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full sm:w-auto border-amber-300 text-amber-700 hover:bg-amber-100"
+                        onClick={() => setUpdateConfirmationArmed(false)}
+                      >
+                        Keep Current
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="gap-1.5 w-full sm:w-auto bg-amber-600 text-white hover:bg-amber-700"
+                        onClick={commitMedicationAdd}
+                        disabled={!canSubmitMedication}
+                      >
+                        <Plus className="w-4 h-4" />
+                        Update Existing
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      className="gap-1.5 w-full sm:w-auto"
+                      onClick={handleAdd}
+                      disabled={!canSubmitMedication}
+                    >
+                      <Plus className="w-4 h-4" />
+                      {isEditingExistingMedication ? 'Update Prescription' : 'Add to Prescription'}
+                    </Button>
+                  )}
                 </div>
               )}
               <Button
