@@ -196,6 +196,17 @@ async function createBaseSchema(client) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS condition_library_entries (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL,
+      aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS diagnosis_catalog (
       id TEXT PRIMARY KEY,
       code TEXT NOT NULL DEFAULT '',
@@ -249,6 +260,20 @@ async function createBaseSchema(client) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (doctor_user_id, investigation_catalog_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS doctor_recent_investigations (
+      id TEXT PRIMARY KEY,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      lookup_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL CHECK (type IN ('lab', 'radiology')),
+      priority TEXT NOT NULL CHECK (priority IN ('routine', 'urgent', 'stat')) DEFAULT 'routine',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (doctor_user_id, lookup_key)
     );
 
     CREATE TABLE IF NOT EXISTS doctor_referral_favorites (
@@ -1163,6 +1188,43 @@ async function runSchemaMigrations(client) {
         );
       }
     }
+  });
+
+  await runMigration(client, '011_condition_library_and_recent_investigations', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS condition_library_entries (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        code TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL,
+        aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS doctor_recent_investigations (
+        id TEXT PRIMARY KEY,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        lookup_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '',
+        type TEXT NOT NULL CHECK (type IN ('lab', 'radiology')),
+        priority TEXT NOT NULL CHECK (priority IN ('routine', 'urgent', 'stat')) DEFAULT 'routine',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (doctor_user_id, lookup_key)
+      );
+    `);
+
+    await ensureAuditColumns(client, 'condition_library_entries');
+    await ensureAuditColumns(client, 'doctor_recent_investigations');
+    await ensureIndex(client, 'idx_condition_library_entries_doctor_name', 'condition_library_entries', '(doctor_user_id, LOWER(name))');
+    await ensureIndex(client, 'idx_condition_library_entries_workspace_doctor', 'condition_library_entries', '(workspace_id, doctor_user_id)');
+    await ensureIndex(client, 'idx_doctor_recent_investigations_updated', 'doctor_recent_investigations', '(doctor_user_id, updated_at DESC)');
   });
 }
 

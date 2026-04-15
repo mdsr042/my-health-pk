@@ -145,10 +145,24 @@ export const diagnosisCatalogSchema = z.object({
   name: trimmedString('Diagnosis name'),
 });
 
+export const conditionLibrarySchema = z.object({
+  code: z.string().trim().max(50).default(''),
+  name: trimmedString('Condition name'),
+  aliases: z.array(z.string().trim().max(120)).max(20).default([]),
+});
+
 export const investigationCatalogSchema = z.object({
   name: trimmedString('Investigation name'),
   category: trimmedString('Category', 120),
   type: z.enum(['lab', 'radiology']),
+});
+
+export const recentInvestigationSchema = z.object({
+  name: trimmedString('Investigation name'),
+  category: trimmedString('Category', 120),
+  type: z.enum(['lab', 'radiology']),
+  priority: z.enum(['routine', 'urgent', 'stat']).default('routine'),
+  notes: z.string().trim().max(1000).default(''),
 });
 
 export const referralSpecialtySchema = z.object({

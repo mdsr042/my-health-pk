@@ -228,6 +228,21 @@ export interface DiagnosisCatalogEntry {
   isActive: boolean;
 }
 
+export interface ConditionLibraryEntry {
+  id: string;
+  code: string;
+  name: string;
+  aliases: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConditionLibraryPayload {
+  code: string;
+  name: string;
+  aliases: string[];
+}
+
 export interface DiagnosisCatalogPayload {
   code: string;
   name: string;
@@ -240,6 +255,8 @@ export interface InvestigationCatalogEntry {
   category: string;
   type: 'lab' | 'radiology';
   isActive: boolean;
+  defaultPriority?: 'routine' | 'urgent' | 'stat';
+  defaultNotes?: string;
 }
 
 export interface InvestigationCatalogPayload {

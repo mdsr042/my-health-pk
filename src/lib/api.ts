@@ -6,6 +6,8 @@ import type {
   AdviceTemplatePayload,
   ApprovalRequest,
   AppSettings,
+  ConditionLibraryEntry,
+  ConditionLibraryPayload,
   ConsultationDraft,
   DiagnosisCatalogPayload,
   DiagnosisSet,
@@ -325,6 +327,33 @@ export async function searchDiagnosisCatalog(query: string, limit = 20) {
   return result.data;
 }
 
+export async function fetchConditionLibrary(query = '', limit = 100) {
+  const result = await request<{ data: ConditionLibraryEntry[] }>(`/condition-library?q=${encodeURIComponent(query)}&limit=${limit}`);
+  return result.data;
+}
+
+export async function createConditionLibraryEntry(payload: ConditionLibraryPayload) {
+  const result = await request<{ data: ConditionLibraryEntry }>('/condition-library', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function updateConditionLibraryEntry(id: string, payload: ConditionLibraryPayload) {
+  const result = await request<{ data: ConditionLibraryEntry }>(`/condition-library/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function deleteConditionLibraryEntry(id: string) {
+  await request<{ ok: true }>(`/condition-library/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function fetchFavoriteDiagnoses() {
   const result = await request<{ data: DiagnosisCatalogEntry[] }>('/diagnosis-catalog/favorites');
   return result.data;
@@ -361,6 +390,19 @@ export async function fetchFavoriteInvestigations(type: 'lab' | 'radiology') {
 export async function fetchRecentInvestigations(type: 'lab' | 'radiology') {
   const result = await request<{ data: InvestigationCatalogEntry[] }>(`/investigation-catalog/recents?type=${type}`);
   return result.data;
+}
+
+export async function recordRecentInvestigation(payload: {
+  name: string;
+  category: string;
+  type: 'lab' | 'radiology';
+  priority: 'routine' | 'urgent' | 'stat';
+  notes: string;
+}) {
+  await request<{ ok: true }>('/investigation-catalog/recents', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function addFavoriteInvestigation(catalogId: string) {

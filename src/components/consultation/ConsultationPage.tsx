@@ -25,8 +25,10 @@ import NotesTimeline from '@/components/consultation/NotesTimeline';
 import OrdersPanel from '@/components/consultation/OrdersPanel';
 import TreatmentTemplateDialog from '@/components/settings/TreatmentTemplateDialog';
 import {
+  createConditionLibraryEntry,
   createTreatmentTemplate,
   fetchAdviceTemplates,
+  fetchConditionLibrary,
   fetchDiagnosisSets,
   fetchInvestigationSets,
   fetchTreatmentTemplates,
@@ -35,6 +37,7 @@ import { readStorage } from '@/lib/storage';
 import { getLocalDateKey } from '@/lib/date';
 import type {
   AdviceTemplate,
+  ConditionLibraryEntry,
   DiagnosisSet,
   InvestigationSet,
   TreatmentTemplate,
@@ -75,6 +78,15 @@ function getMedicationIdentityKey(medication: Medication) {
     normalizeMedicationIdentity(medication.form),
     normalizeMedicationIdentity(medication.route),
   ].join('|');
+}
+
+function normalizeConditionLookup(value: string) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N}%+./ -]+/gu, '')
+    .trim();
 }
 
 const clinicalFieldConfigs = [
@@ -118,7 +130,7 @@ function buildPayloadShape(payload: {
 }
 
 export default function ConsultationPage({ patientId }: ConsultationPageProps) {
-  const { markUnsaved } = usePatientTabs();
+  const { markUnsaved, closeTab } = usePatientTabs();
   const { activeClinic, doctorClinics, user } = useAuth();
   const {
     getPatient,
@@ -156,9 +168,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [diagnosisSets, setDiagnosisSets] = useState<DiagnosisSet[]>([]);
   const [investigationSets, setInvestigationSets] = useState<InvestigationSet[]>([]);
   const [adviceTemplates, setAdviceTemplates] = useState<AdviceTemplate[]>([]);
+  const [conditionLibrary, setConditionLibrary] = useState<ConditionLibraryEntry[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [lastVisitExpanded, setLastVisitExpanded] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [diagnosisQuery, setDiagnosisQuery] = useState('');
+  const [pastHistoryQuery, setPastHistoryQuery] = useState('');
 
   // Consultation form state
   const [chiefComplaint, setChiefComplaint] = useState(draft?.chiefComplaint || activeAppointment?.chiefComplaint || '');
@@ -413,6 +428,10 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     }
     await completeConsultation(buildConsultationPayload());
     markUnsaved(patientId, false);
+    closeTab(patientId);
+    window.dispatchEvent(new CustomEvent(APP_NAVIGATE_EVENT, {
+      detail: { page: 'dashboard' },
+    }));
     toast.success('Visit completed', { description: `${patient?.name} consultation finalized`, icon: <CheckCircle2 className="w-4 h-4 text-success" /> });
   };
 
@@ -461,17 +480,19 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     const hydrateTemplates = async () => {
       setTemplatesLoading(true);
       try {
-        const [remoteTemplates, remoteDiagnosisSets, remoteInvestigationSets, remoteAdviceTemplates] = await Promise.all([
+        const [remoteTemplates, remoteDiagnosisSets, remoteInvestigationSets, remoteAdviceTemplates, remoteConditionLibrary] = await Promise.all([
           fetchTreatmentTemplates(),
           fetchDiagnosisSets(),
           fetchInvestigationSets(),
           fetchAdviceTemplates(),
+          fetchConditionLibrary(),
         ]);
         if (!cancelled) {
           setTemplates(remoteTemplates);
           setDiagnosisSets(remoteDiagnosisSets);
           setInvestigationSets(remoteInvestigationSets);
           setAdviceTemplates(remoteAdviceTemplates);
+          setConditionLibrary(remoteConditionLibrary);
         }
       } catch {
         if (!cancelled) {
@@ -479,6 +500,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
           setDiagnosisSets([]);
           setInvestigationSets([]);
           setAdviceTemplates([]);
+          setConditionLibrary([]);
         }
       } finally {
         if (!cancelled) {
@@ -562,6 +584,26 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const previousMedicationsAvailable = Boolean(latestPreviousNote?.medications.length);
   const previousInvestigationsAvailable = Boolean(latestPreviousNote?.labOrders.length);
   const previousAdviceAvailable = Boolean(latestPreviousNote?.instructions || latestPreviousNote?.followUp);
+  const diagnosisSuggestions = diagnosisQuery.trim()
+    ? conditionLibrary.filter(item => {
+        const query = normalizeConditionLookup(diagnosisQuery);
+        return [
+          item.name,
+          item.code,
+          ...item.aliases,
+        ].some(value => normalizeConditionLookup(value).includes(query));
+      }).slice(0, 6)
+    : conditionLibrary.slice(0, 6);
+  const pastHistorySuggestions = pastHistoryQuery.trim()
+    ? conditionLibrary.filter(item => {
+        const query = normalizeConditionLookup(pastHistoryQuery);
+        return [
+          item.name,
+          item.code,
+          ...item.aliases,
+        ].some(value => normalizeConditionLookup(value).includes(query));
+      }).slice(0, 6)
+    : conditionLibrary.slice(0, 6);
   const clinicalFieldGroups = [
     {
       title: 'Symptoms & History',
@@ -613,6 +655,43 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     setFollowUp(prev => prev || template.followUp);
     markUnsaved(patientId, true);
     toast.success(`${template.name} advice applied`);
+  };
+
+  const addConditionAsDiagnosis = (item: ConditionLibraryEntry) => {
+    addDiagnosis({
+      id: `dx-condition-${item.id}-${Date.now()}`,
+      code: item.code,
+      name: item.name,
+      isPrimary: diagnoses.length === 0,
+    });
+    setDiagnosisQuery('');
+    toast.success(`${item.name} added to diagnosis`);
+  };
+
+  const appendConditionToPastHistory = (item: ConditionLibraryEntry) => {
+    const line = item.code ? `${item.name} (${item.code})` : item.name;
+    setPastHistory(current => {
+      const normalizedCurrent = normalizeConditionLookup(current);
+      if (normalizedCurrent.includes(normalizeConditionLookup(item.name))) {
+        return current;
+      }
+      return current.trim() ? `${current.trim()}\n${line}` : line;
+    });
+    setPastHistoryQuery('');
+    markUnsaved(patientId, true);
+  };
+
+  const savePastHistoryCondition = async () => {
+    const name = pastHistoryQuery.trim();
+    if (!name) return;
+    try {
+      const saved = await createConditionLibraryEntry({ name, code: '', aliases: [] });
+      setConditionLibrary(current => [saved, ...current.filter(item => item.id !== saved.id)]);
+      appendConditionToPastHistory(saved);
+      toast.success('Condition saved to your library');
+    } catch {
+      toast.error('Unable to save condition');
+    }
   };
 
   return (
@@ -730,6 +809,54 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
           <div className="flex-1">
             {activeView === 'consultation' && (
               <div className="p-4 lg:p-6 space-y-5">
+              <Card className="border-0 shadow-sm">
+                <CardContent className="p-4 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-medium text-foreground">Diagnosis</h3>
+                      <p className="text-xs text-muted-foreground">Keep diagnosis first and reuse your saved doctor conditions.</p>
+                    </div>
+                    <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDiagnosisOpen(true)}>
+                      <Plus className="w-3 h-3" /> Add
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Input
+                      value={diagnosisQuery}
+                      onChange={event => setDiagnosisQuery(event.target.value)}
+                      placeholder="Quick add from your saved conditions..."
+                    />
+                    {diagnosisSuggestions.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {diagnosisSuggestions.map(item => (
+                          <Button key={item.id} type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => addConditionAsDiagnosis(item)}>
+                            {item.name}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {diagnoses.length === 0 ? (
+                    <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No diagnoses added yet</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {diagnoses.map(dx => (
+                        <div key={dx.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                          <div className="flex-1">
+                            <span className="font-medium text-foreground text-sm">{dx.name}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">{dx.code}</span>
+                          </div>
+                          {dx.isPrimary && <Badge className="bg-primary/10 text-primary text-[10px]">Primary</Badge>}
+                          <button onClick={() => removeDiagnosis(dx.id)} className="text-xs text-destructive hover:underline">Remove</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
                 <Card className="border-0 shadow-sm">
                   <CardContent className="p-4 space-y-4">
@@ -746,20 +873,54 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                         <div key={field.label} className="space-y-1.5">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <label className="text-sm font-medium text-foreground">{field.label}</label>
-                            <span className="text-[11px] text-muted-foreground">Tap a quick note to insert</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {field.key === 'pastHistory' ? 'Search your saved conditions or type a new one' : 'Tap a quick note to insert'}
+                            </span>
                           </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {field.suggestions.map(suggestion => (
-                              <button
-                                key={suggestion}
-                                type="button"
-                                onClick={() => appendSnippet(fieldState.setter, fieldState.value, suggestion)}
-                                className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                              >
-                                {suggestion}
-                              </button>
-                            ))}
-                          </div>
+                          {field.key === 'pastHistory' ? (
+                            <div className="space-y-2">
+                              <div className="flex flex-col gap-2 sm:flex-row">
+                                <Input
+                                  value={pastHistoryQuery}
+                                  onChange={event => setPastHistoryQuery(event.target.value)}
+                                  placeholder="Search diabetes, HTN, dyslipidemia..."
+                                  className="h-8 text-sm"
+                                />
+                                {pastHistoryQuery.trim() && (
+                                  <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => void savePastHistoryCondition()}>
+                                    Save New
+                                  </Button>
+                                )}
+                              </div>
+                              {pastHistorySuggestions.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {pastHistorySuggestions.map(item => (
+                                    <button
+                                      key={item.id}
+                                      type="button"
+                                      onClick={() => appendConditionToPastHistory(item)}
+                                      className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    >
+                                      {item.name}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {field.suggestions.map(suggestion => (
+                                <button
+                                  key={suggestion}
+                                  type="button"
+                                  onClick={() => appendSnippet(fieldState.setter, fieldState.value, suggestion)}
+                                  className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                >
+                                  {suggestion}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                           <Textarea
                             value={fieldState.value}
                             onChange={e => handleFieldChange(fieldState.setter)(e.target.value)}
@@ -874,33 +1035,6 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                   </Card>
                 </div>
               </div>
-
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium text-foreground">Diagnoses</h3>
-                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDiagnosisOpen(true)}>
-                    <Plus className="w-3 h-3" /> Add
-                  </Button>
-                </div>
-                {diagnoses.length === 0 ? (
-                  <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No diagnoses added yet</p>
-                ) : (
-                  <div className="space-y-2">
-                    {diagnoses.map(dx => (
-                      <div key={dx.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
-                        <div className="flex-1">
-                          <span className="font-medium text-foreground text-sm">{dx.name}</span>
-                          <span className="ml-2 text-xs text-muted-foreground">{dx.code}</span>
-                        </div>
-                        {dx.isPrimary && <Badge className="bg-primary/10 text-primary text-[10px]">Primary</Badge>}
-                        <button onClick={() => removeDiagnosis(dx.id)} className="text-xs text-destructive hover:underline">Remove</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                </CardContent>
-              </Card>
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <Card className="border-0 shadow-sm">

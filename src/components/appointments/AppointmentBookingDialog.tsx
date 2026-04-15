@@ -208,6 +208,20 @@ export default function AppointmentBookingDialog({
             )}
           </div>
 
+          {selectedPatient && (
+            <div className="space-y-1.5 sm:col-span-2">
+              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary">MRN Continuity</p>
+                <p className="text-sm text-foreground">
+                  This booking will continue under MRN <span className="font-semibold">{selectedPatient.mrn}</span>.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Follow-up and repeat visits create a new appointment on the same patient record, not a new registration.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Clinic</Label>
             <Select value={form.clinicId} onValueChange={value => updateForm('clinicId', value)}>

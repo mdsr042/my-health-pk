@@ -4,8 +4,16 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { addFavoriteDiagnosis, fetchFavoriteDiagnoses, fetchRecentDiagnoses, removeFavoriteDiagnosis, searchDiagnosisCatalog } from '@/lib/api';
-import type { DiagnosisCatalogEntry } from '@/lib/app-types';
+import {
+  addFavoriteDiagnosis,
+  createConditionLibraryEntry,
+  fetchConditionLibrary,
+  fetchFavoriteDiagnoses,
+  fetchRecentDiagnoses,
+  removeFavoriteDiagnosis,
+  searchDiagnosisCatalog,
+} from '@/lib/api';
+import type { ConditionLibraryEntry, DiagnosisCatalogEntry } from '@/lib/app-types';
 import type { Diagnosis } from '@/data/mockData';
 import { Search, Star, Plus, Pencil, Trash2 } from 'lucide-react';
 
@@ -28,14 +36,16 @@ function toDiagnosis(entry: DiagnosisCatalogEntry): Diagnosis {
 
 export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, diagnoses }: DiagnosisModalProps) {
   const [search, setSearch] = useState('');
-  const [sourceMode, setSourceMode] = useState<'favorites' | 'recent' | 'browse'>('favorites');
+  const [sourceMode, setSourceMode] = useState<'favorites' | 'recent' | 'library' | 'browse'>('favorites');
   const [selected, setSelected] = useState<Diagnosis | null>(null);
   const [isPrimary, setIsPrimary] = useState(false);
   const [catalogResults, setCatalogResults] = useState<DiagnosisCatalogEntry[]>([]);
+  const [conditionResults, setConditionResults] = useState<ConditionLibraryEntry[]>([]);
   const [favorites, setFavorites] = useState<DiagnosisCatalogEntry[]>([]);
   const [recents, setRecents] = useState<DiagnosisCatalogEntry[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [savingCondition, setSavingCondition] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -43,10 +53,11 @@ export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, di
     const load = async () => {
       setLoading(true);
       try {
-        const [favoriteData, recentData] = await Promise.all([fetchFavoriteDiagnoses(), fetchRecentDiagnoses()]);
+        const [favoriteData, recentData, conditionData] = await Promise.all([fetchFavoriteDiagnoses(), fetchRecentDiagnoses(), fetchConditionLibrary()]);
         if (cancelled) return;
         setFavorites(favoriteData);
         setRecents(recentData);
+        setConditionResults(conditionData);
         setFavoriteIds(new Set(favoriteData.map(item => item.id)));
       } finally {
         if (!cancelled) setLoading(false);
@@ -59,7 +70,7 @@ export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, di
   }, [open]);
 
   useEffect(() => {
-    if (sourceMode !== 'browse') {
+    if (sourceMode !== 'browse' && sourceMode !== 'library') {
       setCatalogResults([]);
       return;
     }
@@ -67,8 +78,19 @@ export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, di
     const timer = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const results = await searchDiagnosisCatalog(search.trim(), 20);
-        if (!cancelled) setCatalogResults(results);
+        if (sourceMode === 'library') {
+          const results = await fetchConditionLibrary(search.trim());
+          if (!cancelled) setConditionResults(results);
+          return;
+        }
+        const [results, customConditions] = await Promise.all([
+          searchDiagnosisCatalog(search.trim(), 20),
+          fetchConditionLibrary(search.trim()),
+        ]);
+        if (!cancelled) {
+          setCatalogResults(results);
+          setConditionResults(customConditions);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -82,7 +104,29 @@ export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, di
   const filtered = useMemo(() => {
     if (sourceMode === 'favorites') return favorites;
     if (sourceMode === 'recent') return recents;
-    return catalogResults;
+    if (sourceMode === 'library') {
+      return conditionResults.map(item => ({
+        id: `condition-${item.id}`,
+        code: item.code,
+        name: item.name,
+        isActive: true,
+      }));
+    }
+
+    const customAsCatalogEntries = conditionResults.map(item => ({
+      id: `condition-${item.id}`,
+      code: item.code,
+      name: item.name,
+      isActive: true,
+    }));
+
+    const seen = new Set<string>();
+    return [...customAsCatalogEntries, ...catalogResults].filter(item => {
+      const key = `${item.code.toLowerCase()}::${item.name.toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [catalogResults, favorites, recents, sourceMode]);
 
   const handleSelect = (entry: DiagnosisCatalogEntry | Diagnosis) => {
@@ -94,6 +138,21 @@ export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, di
   const handleAdd = () => {
     if (!selected) return;
     onAdd({ ...selected, isPrimary });
+  };
+
+  const saveSelectedCondition = async () => {
+    if (!selected) return;
+    setSavingCondition(true);
+    try {
+      const saved = await createConditionLibraryEntry({
+        name: selected.name,
+        code: selected.code,
+        aliases: [],
+      });
+      setConditionResults(current => [saved, ...current.filter(item => item.id !== saved.id)]);
+    } finally {
+      setSavingCondition(false);
+    }
   };
 
   const handleToggleFavorite = async (catalogId: string) => {
@@ -157,6 +216,9 @@ export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, di
               <Button variant={sourceMode === 'recent' ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => { setSourceMode('recent'); setSearch(''); }}>
                 Recent
               </Button>
+              <Button variant={sourceMode === 'library' ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setSourceMode('library')}>
+                My Conditions
+              </Button>
               <Button variant={sourceMode === 'browse' ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setSourceMode('browse')}>
                 Browse All
               </Button>
@@ -213,6 +275,22 @@ export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, di
                     </div>
                   );
                 })}
+                {!loading && search.trim() && sourceMode !== 'favorites' && sourceMode !== 'recent' && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-start gap-2 border-dashed"
+                    onClick={() => handleSelect({
+                      id: `custom-diagnosis-${search.trim().toLowerCase().replace(/\s+/g, '-')}`,
+                      code: '',
+                      name: search.trim(),
+                      isPrimary: false,
+                    })}
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add "{search.trim()}" as custom diagnosis
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -257,8 +335,18 @@ export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, di
                   </div>
                   <div className="p-3 space-y-4">
                     <div className="bg-muted/50 rounded-lg p-3">
-                      <p className="font-medium text-foreground">{selected.name}</p>
-                      <p className="text-xs text-muted-foreground">{selected.code || 'Code not listed'}</p>
+                      <Input
+                        value={selected.name}
+                        onChange={event => setSelected(current => current ? { ...current, name: event.target.value } : current)}
+                        className="h-8 border-0 bg-transparent px-0 text-sm font-medium shadow-none"
+                        placeholder="Diagnosis name"
+                      />
+                      <Input
+                        value={selected.code}
+                        onChange={event => setSelected(current => current ? { ...current, code: event.target.value } : current)}
+                        className="mt-2 h-8 border-0 bg-transparent px-0 text-xs text-muted-foreground shadow-none"
+                        placeholder="Optional code"
+                      />
                     </div>
 
                     <div className="rounded-lg border border-border p-3 flex items-center justify-between gap-3">
@@ -271,6 +359,9 @@ export default function DiagnosisModal({ open, onOpenChange, onAdd, onRemove, di
 
                     <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end">
                       <Button variant="outline" size="sm" onClick={() => setSelected(null)}>Clear</Button>
+                      <Button variant="outline" size="sm" onClick={() => void saveSelectedCondition()} disabled={savingCondition || !selected.name.trim()}>
+                        {savingCondition ? 'Saving...' : 'Save to My Conditions'}
+                      </Button>
                       <Button size="sm" className="gap-1.5" onClick={handleAdd}>
                         <Plus className="w-4 h-4" />
                         {diagnoses.some(dx => dx.id === selected.id) ? 'Update Diagnosis' : 'Add Diagnosis'}

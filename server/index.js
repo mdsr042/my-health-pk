@@ -20,6 +20,7 @@ import {
   adviceTemplateSchema,
   appointmentSchema,
   careActionSchema,
+  conditionLibrarySchema,
   diagnosisCatalogSchema,
   diagnosisSetSchema,
   investigationCatalogSchema,
@@ -34,6 +35,7 @@ import {
   treatmentTemplateSchema,
   validatePasswordPolicy,
   walkInSchema,
+  recentInvestigationSchema,
 } from './validation.js';
 import {
   completeConsultationEncounter,
@@ -165,6 +167,17 @@ function mapDiagnosisCatalogEntry(row) {
   };
 }
 
+function mapConditionLibraryEntry(row) {
+  return {
+    id: row.id,
+    code: row.code ?? '',
+    name: row.name,
+    aliases: Array.isArray(row.aliases) ? row.aliases.filter(Boolean) : [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function mapInvestigationCatalogEntry(row) {
   return {
     id: row.id,
@@ -172,6 +185,8 @@ function mapInvestigationCatalogEntry(row) {
     category: row.category,
     type: row.type,
     isActive: row.is_active,
+    defaultPriority: row.priority ?? undefined,
+    defaultNotes: row.notes ?? undefined,
   };
 }
 
@@ -459,6 +474,15 @@ function normalizeMedicationKey(value) {
     .trim();
 }
 
+function normalizeLookupKey(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N}%+./ -]+/gu, '')
+    .trim();
+}
+
 async function getDoctorMedicationPreferences(doctorUserId) {
   const { rows } = await query(
     `
@@ -478,6 +502,42 @@ async function getDoctorMedicationPreferences(doctorUserId) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
+}
+
+async function searchConditionLibrary(workspaceId, doctorUserId, queryText, limit = 20) {
+  const normalized = String(queryText ?? '').trim().toLowerCase();
+  const { rows } = await query(
+    `
+      SELECT id, code, name, aliases, created_at, updated_at
+      FROM condition_library_entries
+      WHERE workspace_id = $1
+        AND doctor_user_id = $2
+        AND (
+          $3 = ''
+          OR LOWER(name) LIKE $4
+          OR LOWER(code) LIKE $4
+          OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(aliases) AS alias
+            WHERE LOWER(alias) LIKE $4
+          )
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(name) = $3 THEN 0
+          WHEN LOWER(code) = $3 THEN 1
+          WHEN LOWER(name) LIKE $5 THEN 2
+          WHEN LOWER(code) LIKE $5 THEN 3
+          ELSE 4
+        END,
+        updated_at DESC,
+        name ASC
+      LIMIT $6
+    `,
+    [workspaceId, doctorUserId, normalized, `%${normalized}%`, `${normalized}%`, limit]
+  );
+
+  return rows.map(mapConditionLibraryEntry);
 }
 
 async function searchDiagnosisCatalog(queryText, limit = 20) {
@@ -681,6 +741,25 @@ async function getDoctorInvestigationFavorites(doctorUserId, type = '') {
 }
 
 async function getDoctorRecentInvestigations(doctorUserId, type = '') {
+  const recentRows = await query(
+    `
+      SELECT id, name, category, type, priority, notes, updated_at
+      FROM doctor_recent_investigations
+      WHERE doctor_user_id = $1
+        AND ($2 = '' OR type = $2)
+      ORDER BY updated_at DESC
+      LIMIT 20
+    `,
+    [doctorUserId, type]
+  );
+
+  const recentEntries = recentRows.rows.map(row => mapInvestigationCatalogEntry({
+    ...row,
+    is_active: true,
+  }));
+
+  const recentKeys = new Set(recentEntries.map(item => `${item.type}::${item.category.toLowerCase()}::${item.name.toLowerCase()}`));
+
   const { rows } = await query(
     `
       SELECT DISTINCT ON (LOWER(lo.test_name), LOWER(lo.category))
@@ -705,13 +784,18 @@ async function getDoctorRecentInvestigations(doctorUserId, type = '') {
     `,
     [doctorUserId, type]
   );
-  return rows.map((row, index) => ({
-    id: `recent-investigation-${index}-${row.test_name}`,
-    name: row.test_name,
-    category: row.category,
-    type: type || 'lab',
-    isActive: true,
-  }));
+  const noteEntries = rows
+    .map((row, index) => ({
+      id: `recent-investigation-${index}-${row.test_name}`,
+      name: row.test_name,
+      category: row.category,
+      type: type || 'lab',
+      is_active: true,
+    }))
+    .map(mapInvestigationCatalogEntry)
+    .filter(item => !recentKeys.has(`${item.type}::${item.category.toLowerCase()}::${item.name.toLowerCase()}`));
+
+  return [...recentEntries, ...noteEntries].slice(0, 20);
 }
 
 async function getDoctorReferralFavorites(doctorUserId, targetType) {
@@ -1046,6 +1130,50 @@ app.put('/api/medication-preferences', requireAuth, requireRole('doctor_owner'),
   res.json({ data: preference });
 }));
 
+app.get('/api/condition-library', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const items = await searchConditionLibrary(req.auth.workspace.id, req.auth.user.id, String(req.query.q ?? ''), Number(req.query.limit ?? 20));
+  res.json({ data: items });
+}));
+
+app.post('/api/condition-library', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(conditionLibrarySchema, req.body, 'INVALID_CONDITION_LIBRARY');
+  const { rows } = await query(
+    `
+      INSERT INTO condition_library_entries (id, workspace_id, doctor_user_id, code, name, aliases)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, code, name, aliases, created_at, updated_at
+    `,
+    [createId('condition_library_entry'), req.auth.workspace.id, req.auth.user.id, payload.code, payload.name, payload.aliases]
+  );
+  res.status(201).json({ data: mapConditionLibraryEntry(rows[0]) });
+}));
+
+app.put('/api/condition-library/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(conditionLibrarySchema, req.body, 'INVALID_CONDITION_LIBRARY');
+  const entryId = String(req.params.id ?? '').trim();
+  const { rows } = await query(
+    `
+      UPDATE condition_library_entries
+      SET code = $4, name = $5, aliases = $6, updated_at = NOW()
+      WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $3
+      RETURNING id, code, name, aliases, created_at, updated_at
+    `,
+    [entryId, req.auth.workspace.id, req.auth.user.id, payload.code, payload.name, payload.aliases]
+  );
+  if (rows.length === 0) {
+    return res.status(404).json({ error: 'Condition library entry not found', code: 'CONDITION_LIBRARY_NOT_FOUND' });
+  }
+  res.json({ data: mapConditionLibraryEntry(rows[0]) });
+}));
+
+app.delete('/api/condition-library/:id', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  await query(
+    `DELETE FROM condition_library_entries WHERE id = $1 AND workspace_id = $2 AND doctor_user_id = $3`,
+    [String(req.params.id ?? '').trim(), req.auth.workspace.id, req.auth.user.id]
+  );
+  res.json({ ok: true });
+}));
+
 app.get('/api/diagnosis-catalog', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   const items = await searchDiagnosisCatalog(String(req.query.q ?? ''), Number(req.query.limit ?? 20));
   res.json({ data: items });
@@ -1086,6 +1214,27 @@ app.get('/api/investigation-catalog/favorites', requireAuth, requireRole('doctor
 
 app.get('/api/investigation-catalog/recents', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   res.json({ data: await getDoctorRecentInvestigations(req.auth.user.id, String(req.query.type ?? '')) });
+}));
+
+app.post('/api/investigation-catalog/recents', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(recentInvestigationSchema, req.body, 'INVALID_RECENT_INVESTIGATION');
+  const lookupKey = `${payload.type}::${normalizeLookupKey(payload.category)}::${normalizeLookupKey(payload.name)}`;
+  await query(
+    `
+      INSERT INTO doctor_recent_investigations (id, doctor_user_id, lookup_key, name, category, type, priority, notes)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (doctor_user_id, lookup_key)
+      DO UPDATE SET
+        name = EXCLUDED.name,
+        category = EXCLUDED.category,
+        type = EXCLUDED.type,
+        priority = EXCLUDED.priority,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
+    `,
+    [createId('doctor_recent_investigation'), req.auth.user.id, lookupKey, payload.name, payload.category, payload.type, payload.priority, payload.notes]
+  );
+  res.status(201).json({ ok: true });
 }));
 
 app.post('/api/investigation-catalog/favorites', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {

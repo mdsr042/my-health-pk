@@ -153,6 +153,21 @@ export default function PrescriptionPreview({
 
           <div className="mt-3 grid grid-cols-[240px_1fr] flex-1 border border-border">
             <div className="border-r border-border px-4 py-4 space-y-4">
+              {diagnoses.length > 0 && (
+                <section>
+                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Diagnosis</h3>
+                  <div className="space-y-1.5">
+                    {diagnoses.map(dx => (
+                      <p key={dx.id} className="text-sm leading-5 text-foreground">
+                        {dx.name}
+                        {dx.code && <span className="text-muted-foreground"> ({dx.code})</span>}
+                        {dx.isPrimary && <span className="text-xs text-primary font-medium"> Primary</span>}
+                      </p>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {chiefComplaint && (
                 <section>
                   <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Chief Complaint</h3>
@@ -185,21 +200,6 @@ export default function PrescriptionPreview({
                 <section>
                   <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Allergies</h3>
                   <p className="text-sm leading-5 text-foreground whitespace-pre-line">{allergies}</p>
-                </section>
-              )}
-
-              {diagnoses.length > 0 && (
-                <section>
-                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Diagnosis</h3>
-                  <div className="space-y-1.5">
-                    {diagnoses.map(dx => (
-                      <p key={dx.id} className="text-sm leading-5 text-foreground">
-                        {dx.name}
-                        {dx.code && <span className="text-muted-foreground"> ({dx.code})</span>}
-                        {dx.isPrimary && <span className="text-xs text-primary font-medium"> Primary</span>}
-                      </p>
-                    ))}
-                  </div>
                 </section>
               )}
             </div>

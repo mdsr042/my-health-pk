@@ -39,14 +39,17 @@ import {
 import {
   changePassword,
   createAdviceTemplate,
+  createConditionLibraryEntry,
   createDiagnosisSet,
   createInvestigationSet,
   createTreatmentTemplate,
   deleteAdviceTemplate,
+  deleteConditionLibraryEntry,
   deleteDiagnosisSet,
   deleteInvestigationSet,
   deleteTreatmentTemplate,
   fetchAdviceTemplates,
+  fetchConditionLibrary,
   fetchDiagnosisSets,
   fetchInvestigationSets,
   fetchMedicationLibraryFavorites,
@@ -56,6 +59,7 @@ import {
   persistSettings,
   removeMedicationFavorite,
   updateAdviceTemplate,
+  updateConditionLibraryEntry,
   updateDiagnosisSet,
   updateInvestigationSet,
   updateTreatmentTemplate,
@@ -64,6 +68,7 @@ import type {
   AdviceTemplate,
   AdviceTemplatePayload,
   AppSettings,
+  ConditionLibraryEntry,
   DiagnosisSet,
   DiagnosisSetPayload,
   InvestigationSet,
@@ -74,6 +79,7 @@ import type {
 } from '@/lib/app-types';
 import TreatmentTemplateDialog from '@/components/settings/TreatmentTemplateDialog';
 import ReusableContentDialog from '@/components/settings/ReusableContentDialog';
+import ConditionLibraryDialog from '@/components/settings/ConditionLibraryDialog';
 import MedicationModal from '@/components/consultation/MedicationModal';
 import ClinicsPage from '@/pages/Clinics';
 
@@ -198,12 +204,15 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
   const [diagnosisSets, setDiagnosisSets] = useState<DiagnosisSet[]>([]);
   const [investigationSets, setInvestigationSets] = useState<InvestigationSet[]>([]);
   const [adviceTemplates, setAdviceTemplates] = useState<AdviceTemplate[]>([]);
+  const [conditionLibrary, setConditionLibrary] = useState<ConditionLibraryEntry[]>([]);
   const [medicationFavorites, setMedicationFavorites] = useState<MedicationLibraryFavorite[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [libraryDialogMode, setLibraryDialogMode] = useState<'diagnosis' | 'investigation' | 'advice'>('diagnosis');
   const [editingLibraryItem, setEditingLibraryItem] = useState<DiagnosisSet | InvestigationSet | AdviceTemplate | null>(null);
   const [favoriteModalOpen, setFavoriteModalOpen] = useState(false);
+  const [conditionDialogOpen, setConditionDialogOpen] = useState(false);
+  const [editingCondition, setEditingCondition] = useState<ConditionLibraryEntry | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSection>(
     isSettingsSection(initialSection) ? initialSection : SETTINGS_SECTION_OVERVIEW,
   );
@@ -241,11 +250,12 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
       setTemplatesLoading(true);
       setLibraryLoading(true);
       try {
-        const [remoteTemplates, remoteDiagnosisSets, remoteInvestigationSets, remoteAdviceTemplates, remoteMedicationFavorites] = await Promise.all([
+        const [remoteTemplates, remoteDiagnosisSets, remoteInvestigationSets, remoteAdviceTemplates, remoteConditionLibrary, remoteMedicationFavorites] = await Promise.all([
           fetchTreatmentTemplates(),
           fetchDiagnosisSets(),
           fetchInvestigationSets(),
           fetchAdviceTemplates(),
+          fetchConditionLibrary(),
           fetchMedicationLibraryFavorites(),
         ]);
         if (!cancelled) {
@@ -253,6 +263,7 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
           setDiagnosisSets(remoteDiagnosisSets);
           setInvestigationSets(remoteInvestigationSets);
           setAdviceTemplates(remoteAdviceTemplates);
+          setConditionLibrary(remoteConditionLibrary);
           setMedicationFavorites(remoteMedicationFavorites);
         }
       } catch {
@@ -261,6 +272,7 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
           setDiagnosisSets([]);
           setInvestigationSets([]);
           setAdviceTemplates([]);
+          setConditionLibrary([]);
           setMedicationFavorites([]);
         }
       } finally {
@@ -508,13 +520,39 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
     }
   };
 
+  const handleConditionSave = async (payload: { name: string; code: string; aliases: string[] }) => {
+    try {
+      const saved = editingCondition
+        ? await updateConditionLibraryEntry(editingCondition.id, payload)
+        : await createConditionLibraryEntry(payload);
+      setConditionLibrary(current => editingCondition
+        ? current.map(item => item.id === saved.id ? saved : item)
+        : [saved, ...current]);
+      setEditingCondition(null);
+      toast.success(editingCondition ? 'Condition updated' : 'Condition created');
+    } catch {
+      toast.error('Unable to save condition');
+      throw new Error('CONDITION_SAVE_FAILED');
+    }
+  };
+
+  const handleDeleteCondition = async (item: ConditionLibraryEntry) => {
+    try {
+      await deleteConditionLibraryEntry(item.id);
+      setConditionLibrary(current => current.filter(entry => entry.id !== item.id));
+      toast.success('Condition deleted');
+    } catch {
+      toast.error('Unable to delete condition');
+    }
+  };
+
   const overviewCounts = useMemo(
     () => ({
       templates: templates.length,
       favorites: medicationFavorites.length,
-      library: diagnosisSets.length + investigationSets.length + adviceTemplates.length,
+      library: conditionLibrary.length + diagnosisSets.length + investigationSets.length + adviceTemplates.length,
     }),
-    [adviceTemplates.length, diagnosisSets.length, investigationSets.length, medicationFavorites.length, templates.length],
+    [adviceTemplates.length, conditionLibrary.length, diagnosisSets.length, investigationSets.length, medicationFavorites.length, templates.length],
   );
 
   const renderOverview = () => (
@@ -835,12 +873,41 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
   const renderLibrary = () => (
     <SectionShell
       title="Clinical Library"
-      description="Manage doctor-owned diagnosis sets, investigation sets, and reusable advice templates."
+      description="Manage doctor-owned conditions, diagnosis sets, investigation sets, and reusable advice templates."
       onBack={() => setActiveSection(SETTINGS_SECTION_OVERVIEW)}
     >
       <Card className="border-0 shadow-sm">
         <CardContent className="p-5">
-          <div className="grid gap-4 xl:grid-cols-3">
+          <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-4">
+            {renderLibraryColumn(
+              'Condition Library',
+              'Shared doctor-owned conditions for diagnosis and past medical history.',
+              'No reusable conditions saved yet.',
+              'Loading condition library...',
+              <NotebookTabs className="h-4 w-4 text-primary" />,
+              () => {
+                setEditingCondition(null);
+                setConditionDialogOpen(true);
+              },
+              conditionLibrary.length > 0 ? (
+                <div className="space-y-3">
+                  {conditionLibrary.map(item => (
+                    <div key={item.id} className="rounded-lg bg-muted/30 p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-sm text-foreground">{item.name}</p>
+                        {item.code ? <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">{item.code}</span> : null}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{item.aliases.join(', ') || 'No aliases saved'}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => { setEditingCondition(item); setConditionDialogOpen(true); }}>Edit</Button>
+                        <Button variant="outline" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => void handleDeleteCondition(item)}>Delete</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null,
+            )}
+
             {renderLibraryColumn(
               'Diagnosis Sets',
               'Reusable diagnosis bundles for common visits.',
@@ -994,6 +1061,17 @@ export default function SettingsPage({ initialSection = SETTINGS_SECTION_OVERVIE
         mode={libraryDialogMode}
         item={editingLibraryItem}
         onSave={handleLibrarySave}
+      />
+      <ConditionLibraryDialog
+        open={conditionDialogOpen}
+        onOpenChange={open => {
+          setConditionDialogOpen(open);
+          if (!open) {
+            setEditingCondition(null);
+          }
+        }}
+        item={editingCondition}
+        onSave={handleConditionSave}
       />
       <MedicationModal
         open={favoriteModalOpen}

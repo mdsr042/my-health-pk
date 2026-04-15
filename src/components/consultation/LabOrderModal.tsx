@@ -9,6 +9,7 @@ import {
   addFavoriteInvestigation,
   fetchFavoriteInvestigations,
   fetchRecentInvestigations,
+  recordRecentInvestigation,
   removeFavoriteInvestigation,
   searchInvestigationCatalog,
 } from '@/lib/api';
@@ -127,6 +128,13 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type, activeO
     };
     onAdd(order);
     setSelectedTest(entry);
+    void recordRecentInvestigation({
+      name: entry.name,
+      category: entry.category,
+      type: entry.type,
+      priority,
+      notes: clinicalNotes,
+    });
   };
 
   const handleToggleFavorite = async (catalogId: string) => {
@@ -220,10 +228,16 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type, activeO
                 key={test.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => setSelectedTest(test)}
+                onClick={() => {
+                  setPriority(test.defaultPriority ?? 'routine');
+                  setClinicalNotes(test.defaultNotes ?? '');
+                  setSelectedTest(test);
+                }}
                 onKeyDown={event => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
+                    setPriority(test.defaultPriority ?? 'routine');
+                    setClinicalNotes(test.defaultNotes ?? '');
                     setSelectedTest(test);
                   }
                 }}
