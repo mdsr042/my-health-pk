@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -18,7 +18,7 @@ import {
 import type { MedicationCatalogDetail, MedicationCatalogEntry, MedicationFavorite, MedicationPreference } from '@/lib/app-types';
 import { Badge } from '@/components/ui/badge';
 import { parseDosePattern } from '@/lib/medication-pattern';
-import { Search, Star, Plus, Pencil, Trash2, Info } from 'lucide-react';
+import { Search, Star, Plus, Pencil, Trash2, Info, X } from 'lucide-react';
 
 interface MedicationModalProps {
   open: boolean;
@@ -166,6 +166,7 @@ export default function MedicationModal({
   const [activeResultIndex, setActiveResultIndex] = useState(-1);
   const [pendingRevealMedicationId, setPendingRevealMedicationId] = useState('');
   const [highlightedPrescribedId, setHighlightedPrescribedId] = useState('');
+  const [actionFeedback, setActionFeedback] = useState('');
   const resultRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const prescribedContainerRef = useRef<HTMLDivElement | null>(null);
   const prescribedItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -480,6 +481,12 @@ export default function MedicationModal({
     return () => window.cancelAnimationFrame(animationFrame);
   }, [pendingRevealMedicationId, prescribedMedications]);
 
+  useEffect(() => {
+    if (!actionFeedback) return;
+    const timer = window.setTimeout(() => setActionFeedback(''), 2200);
+    return () => window.clearTimeout(timer);
+  }, [actionFeedback]);
+
   const clearSelectionState = () => {
     setSelected(null);
     setDosePattern('');
@@ -526,6 +533,7 @@ export default function MedicationModal({
 
     onAdd(medicationToSave);
     setPendingRevealMedicationId(medicationToSave.id);
+    setActionFeedback(isEditingExistingMedication ? 'Existing medicine updated in the prescribed list.' : 'Medicine added to the prescribed list.');
     clearSelectionState();
     void persistMedicationPreference(medicationToSave).catch(() => {
       // Keep prescribing flow fast even if preference persistence fails.
@@ -631,6 +639,7 @@ export default function MedicationModal({
       setCatalogHasMore(false);
       setCatalogCursor(null);
       setActiveResultIndex(-1);
+      setActionFeedback('');
     }
     onOpenChange(o);
   };
@@ -638,7 +647,9 @@ export default function MedicationModal({
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
-        className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-6"
+        className="max-w-4xl max-h-[92vh] overflow-y-auto p-0 sm:p-0 [&>button]:hidden"
+        onInteractOutside={event => event.preventDefault()}
+        onPointerDownOutside={event => event.preventDefault()}
         onKeyDown={event => {
           if (event.key !== 'Enter' || event.shiftKey || !selected) return;
           const target = event.target as HTMLElement | null;
@@ -652,11 +663,19 @@ export default function MedicationModal({
           handleAdd();
         }}
       >
-        <DialogHeader>
-          <DialogTitle>{mode === 'favorites' ? 'Add Favorite Medicine' : 'Add Medication'}</DialogTitle>
-        </DialogHeader>
+        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+          <DialogHeader className="space-y-0">
+            <DialogTitle>{mode === 'favorites' ? 'Add Favorite Medicine' : 'Add Medication'}</DialogTitle>
+          </DialogHeader>
+          <DialogClose asChild>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
+            </Button>
+          </DialogClose>
+        </div>
 
-        <div className="grid gap-5 lg:grid-cols-[1.1fr,0.9fr]">
+        <div className="grid gap-5 px-4 py-4 sm:px-6 sm:py-5 lg:grid-cols-[1.1fr,0.9fr]">
           <div className="space-y-4 min-w-0">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -1155,40 +1174,6 @@ export default function MedicationModal({
                       </div>
                     </div>
 
-                    <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap gap-2 justify-end items-stretch sm:items-center">
-                      <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => setSelected(null)}>Clear</Button>
-                      {mode !== 'favorites' && !isCustomMedication && selectedRegistrationNo ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-1.5 w-full sm:w-auto"
-                          onClick={() => void handleSaveFavorite()}
-                          disabled={savingFavorite || !canSubmitMedication}
-                        >
-                          <Star className={`w-4 h-4 ${isSelectedFavorite ? 'fill-warning text-warning' : ''}`} />
-                          {savingFavorite ? 'Saving...' : isSelectedFavorite ? 'Update Favorite Setup' : 'Save to Favorites'}
-                        </Button>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        className="gap-1.5 w-full sm:w-auto"
-                        onClick={() => {
-                          if (mode === 'favorites') {
-                            void handleSaveFavorite();
-                            return;
-                          }
-                          handleAdd();
-                        }}
-                        disabled={mode === 'favorites' ? !canSaveFavoriteFromSettings || savingFavorite : !canSubmitMedication}
-                      >
-                        <Plus className="w-4 h-4" />
-                        {mode === 'favorites'
-                          ? 'Save Favorite'
-                          : isEditingExistingMedication
-                              ? 'Update Prescription'
-                              : 'Add to Prescription'}
-                      </Button>
-                    </div>
                   </div>
                 </div>
               ) : (
@@ -1198,7 +1183,69 @@ export default function MedicationModal({
               )}
             </div>
 
-            <div className="mt-auto pt-6">
+            <div className="sticky bottom-0 z-20 mt-auto border-t border-border bg-background/95 pt-3 backdrop-blur">
+              {(actionFeedback || updateConfirmationArmed) && (
+                <div className="mb-3 rounded-lg border px-3 py-2 text-xs">
+                  {updateConfirmationArmed ? (
+                    <div className="flex flex-wrap items-center gap-2 text-emerald-700">
+                      <span>Do you want to update the existing prescribed medicine?</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
+                        onClick={() => setUpdateConfirmationArmed(false)}
+                      >
+                        Keep current prescription
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white"
+                        onClick={commitMedicationAdd}
+                      >
+                        Update existing medicine
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-emerald-700">{actionFeedback}</p>
+                  )}
+                </div>
+              )}
+              {selected && (
+                <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap gap-2 justify-end items-stretch sm:items-center">
+                  <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => setSelected(null)}>Clear</Button>
+                  {mode !== 'favorites' && !isCustomMedication && selectedRegistrationNo ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 w-full sm:w-auto"
+                      onClick={() => void handleSaveFavorite()}
+                      disabled={savingFavorite || !canSubmitMedication}
+                    >
+                      <Star className={`w-4 h-4 ${isSelectedFavorite ? 'fill-warning text-warning' : ''}`} />
+                      {savingFavorite ? 'Saving...' : isSelectedFavorite ? 'Update Favorite Setup' : 'Save to Favorites'}
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    className="gap-1.5 w-full sm:w-auto"
+                    onClick={() => {
+                      if (mode === 'favorites') {
+                        void handleSaveFavorite();
+                        return;
+                      }
+                      handleAdd();
+                    }}
+                    disabled={mode === 'favorites' ? !canSaveFavoriteFromSettings || savingFavorite : !canSubmitMedication}
+                  >
+                    <Plus className="w-4 h-4" />
+                    {mode === 'favorites'
+                      ? 'Save Favorite'
+                      : isEditingExistingMedication
+                          ? (updateConfirmationArmed ? 'Confirm Update' : 'Update Prescription')
+                          : 'Add to Prescription'}
+                  </Button>
+                </div>
+              )}
               <Button
                 variant="outline"
                 size="sm"
