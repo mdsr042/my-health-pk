@@ -1,4 +1,4 @@
-import { type Patient, type Diagnosis, type Medication, type Vitals, doctor } from '@/data/mockData';
+import { type Patient, type Diagnosis, type Medication, type Vitals } from '@/data/mockData';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Printer } from 'lucide-react';
@@ -72,7 +72,7 @@ export default function PrescriptionPreview({
   followUp,
   instructions,
 }: PrescriptionPreviewProps) {
-  const { activeClinic } = useAuth();
+  const { activeClinic, doctor } = useAuth();
   const now = new Date();
   const today = now.toLocaleDateString('en-PK', { year: 'numeric', month: 'long', day: 'numeric' });
   const printedAt = now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
@@ -86,6 +86,10 @@ export default function PrescriptionPreview({
     { label: 'BMI', value: vitals.bmi },
     { label: 'RR', value: vitals.respiratoryRate ? `${vitals.respiratoryRate}/min` : '' },
   ].filter(item => item.value);
+  const doctorName = doctor?.name?.trim() || 'Doctor';
+  const doctorSpecialization = doctor?.specialization?.trim() || 'Specialization not added';
+  const doctorQualifications = doctor?.qualifications?.trim() || 'Qualifications not added';
+  const doctorPmcNumber = doctor?.pmcNumber?.trim() || 'Not added';
 
   return (
     <div className="p-4 lg:p-6">
@@ -111,10 +115,10 @@ export default function PrescriptionPreview({
               <p className="text-xs text-primary-foreground/80">Phone: {activeClinic?.phone}</p>
             </div>
             <div className="text-right">
-              <p className="text-base font-bold">{doctor.name}</p>
-              <p className="text-xs text-primary-foreground/80">{doctor.specialization}</p>
-              <p className="text-xs text-primary-foreground/80">{doctor.qualifications}</p>
-              <p className="text-[11px] text-primary-foreground/60">PMC Reg: {doctor.pmcNumber}</p>
+              <p className="text-base font-bold">{doctorName}</p>
+              <p className="text-xs text-primary-foreground/80">{doctorSpecialization}</p>
+              <p className="text-xs text-primary-foreground/80">{doctorQualifications}</p>
+              <p className="text-[11px] text-primary-foreground/60">PMC Reg: {doctorPmcNumber}</p>
             </div>
           </div>
         </div>
@@ -286,9 +290,9 @@ export default function PrescriptionPreview({
         <div className="px-8 py-3 bg-muted/50 border-t border-border">
           <div className="grid grid-cols-2 gap-6 text-xs">
             <div>
-              <p className="font-semibold text-foreground">{doctor.name}</p>
-              <p className="text-muted-foreground">{doctor.qualifications}</p>
-              <p className="text-muted-foreground">{doctor.specialization}</p>
+              <p className="font-semibold text-foreground">{doctorName}</p>
+              <p className="text-muted-foreground">{doctorQualifications}</p>
+              <p className="text-muted-foreground">{doctorSpecialization}</p>
             </div>
             <div className="text-right">
               <p className="font-semibold text-foreground">{activeClinic?.name}</p>

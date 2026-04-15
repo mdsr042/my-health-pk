@@ -1,15 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -172,7 +162,7 @@ export default function MedicationModal({
   const [detailLoadingRegNo, setDetailLoadingRegNo] = useState('');
   const [languageMode, setLanguageMode] = useState<'en' | 'ur' | 'bilingual'>('bilingual');
   const [savingFavorite, setSavingFavorite] = useState(false);
-  const [duplicateConfirmOpen, setDuplicateConfirmOpen] = useState(false);
+  const [updateConfirmationArmed, setUpdateConfirmationArmed] = useState(false);
   const [activeResultIndex, setActiveResultIndex] = useState(-1);
   const [pendingRevealMedicationId, setPendingRevealMedicationId] = useState('');
   const [highlightedPrescribedId, setHighlightedPrescribedId] = useState('');
@@ -390,6 +380,7 @@ export default function MedicationModal({
     const matchingPreset = instructionPresets.find(preset => preset.en === nextMedication.instructions);
     setInstructionPreset(matchingPreset?.value ?? (nextMedication.instructions ? 'custom' : 'select'));
     setCatalogDetail(null);
+    setUpdateConfirmationArmed(false);
   };
 
   const handleCustomMedication = () => {
@@ -499,6 +490,7 @@ export default function MedicationModal({
     setLanguageMode('bilingual');
     setCatalogDetail(null);
     setDetailLoadingRegNo('');
+    setUpdateConfirmationArmed(false);
   };
 
   const handleDosePatternChange = (value: string) => {
@@ -539,8 +531,8 @@ export default function MedicationModal({
   };
 
   const handleAdd = () => {
-    if (isEditingExistingMedication) {
-      setDuplicateConfirmOpen(true);
+    if (isEditingExistingMedication && !updateConfirmationArmed) {
+      setUpdateConfirmationArmed(true);
       return;
     }
     commitMedicationAdd();
@@ -935,8 +927,30 @@ export default function MedicationModal({
                   </div>
                   <div className="p-3 space-y-4">
                     {isEditingExistingMedication && (
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-                        This medicine is already prescribed in this visit. Review the configuration below and click <span className="font-semibold">Update Prescription</span> to replace the existing entry.
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 space-y-2">
+                        <p>
+                          This medicine is already prescribed in this visit. Review the configuration below and click <span className="font-semibold">Update Prescription</span> to replace the existing entry.
+                        </p>
+                        {updateConfirmationArmed && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[11px] text-emerald-700/90">Do you want to update the existing prescribed medicine?</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
+                              onClick={() => setUpdateConfirmationArmed(false)}
+                            >
+                              Keep current prescription
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white"
+                              onClick={commitMedicationAdd}
+                            >
+                              Update existing medicine
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )}
                     <div className="bg-muted/50 rounded-lg p-3">
@@ -1196,27 +1210,6 @@ export default function MedicationModal({
         </div>
       </DialogContent>
 
-      <AlertDialog open={duplicateConfirmOpen} onOpenChange={setDuplicateConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Medicine already prescribed</AlertDialogTitle>
-            <AlertDialogDescription>
-              This medicine is already in the current prescription. If you continue, the existing prescribed entry will be updated with the configuration you have entered now.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep current prescription</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                commitMedicationAdd();
-                setDuplicateConfirmOpen(false);
-              }}
-            >
-              Update existing medicine
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Dialog>
   );
 }
