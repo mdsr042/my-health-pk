@@ -55,6 +55,28 @@ interface ConsultationPageProps {
 type TabView = 'consultation' | 'notes' | 'orders' | 'documents' | 'prescription';
 const SETTINGS_STORAGE_KEY = 'my-health/settings';
 
+function normalizeMedicationIdentity(value: string) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N}%+./ -]+/gu, '')
+    .trim();
+}
+
+function getMedicationIdentityKey(medication: Medication) {
+  if (medication.id.startsWith('cat-')) {
+    return medication.id;
+  }
+
+  return [
+    normalizeMedicationIdentity(medication.name),
+    normalizeMedicationIdentity(medication.strength),
+    normalizeMedicationIdentity(medication.form),
+    normalizeMedicationIdentity(medication.route),
+  ].join('|');
+}
+
 const clinicalFieldConfigs = [
   { label: 'Chief Complaint', key: 'chiefComplaint', rows: 2, suggestions: ['Fever for 3 days', 'Follow-up visit', 'General weakness'] },
   { label: 'History of Present Illness', key: 'hpi', rows: 3, suggestions: ['Symptoms started gradually', 'No shortness of breath', 'No vomiting or diarrhea'] },
@@ -175,8 +197,11 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const removeDiagnosis = (id: string) => { setDiagnoses(prev => prev.filter(d => d.id !== id)); markUnsaved(patientId, true); };
   const addMedication = (med: Medication) => {
     setMedications(prev => {
-      const exists = prev.some(item => item.id === med.id);
-      return exists ? prev.map(item => item.id === med.id ? med : item) : [...prev, med];
+      const targetKey = getMedicationIdentityKey(med);
+      const existingMedication = prev.find(item => getMedicationIdentityKey(item) === targetKey);
+      return existingMedication
+        ? prev.map(item => item.id === existingMedication.id ? { ...med, id: existingMedication.id } : item)
+        : [...prev, med];
     });
     markUnsaved(patientId, true);
   };

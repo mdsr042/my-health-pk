@@ -309,11 +309,13 @@ export default function MedicationModal({
     if (dosePattern.trim() && !parsedPattern) return null;
     if (!selected.name.trim()) return null;
 
-    const isEditingExisting = prescribedMedications.some(med => med.id === selected.id);
+    const existingMedication = prescribedMedications.find(med => getMedicationMatchKey(med) === getMedicationMatchKey(selected));
+    const nextMedicationId = existingMedication?.id
+      ?? (selected.id.startsWith('cat-') ? selected.id : `rx-${Date.now()}`);
 
     return {
       ...selected,
-      id: isEditingExisting ? selected.id : `rx-${Date.now()}`,
+      id: nextMedicationId,
       languageMode,
       dosePattern: parsedPattern?.normalizedPattern || dosePattern.trim() || selected.dosePattern,
       frequency: languageMode === 'ur' ? '' : (customFrequency || selected.frequency),
