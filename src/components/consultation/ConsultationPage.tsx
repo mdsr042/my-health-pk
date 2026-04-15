@@ -31,6 +31,7 @@ import {
   fetchConditionLibrary,
   fetchDiagnosisSets,
   fetchInvestigationSets,
+  searchDiagnosisCatalog,
   fetchTreatmentTemplates,
 } from '@/lib/api';
 import { readStorage } from '@/lib/storage';
@@ -38,6 +39,7 @@ import { getLocalDateKey } from '@/lib/date';
 import type {
   AdviceTemplate,
   ConditionLibraryEntry,
+  DiagnosisCatalogEntry,
   DiagnosisSet,
   InvestigationSet,
   TreatmentTemplate,
@@ -169,6 +171,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [investigationSets, setInvestigationSets] = useState<InvestigationSet[]>([]);
   const [adviceTemplates, setAdviceTemplates] = useState<AdviceTemplate[]>([]);
   const [conditionLibrary, setConditionLibrary] = useState<ConditionLibraryEntry[]>([]);
+  const [diagnosisCatalogSuggestions, setDiagnosisCatalogSuggestions] = useState<DiagnosisCatalogEntry[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [lastVisitExpanded, setLastVisitExpanded] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
@@ -516,6 +519,34 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   }, []);
 
   useEffect(() => {
+    const query = diagnosisQuery.trim();
+    if (!query) {
+      setDiagnosisCatalogSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void searchDiagnosisCatalog(query, 8)
+        .then(results => {
+          if (!cancelled) {
+            setDiagnosisCatalogSuggestions(results);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setDiagnosisCatalogSuggestions([]);
+          }
+        });
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [diagnosisQuery]);
+
+  useEffect(() => {
     const settings = readStorage(SETTINGS_STORAGE_KEY, { autoSave: true });
     if (!settings.autoSave) return;
 
@@ -584,16 +615,37 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const previousMedicationsAvailable = Boolean(latestPreviousNote?.medications.length);
   const previousInvestigationsAvailable = Boolean(latestPreviousNote?.labOrders.length);
   const previousAdviceAvailable = Boolean(latestPreviousNote?.instructions || latestPreviousNote?.followUp);
-  const diagnosisSuggestions = diagnosisQuery.trim()
-    ? conditionLibrary.filter(item => {
-        const query = normalizeConditionLookup(diagnosisQuery);
-        return [
-          item.name,
-          item.code,
-          ...item.aliases,
-        ].some(value => normalizeConditionLookup(value).includes(query));
-      }).slice(0, 6)
-    : conditionLibrary.slice(0, 6);
+  const diagnosisSuggestions = (() => {
+    const savedConditions = diagnosisQuery.trim()
+      ? conditionLibrary.filter(item => {
+          const query = normalizeConditionLookup(diagnosisQuery);
+          return [
+            item.name,
+            item.code,
+            ...item.aliases,
+          ].some(value => normalizeConditionLookup(value).includes(query));
+        }).slice(0, 6)
+      : conditionLibrary.slice(0, 6);
+
+    const seen = new Set(
+      savedConditions.map(item => `${normalizeConditionLookup(item.name)}::${normalizeConditionLookup(item.code)}`)
+    );
+
+    const catalogMatches = diagnosisCatalogSuggestions
+      .filter(item => {
+        const key = `${normalizeConditionLookup(item.name)}::${normalizeConditionLookup(item.code)}`;
+        return !seen.has(key);
+      })
+      .slice(0, Math.max(0, 6 - savedConditions.length))
+      .map(item => ({
+        id: `catalog-${item.id}`,
+        name: item.name,
+        code: item.code,
+        aliases: [],
+      }));
+
+    return [...savedConditions, ...catalogMatches];
+  })();
   const pastHistorySuggestions = pastHistoryQuery.trim()
     ? conditionLibrary.filter(item => {
         const query = normalizeConditionLookup(pastHistoryQuery);
@@ -825,16 +877,23 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                     <Input
                       value={diagnosisQuery}
                       onChange={event => setDiagnosisQuery(event.target.value)}
-                      placeholder="Quick add from your saved conditions..."
+                      placeholder="Quick add diagnosis by name or code..."
                     />
                     {diagnosisSuggestions.length > 0 && (
                       <div className="flex flex-wrap gap-2">
                         {diagnosisSuggestions.map(item => (
-                          <Button key={item.id} type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => addConditionAsDiagnosis(item)}>
-                            {item.name}
+                          <Button key={item.id} type="button" variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={() => addConditionAsDiagnosis(item)}>
+                            <span>{item.name}</span>
+                            {item.code && <span className="text-[10px] text-muted-foreground">{item.code}</span>}
+                            {item.id.startsWith('catalog-') && <span className="text-[10px] text-muted-foreground">Catalog</span>}
                           </Button>
                         ))}
                       </div>
+                    )}
+                    {diagnosisQuery.trim() && diagnosisSuggestions.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        No inline matches found yet. Open the full diagnosis modal for wider browse options.
+                      </p>
                     )}
                   </div>
 
