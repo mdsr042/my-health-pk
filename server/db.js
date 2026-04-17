@@ -207,6 +207,17 @@ async function createBaseSchema(client) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS procedure_library_entries (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'General',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS diagnosis_catalog (
       id TEXT PRIMARY KEY,
       code TEXT NOT NULL DEFAULT '',
@@ -416,6 +427,16 @@ async function createBaseSchema(client) {
       status TEXT NOT NULL CHECK (status IN ('ordered', 'collected', 'resulted')),
       result TEXT NOT NULL DEFAULT '',
       date TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS procedures (
+      id TEXT PRIMARY KEY,
+      note_id TEXT NOT NULL REFERENCES clinical_notes(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'General',
+      notes TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -1225,6 +1246,39 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_condition_library_entries_doctor_name', 'condition_library_entries', '(doctor_user_id, LOWER(name))');
     await ensureIndex(client, 'idx_condition_library_entries_workspace_doctor', 'condition_library_entries', '(workspace_id, doctor_user_id)');
     await ensureIndex(client, 'idx_doctor_recent_investigations_updated', 'doctor_recent_investigations', '(doctor_user_id, updated_at DESC)');
+  });
+
+  await runMigration(client, '012_procedure_library_and_note_procedures', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS procedure_library_entries (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'General',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS procedures (
+        id TEXT PRIMARY KEY,
+        note_id TEXT NOT NULL REFERENCES clinical_notes(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'General',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await ensureAuditColumns(client, 'procedure_library_entries');
+    await ensureAuditColumns(client, 'procedures');
+    await ensureIndex(client, 'idx_procedure_library_entries_doctor_name', 'procedure_library_entries', '(doctor_user_id, LOWER(name))');
+    await ensureIndex(client, 'idx_procedure_library_entries_workspace_doctor', 'procedure_library_entries', '(workspace_id, doctor_user_id)');
+    await ensureIndex(client, 'idx_procedures_note_id', 'procedures', '(note_id)');
   });
 }
 

@@ -37,6 +37,7 @@ interface ConsultationPayload {
   diagnoses: ConsultationDraft['diagnoses'];
   medications: ConsultationDraft['medications'];
   labOrders: ConsultationDraft['labOrders'];
+  procedures: ConsultationDraft['procedures'];
   careActions: ConsultationDraft['careActions'];
 }
 

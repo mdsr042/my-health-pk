@@ -29,6 +29,7 @@ import {
   passwordChangeSchema,
   passwordResetSchema,
   patientSchema,
+  procedureLibrarySchema,
   referralFacilitySchema,
   referralSpecialtySchema,
   signupSchema,
@@ -132,7 +133,7 @@ function mapAppointment(row) {
   };
 }
 
-function mapClinicalNote(row, diagnosesByNote, medicationsByNote, labOrdersByNote) {
+function mapClinicalNote(row, diagnosesByNote, medicationsByNote, labOrdersByNote, proceduresByNote = {}) {
   return {
     id: row.id,
     appointmentId: row.appointment_id ?? '',
@@ -153,6 +154,7 @@ function mapClinicalNote(row, diagnosesByNote, medicationsByNote, labOrdersByNot
     diagnoses: diagnosesByNote[row.id] ?? [],
     medications: medicationsByNote[row.id] ?? [],
     labOrders: labOrdersByNote[row.id] ?? [],
+    procedures: proceduresByNote[row.id] ?? [],
     careActions: row.care_actions ?? [],
     status: row.status,
   };
@@ -173,6 +175,17 @@ function mapConditionLibraryEntry(row) {
     code: row.code ?? '',
     name: row.name,
     aliases: Array.isArray(row.aliases) ? row.aliases.filter(Boolean) : [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapProcedureLibraryEntry(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category ?? 'General',
+    notes: row.notes ?? '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -319,7 +332,7 @@ async function getWorkspaceNotes(workspaceId, patientId = null) {
   if (notes.length === 0) return [];
 
   const noteIds = notes.map(note => note.id);
-  const [diagnosesResult, medicationsResult, labOrdersResult, careActionsResult] = await Promise.all([
+  const [diagnosesResult, medicationsResult, labOrdersResult, proceduresResult, careActionsResult] = await Promise.all([
     query(
       `
         SELECT *
@@ -340,6 +353,14 @@ async function getWorkspaceNotes(workspaceId, patientId = null) {
       `
         SELECT *
         FROM lab_orders
+        WHERE note_id = ANY($1::text[])
+      `,
+      [noteIds]
+    ),
+    query(
+      `
+        SELECT *
+        FROM procedures
         WHERE note_id = ANY($1::text[])
       `,
       [noteIds]
@@ -408,12 +429,24 @@ async function getWorkspaceNotes(workspaceId, patientId = null) {
     return acc;
   }, {});
 
+  const proceduresByNote = proceduresResult.rows.reduce((acc, row) => {
+    acc[row.note_id] ??= [];
+    acc[row.note_id].push({
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      notes: row.notes,
+    });
+    return acc;
+  }, {});
+
   return notes.map(note =>
     mapClinicalNote(
       { ...note, care_actions: careActionsByNote[note.id] ?? [] },
       diagnosesByNote,
       medicationsByNote,
-      labOrdersByNote
+      labOrdersByNote,
+      proceduresByNote
     )
   );
 }
@@ -431,10 +464,11 @@ async function getWorkspaceNoteById(workspaceId, noteId) {
 
   if (!rows[0]) return null;
 
-  const [diagnosesResult, medicationsResult, labOrdersResult, careActionsResult] = await Promise.all([
+  const [diagnosesResult, medicationsResult, labOrdersResult, proceduresResult, careActionsResult] = await Promise.all([
     query(`SELECT * FROM diagnoses WHERE note_id = $1`, [noteId]),
     query(`SELECT * FROM medications WHERE note_id = $1`, [noteId]),
     query(`SELECT * FROM lab_orders WHERE note_id = $1`, [noteId]),
+    query(`SELECT * FROM procedures WHERE note_id = $1`, [noteId]),
     query(
       `
         SELECT *
@@ -487,6 +521,14 @@ async function getWorkspaceNoteById(workspaceId, noteId) {
         status: row.status,
         result: row.result,
         date: row.date,
+      })),
+    },
+    {
+      [noteId]: proceduresResult.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        category: row.category,
+        notes: row.notes,
       })),
     }
   );
@@ -612,6 +654,37 @@ async function searchConditionLibrary(workspaceId, doctorUserId, queryText, limi
   );
 
   return rows.map(mapConditionLibraryEntry);
+}
+
+async function searchProcedureLibrary(workspaceId, doctorUserId, queryText, limit = 20) {
+  const normalized = String(queryText ?? '').trim().toLowerCase();
+  const { rows } = await query(
+    `
+      SELECT id, name, category, notes, created_at, updated_at
+      FROM procedure_library_entries
+      WHERE workspace_id = $1
+        AND doctor_user_id = $2
+        AND (
+          $3 = ''
+          OR LOWER(name) LIKE $4
+          OR LOWER(category) LIKE $4
+          OR LOWER(notes) LIKE $4
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(name) = $3 THEN 0
+          WHEN LOWER(name) LIKE $5 THEN 1
+          WHEN LOWER(category) LIKE $5 THEN 2
+          ELSE 3
+        END,
+        updated_at DESC,
+        name ASC
+      LIMIT $6
+    `,
+    [workspaceId, doctorUserId, normalized, `%${normalized}%`, `${normalized}%`, limit]
+  );
+
+  return rows.map(mapProcedureLibraryEntry);
 }
 
 async function searchDiagnosisCatalog(queryText, limit = 20) {
@@ -1246,6 +1319,24 @@ app.delete('/api/condition-library/:id', requireAuth, requireRole('doctor_owner'
     [String(req.params.id ?? '').trim(), req.auth.workspace.id, req.auth.user.id]
   );
   res.json({ ok: true });
+}));
+
+app.get('/api/procedure-library', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const items = await searchProcedureLibrary(req.auth.workspace.id, req.auth.user.id, String(req.query.q ?? ''), Number(req.query.limit ?? 20));
+  res.json({ data: items });
+}));
+
+app.post('/api/procedure-library', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(procedureLibrarySchema, req.body, 'INVALID_PROCEDURE_LIBRARY');
+  const { rows } = await query(
+    `
+      INSERT INTO procedure_library_entries (id, workspace_id, doctor_user_id, name, category, notes)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, name, category, notes, created_at, updated_at
+    `,
+    [createId('procedure_library_entry'), req.auth.workspace.id, req.auth.user.id, payload.name, payload.category, payload.notes]
+  );
+  res.status(201).json({ data: mapProcedureLibraryEntry(rows[0]) });
 }));
 
 app.get('/api/diagnosis-catalog', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {

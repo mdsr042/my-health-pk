@@ -93,6 +93,13 @@ function getLabOrderDedupKey(order) {
   ].join('|');
 }
 
+function getProcedureDedupKey(procedure) {
+  return [
+    normalizeLookupValue(procedure?.name),
+    normalizeLookupValue(procedure?.category),
+  ].join('|');
+}
+
 function dedupeMedicationPayload(items = []) {
   const seen = new Set();
   return items.filter(item => {
@@ -107,6 +114,16 @@ function dedupeLabOrderPayload(items = []) {
   const seen = new Set();
   return items.filter(item => {
     const key = getLabOrderDedupKey(item);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeProcedurePayload(items = []) {
+  const seen = new Set();
+  return items.filter(item => {
+    const key = getProcedureDedupKey(item);
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -428,6 +445,23 @@ export async function completeConsultationEncounter(client, { workspaceId, docto
         order.status || 'ordered',
         order.result || '',
         order.date,
+      ]
+    );
+  }
+
+  const dedupedProcedures = dedupeProcedurePayload(payload.procedures ?? []);
+  for (const procedure of dedupedProcedures) {
+    await client.query(
+      `
+        INSERT INTO procedures (id, note_id, name, category, notes)
+        VALUES ($1, $2, $3, $4, $5)
+      `,
+      [
+        procedure.id || createId('procedure'),
+        noteId,
+        procedure.name,
+        procedure.category || 'General',
+        procedure.notes || '',
       ]
     );
   }

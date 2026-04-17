@@ -165,6 +165,12 @@ export const recentInvestigationSchema = z.object({
   notes: z.string().trim().max(1000).default(''),
 });
 
+export const procedureLibrarySchema = z.object({
+  name: trimmedString('Procedure name'),
+  category: z.string().trim().max(120).default('General'),
+  notes: z.string().trim().max(1000).default(''),
+});
+
 export const referralSpecialtySchema = z.object({
   name: trimmedString('Specialty name'),
 });

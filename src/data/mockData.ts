@@ -99,6 +99,13 @@ export interface LabOrder {
   date: string;
 }
 
+export interface Procedure {
+  id: string;
+  name: string;
+  category: string;
+  notes: string;
+}
+
 export interface CareAction {
   id: string;
   appointmentId?: string;
@@ -135,6 +142,7 @@ export interface ClinicalNote {
   diagnoses: Diagnosis[];
   medications: Medication[];
   labOrders: LabOrder[];
+  procedures: Procedure[];
   careActions: CareAction[];
   status: 'draft' | 'completed';
 }
@@ -298,6 +306,7 @@ export const previousNotes: ClinicalNote[] = [
       { id: 'lab-1', testName: 'HbA1c', category: 'Biochemistry', priority: 'routine', status: 'resulted', result: '8.2%', date: '2026-03-15' },
       { id: 'lab-2', testName: 'Fasting Blood Glucose', category: 'Biochemistry', priority: 'routine', status: 'resulted', result: '185 mg/dL', date: '2026-03-15' },
     ],
+    procedures: [],
     status: 'completed',
   },
   {
@@ -324,6 +333,7 @@ export const previousNotes: ClinicalNote[] = [
       { id: 'lab-4', testName: 'Troponin I', category: 'Biochemistry', priority: 'stat', status: 'resulted', result: '0.02 ng/mL (Normal)', date: '2026-03-20' },
       { id: 'lab-5', testName: 'Chest X-Ray PA', category: 'Radiology', priority: 'routine', status: 'resulted', result: 'Mild cardiomegaly. Clear lung fields.', date: '2026-03-20' },
     ],
+    procedures: [],
     status: 'completed',
   },
   {
@@ -341,6 +351,7 @@ export const previousNotes: ClinicalNote[] = [
     diagnoses: [{ id: 'dx-5', code: 'M54.5', name: 'Low Back Pain', isPrimary: true }],
     medications: [{ ...medicationLibrary[8], id: 'rx-3-1' }],
     labOrders: [],
+    procedures: [],
     status: 'completed',
   },
   {
@@ -358,6 +369,7 @@ export const previousNotes: ClinicalNote[] = [
     diagnoses: [{ id: 'dx-6', code: 'G43.9', name: 'Migraine, Unspecified', isPrimary: true }],
     medications: [{ ...medicationLibrary[3], id: 'rx-4-1' }],
     labOrders: [],
+    procedures: [],
     status: 'completed',
   },
   {
@@ -381,6 +393,7 @@ export const previousNotes: ClinicalNote[] = [
       { id: 'lab-6', testName: 'Renal Function Tests', category: 'Biochemistry', priority: 'routine', status: 'resulted', result: 'Creatinine 0.9, BUN 15 (Normal)', date: '2026-03-28' },
       { id: 'lab-7', testName: 'Serum Electrolytes', category: 'Biochemistry', priority: 'routine', status: 'resulted', result: 'Na 140, K 4.2 (Normal)', date: '2026-03-28' },
     ],
+    procedures: [],
     status: 'completed',
   },
 ];

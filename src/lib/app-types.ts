@@ -7,6 +7,7 @@ import type {
   LabOrder,
   Medication,
   Patient,
+  Procedure,
   CareAction,
   Vitals,
 } from '@/data/mockData';
@@ -28,6 +29,7 @@ export interface ConsultationDraft {
   diagnoses: Diagnosis[];
   medications: Medication[];
   labOrders: LabOrder[];
+  procedures: Procedure[];
   careActions: CareAction[];
   savedAt: string;
 }
@@ -264,6 +266,21 @@ export interface InvestigationCatalogPayload {
   category: string;
   type: 'lab' | 'radiology';
   isActive: boolean;
+}
+
+export interface ProcedureLibraryEntry {
+  id: string;
+  name: string;
+  category: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProcedureLibraryPayload {
+  name: string;
+  category: string;
+  notes: string;
 }
 
 export interface ReferralSpecialtyEntry {

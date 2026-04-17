@@ -23,6 +23,8 @@ import type {
   MedicationFavorite,
   MedicationLibraryFavorite,
   MedicationPreference,
+  ProcedureLibraryEntry,
+  ProcedureLibraryPayload,
   SessionPayload,
   SignupPayload,
   ReferralFacilityEntry,
@@ -612,6 +614,19 @@ export async function updateAdviceTemplate(id: string, payload: AdviceTemplatePa
 
 export async function deleteAdviceTemplate(id: string) {
   await request<{ ok: true }>(`/advice-templates/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchProcedureLibrary(query = '', limit = 100) {
+  const result = await request<{ data: ProcedureLibraryEntry[] }>(`/procedure-library?q=${encodeURIComponent(query)}&limit=${limit}`);
+  return result.data;
+}
+
+export async function createProcedureLibraryEntry(payload: ProcedureLibraryPayload) {
+  const result = await request<{ data: ProcedureLibraryEntry }>('/procedure-library', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
 }
 
 export async function approveDoctor(approvalRequestId: string) {

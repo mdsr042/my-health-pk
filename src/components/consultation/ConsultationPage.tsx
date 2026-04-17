@@ -2,18 +2,19 @@ import { useState, useCallback, useEffect } from 'react';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import { useData } from '@/contexts/DataContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { sampleVitals, type CareAction, type Diagnosis, type Medication, type LabOrder } from '@/data/mockData';
+import { sampleVitals, type CareAction, type Diagnosis, type Medication, type LabOrder, type Procedure } from '@/data/mockData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import {
   Stethoscope, Pill, FlaskConical, Scan, FileText, Plus,
   Save, Pause, CheckCircle2, Printer, Heart, Thermometer,
   Activity, Wind, Scale, Ruler, ArrowRightLeft,
-  Building2, CalendarPlus, ChevronRight, LayoutTemplate, NotebookTabs, MessageSquareQuote
+  Building2, CalendarPlus, ChevronRight, LayoutTemplate, NotebookTabs, MessageSquareQuote, PencilLine
 } from 'lucide-react';
 import DiagnosisModal from '@/components/consultation/DiagnosisModal';
 import MedicationModal from '@/components/consultation/MedicationModal';
@@ -23,6 +24,7 @@ import AppointmentBookingDialog from '@/components/appointments/AppointmentBooki
 import PrescriptionPreview from '@/components/consultation/PrescriptionPreview';
 import NotesTimeline from '@/components/consultation/NotesTimeline';
 import OrdersPanel from '@/components/consultation/OrdersPanel';
+import ProcedureModal from '@/components/consultation/ProcedureModal';
 import TreatmentTemplateDialog from '@/components/settings/TreatmentTemplateDialog';
 import {
   createConditionLibraryEntry,
@@ -31,6 +33,7 @@ import {
   fetchConditionLibrary,
   fetchDiagnosisSets,
   fetchInvestigationSets,
+  fetchProcedureLibrary,
   searchDiagnosisCatalog,
   fetchTreatmentTemplates,
 } from '@/lib/api';
@@ -116,6 +119,8 @@ function buildPayloadShape(payload: {
   diagnoses: Diagnosis[];
   medications: Medication[];
   labOrders: LabOrder[];
+  procedures: Procedure[];
+  careActions: CareAction[];
 }) {
   return {
     ...payload,
@@ -162,6 +167,8 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [diagnosisOpen, setDiagnosisOpen] = useState(false);
   const [medicationOpen, setMedicationOpen] = useState(false);
   const [labOrderOpen, setLabOrderOpen] = useState(false);
+  const [procedureOpen, setProcedureOpen] = useState(false);
+  const [vitalsOpen, setVitalsOpen] = useState(false);
   const [labOrderType, setLabOrderType] = useState<'lab' | 'radiology'>('lab');
   const [referralOpen, setReferralOpen] = useState(false);
   const [referralType, setReferralType] = useState<'referral' | 'admission' | 'followup'>('referral');
@@ -171,6 +178,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [investigationSets, setInvestigationSets] = useState<InvestigationSet[]>([]);
   const [adviceTemplates, setAdviceTemplates] = useState<AdviceTemplate[]>([]);
   const [conditionLibrary, setConditionLibrary] = useState<ConditionLibraryEntry[]>([]);
+  const [procedureLibrary, setProcedureLibrary] = useState<Procedure[]>([]);
   const [diagnosisCatalogSuggestions, setDiagnosisCatalogSuggestions] = useState<DiagnosisCatalogEntry[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [lastVisitExpanded, setLastVisitExpanded] = useState(false);
@@ -192,6 +200,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>(draft?.diagnoses || []);
   const [medications, setMedications] = useState<Medication[]>(draft?.medications || []);
   const [labOrders, setLabOrders] = useState<LabOrder[]>(draft?.labOrders || []);
+  const [procedures, setProcedures] = useState<Procedure[]>(draft?.procedures || []);
   const [careActions, setCareActions] = useState<CareAction[]>(draft?.careActions || []);
 
   const handleFieldChange = useCallback((setter: Function) => (value: string) => {
@@ -228,6 +237,21 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     setLabOrders(prev => [...prev, order]);
     markUnsaved(patientId, true);
     toast.success(`${order.testName} ordered`, { description: `Priority: ${order.priority}` });
+  };
+  const addProcedure = (procedure: Procedure) => {
+    setProcedures(prev => {
+      const key = `${procedure.name.toLowerCase()}::${procedure.category.toLowerCase()}`;
+      const existing = prev.find(item => `${item.name.toLowerCase()}::${item.category.toLowerCase()}` === key);
+      return existing
+        ? prev.map(item => (item.id === existing.id ? { ...procedure, id: existing.id } : item))
+        : [...prev, { ...procedure, id: procedure.id || `procedure-${Date.now()}` }];
+    });
+    markUnsaved(patientId, true);
+    toast.success(`${procedure.name} added to procedures`);
+  };
+  const removeProcedure = (id: string) => {
+    setProcedures(prev => prev.filter(item => item.id !== id));
+    markUnsaved(patientId, true);
   };
 
   const openLabModal = (type: 'lab' | 'radiology') => { setLabOrderType(type); setLabOrderOpen(true); };
@@ -364,6 +388,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       diagnoses,
       medications,
       labOrders,
+      procedures,
       careActions,
     }),
     appointmentId: activeAppointment?.id || draft?.appointmentId || '',
@@ -383,6 +408,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     hpi,
     instructions,
     labOrders,
+    procedures,
     careActions,
     medications,
     pastHistory,
@@ -483,12 +509,13 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     const hydrateTemplates = async () => {
       setTemplatesLoading(true);
       try {
-        const [remoteTemplates, remoteDiagnosisSets, remoteInvestigationSets, remoteAdviceTemplates, remoteConditionLibrary] = await Promise.all([
+        const [remoteTemplates, remoteDiagnosisSets, remoteInvestigationSets, remoteAdviceTemplates, remoteConditionLibrary, remoteProcedureLibrary] = await Promise.all([
           fetchTreatmentTemplates(),
           fetchDiagnosisSets(),
           fetchInvestigationSets(),
           fetchAdviceTemplates(),
           fetchConditionLibrary(),
+          fetchProcedureLibrary(),
         ]);
         if (!cancelled) {
           setTemplates(remoteTemplates);
@@ -496,6 +523,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
           setInvestigationSets(remoteInvestigationSets);
           setAdviceTemplates(remoteAdviceTemplates);
           setConditionLibrary(remoteConditionLibrary);
+          setProcedureLibrary(remoteProcedureLibrary.map(item => ({
+            id: item.id,
+            name: item.name,
+            category: item.category,
+            notes: item.notes,
+          })));
         }
       } catch {
         if (!cancelled) {
@@ -504,6 +537,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
           setInvestigationSets([]);
           setAdviceTemplates([]);
           setConditionLibrary([]);
+          setProcedureLibrary([]);
         }
       } finally {
         if (!cancelled) {
@@ -563,6 +597,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       diagnoses.length ||
       medications.length ||
       labOrders.length
+      || procedures.length
     );
 
     if (!hasDraftableContent) return;
@@ -584,6 +619,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     hpi,
     instructions,
     labOrders.length,
+    procedures.length,
     markUnsaved,
     medications.length,
     pastHistory,
@@ -604,6 +640,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
   const quickActions = [
     { label: 'Diagnosis', icon: Plus, color: 'text-primary', action: () => setDiagnosisOpen(true) },
+    { label: 'Procedure', icon: Stethoscope, color: 'text-primary', action: () => setProcedureOpen(true) },
     { label: 'Medication', icon: Pill, color: 'text-success', action: () => setMedicationOpen(true) },
     { label: 'Lab Order', icon: FlaskConical, color: 'text-warning', action: () => openLabModal('lab') },
     { label: 'Radiology', icon: Scan, color: 'text-info', action: () => openLabModal('radiology') },
@@ -656,6 +693,22 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         ].some(value => normalizeConditionLookup(value).includes(query));
       }).slice(0, 6)
     : conditionLibrary.slice(0, 6);
+  const compactVitals = [
+    vitals.bp ? `BP ${vitals.bp}` : '',
+    vitals.pulse ? `Pulse ${vitals.pulse}` : '',
+    vitals.temp ? `Temp ${vitals.temp}` : '',
+    vitals.spo2 ? `SpO₂ ${vitals.spo2}%` : '',
+  ].filter(Boolean);
+  const fullVitalFields = [
+    { key: 'bp', label: 'Blood Pressure', icon: Heart },
+    { key: 'pulse', label: 'Pulse', icon: Activity },
+    { key: 'temp', label: 'Temperature (°F)', icon: Thermometer },
+    { key: 'spo2', label: 'SpO2 (%)', icon: Wind },
+    { key: 'weight', label: 'Weight (kg)', icon: Scale },
+    { key: 'height', label: 'Height (cm)', icon: Ruler },
+    { key: 'bmi', label: 'BMI', icon: Scale },
+    { key: 'respiratoryRate', label: 'Resp. Rate (/min)', icon: Wind },
+  ] as const;
   const clinicalFieldGroups = [
     {
       title: 'Symptoms & History',
@@ -861,61 +914,6 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
           <div className="flex-1">
             {activeView === 'consultation' && (
               <div className="p-4 lg:p-6 space-y-5">
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-4 space-y-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-medium text-foreground">Diagnosis</h3>
-                      <p className="text-xs text-muted-foreground">Keep diagnosis first and reuse your saved doctor conditions.</p>
-                    </div>
-                    <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDiagnosisOpen(true)}>
-                      <Plus className="w-3 h-3" /> Add
-                    </Button>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Input
-                      value={diagnosisQuery}
-                      onChange={event => setDiagnosisQuery(event.target.value)}
-                      placeholder="Quick add diagnosis by name or code..."
-                    />
-                    {diagnosisSuggestions.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {diagnosisSuggestions.map(item => (
-                          <Button key={item.id} type="button" variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={() => addConditionAsDiagnosis(item)}>
-                            <span>{item.name}</span>
-                            {item.code && <span className="text-[10px] text-muted-foreground">{item.code}</span>}
-                            {item.id.startsWith('catalog-') && <span className="text-[10px] text-muted-foreground">Catalog</span>}
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                    {diagnosisQuery.trim() && diagnosisSuggestions.length === 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        No inline matches found yet. Open the full diagnosis modal for wider browse options.
-                      </p>
-                    )}
-                  </div>
-
-                  {diagnoses.length === 0 ? (
-                    <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No diagnoses added yet</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {diagnoses.map(dx => (
-                        <div key={dx.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
-                          <div className="flex-1">
-                            <span className="font-medium text-foreground text-sm">{dx.name}</span>
-                            <span className="ml-2 text-xs text-muted-foreground">{dx.code}</span>
-                          </div>
-                          {dx.isPrimary && <Badge className="bg-primary/10 text-primary text-[10px]">Primary</Badge>}
-                          <button onClick={() => removeDiagnosis(dx.id)} className="text-xs text-destructive hover:underline">Remove</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
               <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
                 <Card className="border-0 shadow-sm">
                   <CardContent className="p-4 space-y-4">
@@ -1001,47 +999,26 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 <div className="space-y-4">
                   <Card className="border-0 shadow-sm">
                     <CardContent className="p-4">
-                      <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-primary" /> Vitals
-                      </h3>
-                      <div className="grid grid-cols-2 gap-3">
-                        {[
-                          { label: 'BP', value: vitals.bp, unit: 'mmHg' },
-                          { label: 'Pulse', value: vitals.pulse, unit: 'bpm' },
-                          { label: 'Temp', value: vitals.temp, unit: '°F' },
-                          { label: 'SpO₂', value: vitals.spo2, unit: '%' },
-                          { label: 'Weight', value: vitals.weight, unit: 'kg' },
-                          { label: 'Height', value: vitals.height, unit: 'cm' },
-                          { label: 'BMI', value: vitals.bmi, unit: '' },
-                          { label: 'RR', value: vitals.respiratoryRate, unit: '/min' },
-                        ].map(v => (
-                          <div key={v.label} className="bg-muted/50 rounded-lg p-3">
-                            <p className="text-xs text-muted-foreground mb-1">{v.label}</p>
-                            <div className="flex items-baseline gap-1">
-                              <Input
-                                value={v.value}
-                                onChange={e => {
-                                  const keyMap = {
-                                    BP: 'bp',
-                                    Pulse: 'pulse',
-                                    Temp: 'temp',
-                                    'SpO₂': 'spo2',
-                                    Weight: 'weight',
-                                    Height: 'height',
-                                    BMI: 'bmi',
-                                    RR: 'respiratoryRate',
-                                  } as const;
-
-                                  setVitals(prev => ({ ...prev, [keyMap[v.label as keyof typeof keyMap]]: e.target.value }));
-                                  markUnsaved(patientId, true);
-                                }}
-                                className="h-7 bg-transparent border-0 p-0 text-lg font-semibold text-foreground focus-visible:ring-0 w-16"
-                              />
-                              <span className="text-xs text-muted-foreground">{v.unit}</span>
-                            </div>
-                          </div>
-                        ))}
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="font-semibold text-foreground mb-1 flex items-center gap-2">
+                            <Activity className="w-4 h-4 text-primary" /> Vitals
+                          </h3>
+                          <p className="text-xs text-muted-foreground">Keep vitals compact here and open the full entry only when needed.</p>
+                        </div>
+                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setVitalsOpen(true)}>
+                          <PencilLine className="w-3.5 h-3.5" /> {compactVitals.length > 0 ? 'Edit Vitals' : 'Add Vitals'}
+                        </Button>
                       </div>
+                      {compactVitals.length === 0 ? (
+                        <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No vitals added yet</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {compactVitals.map(item => (
+                            <Badge key={item} variant="outline" className="text-[10px]">{item}</Badge>
+                          ))}
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -1095,7 +1072,62 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 </div>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-2">
+              <Card className="border-0 shadow-sm">
+                <CardContent className="p-4 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-medium text-foreground">Diagnosis</h3>
+                      <p className="text-xs text-muted-foreground">Keep diagnosis easy to add without pulling it above the live history workflow.</p>
+                    </div>
+                    <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDiagnosisOpen(true)}>
+                      <Plus className="w-3 h-3" /> Add
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Input
+                      value={diagnosisQuery}
+                      onChange={event => setDiagnosisQuery(event.target.value)}
+                      placeholder="Quick add diagnosis by name or code..."
+                    />
+                    {diagnosisSuggestions.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {diagnosisSuggestions.map(item => (
+                          <Button key={item.id} type="button" variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={() => addConditionAsDiagnosis(item)}>
+                            <span>{item.name}</span>
+                            {item.code && <span className="text-[10px] text-muted-foreground">{item.code}</span>}
+                            {item.id.startsWith('catalog-') && <span className="text-[10px] text-muted-foreground">Catalog</span>}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                    {diagnosisQuery.trim() && diagnosisSuggestions.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        No inline matches found yet. Open the full diagnosis modal for wider browse options.
+                      </p>
+                    )}
+                  </div>
+
+                  {diagnoses.length === 0 ? (
+                    <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No diagnoses added yet</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {diagnoses.map(dx => (
+                        <div key={dx.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                          <div className="flex-1">
+                            <span className="font-medium text-foreground text-sm">{dx.name}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">{dx.code}</span>
+                          </div>
+                          {dx.isPrimary && <Badge className="bg-primary/10 text-primary text-[10px]">Primary</Badge>}
+                          <button onClick={() => removeDiagnosis(dx.id)} className="text-xs text-destructive hover:underline">Remove</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <div className="grid gap-4 lg:grid-cols-3">
                 <Card className="border-0 shadow-sm">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between mb-3">
@@ -1171,6 +1203,56 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                               {order.priority}
                             </Badge>
                           </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="font-semibold text-foreground flex items-center gap-2">
+                          <Stethoscope className="w-4 h-4 text-primary" /> Procedures
+                        </h3>
+                        <p className="text-xs text-muted-foreground">Save custom procedures once and reuse them in future visits.</p>
+                      </div>
+                      <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setProcedureOpen(true)}>
+                        <Plus className="w-3.5 h-3.5" /> Add
+                      </Button>
+                    </div>
+                    {procedures.length === 0 ? (
+                      <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No procedures added yet</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {procedures.map(procedure => (
+                          <div key={procedure.id} className="bg-muted/50 rounded-lg p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-foreground text-sm">{procedure.name}</p>
+                                <p className="text-xs text-muted-foreground">{procedure.category}</p>
+                                {procedure.notes && <p className="text-xs text-muted-foreground mt-1">{procedure.notes}</p>}
+                              </div>
+                              <button onClick={() => removeProcedure(procedure.id)} className="text-xs text-destructive hover:underline">Remove</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {procedureLibrary.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {procedureLibrary.slice(0, 5).map(item => (
+                          <Button
+                            key={item.id}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[11px]"
+                            onClick={() => addProcedure(item)}
+                          >
+                            {item.name}
+                          </Button>
                         ))}
                       </div>
                     )}
@@ -1297,7 +1379,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
             )}
 
             {activeView === 'notes' && <NotesTimeline notes={patientNotes} />}
-            {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} activeCareActions={careActions} previousNotes={patientNotes} />}
+            {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} activeProcedures={procedures} activeCareActions={careActions} previousNotes={patientNotes} />}
             {activeView === 'documents' && (
               <div className="p-6 text-center text-muted-foreground">
                 <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
@@ -1375,6 +1457,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         prescribedMedications={medications}
       />
       <LabOrderModal open={labOrderOpen} onOpenChange={setLabOrderOpen} onAdd={addLabOrder} type={labOrderType} activeOrders={labOrders} />
+      <ProcedureModal
+        open={procedureOpen}
+        onOpenChange={setProcedureOpen}
+        onAdd={addProcedure}
+        procedures={procedures}
+      />
       <ReferralModal
         open={referralOpen}
         onOpenChange={setReferralOpen}
@@ -1402,6 +1490,41 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         template={null}
         onSave={handleCreateTemplate}
       />
+      <Dialog open={vitalsOpen} onOpenChange={setVitalsOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-primary" />
+              Vitals
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {fullVitalFields.map(field => {
+              const Icon = field.icon;
+              return (
+                <div key={field.key} className="space-y-1.5">
+                  <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                    <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+                    {field.label}
+                  </label>
+                  <Input
+                    value={String(vitals[field.key] ?? '')}
+                    onChange={event => {
+                      setVitals(current => ({ ...current, [field.key]: event.target.value }));
+                      markUnsaved(patientId, true);
+                    }}
+                    placeholder={`Enter ${field.label.toLowerCase()}`}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setVitalsOpen(false)}>Close</Button>
+            <Button onClick={() => setVitalsOpen(false)}>Done</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

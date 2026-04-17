@@ -118,6 +118,21 @@ export default function NotesTimeline({ notes }: NotesTimelineProps) {
                   </div>
                 )}
 
+                {note.procedures.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Procedures</p>
+                    <div className="space-y-1">
+                      {note.procedures.map(procedure => (
+                        <div key={procedure.id} className="flex items-center gap-2 text-sm">
+                          <span className="text-foreground">{procedure.name}</span>
+                          <Badge variant="outline" className="text-[10px]">{procedure.category}</Badge>
+                          {procedure.notes && <span className="text-xs text-muted-foreground">• {procedure.notes}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {note.careActions.length > 0 && (
                   <div>
                     <p className="text-xs font-medium text-muted-foreground mb-1">Care Actions</p>

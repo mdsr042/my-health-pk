@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { type Patient, type Diagnosis, type Medication, type Vitals } from '@/data/mockData';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -73,6 +74,7 @@ export default function PrescriptionPreview({
   instructions,
 }: PrescriptionPreviewProps) {
   const { activeClinic, doctor } = useAuth();
+  const [printMode, setPrintMode] = useState<'branded' | 'minimal'>('branded');
   const now = new Date();
   const today = now.toLocaleDateString('en-PK', { year: 'numeric', month: 'long', day: 'numeric' });
   const printedAt = now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
@@ -90,10 +92,19 @@ export default function PrescriptionPreview({
   const doctorSpecialization = doctor?.specialization?.trim() || 'Specialization not added';
   const doctorQualifications = doctor?.qualifications?.trim() || 'Qualifications not added';
   const doctorPmcNumber = doctor?.pmcNumber?.trim() || 'Not added';
+  const compactVitals = vitalsList.slice(0, 4);
 
   return (
     <div className="p-4 lg:p-6">
-      <div className="flex justify-end mb-4 no-print">
+      <div className="flex flex-wrap items-center justify-end gap-2 mb-4 no-print">
+        <div className="flex items-center gap-1 rounded-md border border-border bg-card p-1">
+          <Button variant={printMode === 'branded' ? 'default' : 'ghost'} size="sm" className="h-8" onClick={() => setPrintMode('branded')}>
+            Branded
+          </Button>
+          <Button variant={printMode === 'minimal' ? 'default' : 'ghost'} size="sm" className="h-8" onClick={() => setPrintMode('minimal')}>
+            Minimal
+          </Button>
+        </div>
         <Button variant="outline" size="sm" className="gap-1.5" onClick={() => window.print()}>
           <Printer className="w-4 h-4" /> Print Prescription
         </Button>
@@ -103,25 +114,42 @@ export default function PrescriptionPreview({
         className="bg-card mx-auto max-w-[210mm] shadow-lg rounded-lg overflow-hidden border border-border flex flex-col"
         style={{ minHeight: '297mm' }}
       >
-        <div className="bg-primary px-8 py-4 text-primary-foreground">
-          <div className="flex items-center justify-between text-[11px] text-primary-foreground/80 mb-3">
-            <p>{printedAt}</p>
-            <p className="font-medium">Prescription</p>
-          </div>
-          <div className="flex items-start justify-between gap-6">
-            <div>
-              <h1 className="text-lg font-bold">{activeClinic?.logo} {activeClinic?.name}</h1>
-              <p className="text-xs text-primary-foreground/80">{activeClinic?.location}, {activeClinic?.city}</p>
-              <p className="text-xs text-primary-foreground/80">Phone: {activeClinic?.phone}</p>
+        {printMode === 'branded' ? (
+          <div className="bg-primary px-8 py-4 text-primary-foreground">
+            <div className="flex items-center justify-between text-[11px] text-primary-foreground/80 mb-3">
+              <p>{printedAt}</p>
+              <p className="font-medium">Prescription</p>
             </div>
-            <div className="text-right">
-              <p className="text-base font-bold">{doctorName}</p>
-              <p className="text-xs text-primary-foreground/80">{doctorSpecialization}</p>
-              <p className="text-xs text-primary-foreground/80">{doctorQualifications}</p>
-              <p className="text-[11px] text-primary-foreground/60">PMC Reg: {doctorPmcNumber}</p>
+            <div className="flex items-start justify-between gap-6">
+              <div>
+                <h1 className="text-lg font-bold">{activeClinic?.logo} {activeClinic?.name}</h1>
+                <p className="text-xs text-primary-foreground/80">{activeClinic?.location}, {activeClinic?.city}</p>
+                <p className="text-xs text-primary-foreground/80">Phone: {activeClinic?.phone}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-base font-bold">{doctorName}</p>
+                <p className="text-xs text-primary-foreground/80">{doctorSpecialization}</p>
+                <p className="text-xs text-primary-foreground/80">{doctorQualifications}</p>
+                <p className="text-[11px] text-primary-foreground/60">PMC Reg: {doctorPmcNumber}</p>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="border-b border-border px-8 py-4">
+            <div className="flex items-start justify-between gap-6">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">Prescription</p>
+                <p className="text-lg font-semibold text-foreground">{doctorName}</p>
+                <p className="text-sm text-muted-foreground">{doctorSpecialization}</p>
+              </div>
+              <div className="text-right text-sm text-muted-foreground">
+                <p>{today}</p>
+                <p>{printedAt}</p>
+                <p>PMC: {doctorPmcNumber}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="px-8 py-5 flex-1 flex flex-col">
           <div className="grid grid-cols-3 gap-x-4 gap-y-2 text-sm border-b border-border pb-3">
@@ -182,24 +210,23 @@ export default function PrescriptionPreview({
                 </section>
               )}
 
-              {vitalsList.length > 0 && (
-                <section>
-                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Vitals</h3>
-                  <div className="space-y-1">
-                    {vitalsList.map(item => (
-                      <div key={item.label} className="flex items-start justify-between gap-3 text-sm">
-                        <span className="text-muted-foreground">{item.label}</span>
-                        <span className="text-right text-foreground">{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
               {allergies && (
                 <section>
                   <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Allergies</h3>
                   <p className="text-sm leading-5 text-foreground whitespace-pre-line">{allergies}</p>
+                </section>
+              )}
+
+              {compactVitals.length > 0 && (
+                <section>
+                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Vitals</h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {compactVitals.map(item => (
+                      <span key={item.label} className="rounded-full border border-border bg-muted/40 px-2 py-1 text-[11px] text-foreground">
+                        {item.label}: {item.value}
+                      </span>
+                    ))}
+                  </div>
                 </section>
               )}
             </div>
@@ -288,17 +315,19 @@ export default function PrescriptionPreview({
         </div>
 
         <div className="px-8 py-3 bg-muted/50 border-t border-border">
-          <div className="grid grid-cols-2 gap-6 text-xs">
+          <div className={`grid gap-6 text-xs ${printMode === 'branded' ? 'grid-cols-2' : 'grid-cols-1'}`}>
             <div>
               <p className="font-semibold text-foreground">{doctorName}</p>
               <p className="text-muted-foreground">{doctorQualifications}</p>
               <p className="text-muted-foreground">{doctorSpecialization}</p>
             </div>
-            <div className="text-right">
-              <p className="font-semibold text-foreground">{activeClinic?.name}</p>
-              <p className="text-muted-foreground">{activeClinic?.location}, {activeClinic?.city}</p>
-              <p className="text-muted-foreground">Phone: {activeClinic?.phone}</p>
-            </div>
+            {printMode === 'branded' && (
+              <div className="text-right">
+                <p className="font-semibold text-foreground">{activeClinic?.name}</p>
+                <p className="text-muted-foreground">{activeClinic?.location}, {activeClinic?.city}</p>
+                <p className="text-muted-foreground">Phone: {activeClinic?.phone}</p>
+              </div>
+            )}
           </div>
           <p className="mt-2 text-[11px] text-center text-muted-foreground">
             This prescription is computer-generated.

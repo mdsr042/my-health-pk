@@ -40,6 +40,7 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type, activeO
   const [recents, setRecents] = useState<InvestigationCatalogEntry[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [customCategory, setCustomCategory] = useState('');
 
   const today = new Date().toISOString().split('T')[0];
   const isLab = type === 'lab';
@@ -52,6 +53,7 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type, activeO
       setClinicalNotes('');
       setSelectedTest(null);
       setCatalogResults([]);
+      setCustomCategory('');
       return;
     }
 
@@ -137,6 +139,22 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type, activeO
     });
   };
 
+  const handleAddCustom = () => {
+    const customName = search.trim();
+    if (!customName) return;
+    const entry: InvestigationCatalogEntry = {
+      id: `custom-${type}-${Date.now()}`,
+      name: customName,
+      category: customCategory.trim() || (isLab ? 'Custom Lab' : 'Custom Radiology'),
+      type,
+      isActive: true,
+      defaultPriority: priority,
+      defaultNotes: clinicalNotes,
+    };
+    setSelectedTest(entry);
+    handleAdd(entry);
+  };
+
   const handleToggleFavorite = async (catalogId: string) => {
     const wasFavorite = favoriteIds.has(catalogId);
     const next = new Set(favoriteIds);
@@ -217,6 +235,26 @@ export default function LabOrderModal({ open, onOpenChange, onAdd, type, activeO
               </Select>
             </div>
           </div>
+
+          {search.trim() && sourceMode === 'browse' && filtered.length === 0 && !loading && (
+            <div className="rounded-lg border border-dashed border-primary/35 bg-primary/5 p-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-1">
+                  <p className="text-sm font-medium text-foreground">Add custom {isLab ? 'lab test' : 'radiology exam'}</p>
+                  <p className="text-xs text-muted-foreground">If this item is not in the catalog yet, add it once and it will appear again in your recent investigations.</p>
+                </div>
+                <Input
+                  placeholder="Category"
+                  value={customCategory}
+                  onChange={event => setCustomCategory(event.target.value)}
+                  className="h-8 sm:w-44"
+                />
+                <Button type="button" size="sm" className="gap-1.5" onClick={handleAddCustom}>
+                  <Plus className="w-3.5 h-3.5" /> Add Custom
+                </Button>
+              </div>
+            </div>
+          )}
 
           <div className="max-h-[280px] overflow-y-auto space-y-1 scrollbar-thin">
             {loading && <p className="text-sm text-muted-foreground text-center py-3">Loading investigations...</p>}

@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { FlaskConical, Scan, Stethoscope, ArrowRightLeft, Plus, Building2, CalendarPlus } from 'lucide-react';
-import type { CareAction, ClinicalNote, LabOrder } from '@/data/mockData';
+import type { CareAction, ClinicalNote, LabOrder, Procedure } from '@/data/mockData';
 
 const orderCategories = [
   { id: 'lab', label: 'Laboratory', icon: FlaskConical, color: 'text-warning' },
@@ -15,11 +15,12 @@ const orderCategories = [
 
 interface OrdersPanelProps {
   activeOrders: LabOrder[];
+  activeProcedures: Procedure[];
   activeCareActions: CareAction[];
   previousNotes: ClinicalNote[];
 }
 
-export default function OrdersPanel({ activeOrders, activeCareActions, previousNotes }: OrdersPanelProps) {
+export default function OrdersPanel({ activeOrders, activeProcedures, activeCareActions, previousNotes }: OrdersPanelProps) {
   const historicalOrders = previousNotes.flatMap(note =>
     note.labOrders.map(order => ({
       ...order,
@@ -28,9 +29,11 @@ export default function OrdersPanel({ activeOrders, activeCareActions, previousN
   );
 
   const historicalCareActions = previousNotes.flatMap(note => note.careActions ?? []);
+  const historicalProcedures = previousNotes.flatMap(note => note.procedures ?? []);
 
   const orders = [...activeOrders, ...historicalOrders];
   const careActions = [...activeCareActions, ...historicalCareActions];
+  const procedures = [...activeProcedures, ...historicalProcedures];
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
@@ -46,6 +49,32 @@ export default function OrdersPanel({ activeOrders, activeCareActions, previousN
             </Button>
           );
         })}
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="font-semibold text-foreground text-sm">Procedures</h3>
+        {procedures.length === 0 ? (
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-6 text-center text-sm text-muted-foreground">
+              No procedures recorded yet
+            </CardContent>
+          </Card>
+        ) : (
+          procedures.map(procedure => (
+            <Card key={procedure.id} className="border-0 shadow-sm">
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-primary/10">
+                  <Stethoscope className="w-4 h-4 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">{procedure.name}</p>
+                  <p className="text-xs text-muted-foreground">{procedure.notes || procedure.category}</p>
+                </div>
+                <Badge variant="outline" className="text-[10px]">{procedure.category}</Badge>
+              </CardContent>
+            </Card>
+          ))
+        )}
       </div>
 
       <div className="space-y-3">
