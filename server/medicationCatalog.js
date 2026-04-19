@@ -20,6 +20,16 @@ function normalizeText(value) {
     .toLowerCase();
 }
 
+function cleanCatalogLabel(value) {
+  const text = String(value ?? '')
+    .replace(/^\s*[-:]+\s*\d+\s*[-:]+\s*/g, '')
+    .replace(/^\s*[-:]+\s*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return text || String(value ?? '').trim();
+}
+
 async function loadCatalog() {
   if (catalogCache) return catalogCache;
 
@@ -29,12 +39,13 @@ async function loadCatalog() {
     const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
 
     const indexedEntries = entries.map(entry => {
-      const normalizedBrand = normalizeText(entry.brandName);
+      const normalizedBrandName = cleanCatalogLabel(entry.brandName || entry.rawDisplayName || entry.registrationNo);
+      const normalizedBrand = normalizeText(normalizedBrandName);
       const normalizedGeneric = normalizeText(entry.genericName);
       const normalizedCompany = normalizeText(entry.companyName);
       const normalizedRegNo = normalizeText(entry.registrationNo);
       const searchText = normalizeText([
-        entry.brandName,
+        normalizedBrandName,
         entry.rawDisplayName,
         entry.genericName,
         entry.strengthText,
@@ -46,6 +57,7 @@ async function loadCatalog() {
 
       return {
         ...entry,
+        brandName: normalizedBrandName,
         _normalizedBrand: normalizedBrand,
         _normalizedGeneric: normalizedGeneric,
         _normalizedCompany: normalizedCompany,

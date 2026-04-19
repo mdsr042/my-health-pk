@@ -130,6 +130,24 @@ function dedupeMedications<T extends Medication>(items: T[]) {
   });
 }
 
+function hasMedicationEnrichment(detail: MedicationCatalogDetail | null) {
+  if (!detail?.enrichment) return false;
+  const enrichment = detail.enrichment;
+  return Boolean(
+    enrichment.therapeuticCategory ||
+    enrichment.drugCategory ||
+    enrichment.tradePrice ||
+    enrichment.packInfo ||
+    enrichment.indications ||
+    enrichment.dosage ||
+    enrichment.administration ||
+    enrichment.contraindications ||
+    enrichment.precautions ||
+    enrichment.adverseEffects ||
+    enrichment.alternativesSummary
+  );
+}
+
 export default function MedicationModal({
   open,
   onOpenChange,
@@ -1023,10 +1041,73 @@ export default function MedicationModal({
                                 {detailLoadingRegNo === selected.id.replace('cat-', '') ? 'Loading details...' : 'Get medicine details'}
                               </Button>
                               {catalogDetail && catalogDetail.registrationNo === selected.id.replace('cat-', '') && (
-                                <div className="text-xs text-muted-foreground space-y-1">
-                                  <p>Generic: {catalogDetail.genericName || 'Not listed'}</p>
-                                  <p>Company: {catalogDetail.companyName || 'Not listed'}</p>
-                                  <p>Reg. No: {catalogDetail.registrationNo}</p>
+                                <div className="space-y-3 rounded-lg border border-border/70 bg-background p-3 text-xs text-muted-foreground">
+                                  <div className="grid gap-2 sm:grid-cols-2">
+                                    <div>
+                                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Pakistan Base Catalog</p>
+                                      <div className="mt-1 space-y-1">
+                                        <p>Generic: {catalogDetail.genericName || 'Not listed'}</p>
+                                        <p>Company: {catalogDetail.companyName || 'Not listed'}</p>
+                                        <p>Strength: {catalogDetail.strengthText || 'Not listed'}</p>
+                                        <p>Form / Route: {[catalogDetail.dosageForm || 'Form not listed', catalogDetail.route || 'Route not listed'].join(' • ')}</p>
+                                        <p>Reg. No: {catalogDetail.registrationNo}</p>
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Detail Status</p>
+                                      <div className="mt-1 space-y-1">
+                                        <p>{catalogDetail.detailAvailability === 'enriched' ? 'Enriched Pakistan detail available' : 'DRAP base detail only'}</p>
+                                        <p>Status: {catalogDetail.enrichmentStatus}</p>
+                                        <p>Source: {catalogDetail.enrichment?.sourceName || catalogDetail.source}</p>
+                                        <p>Updated: {catalogDetail.sourceUpdatedAt ? new Date(catalogDetail.sourceUpdatedAt).toLocaleDateString('en-PK') : 'Not added yet'}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {hasMedicationEnrichment(catalogDetail) ? (
+                                    <div className="grid gap-3 border-t border-border/70 pt-3">
+                                      <div className="grid gap-3 sm:grid-cols-2">
+                                        <div>
+                                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Category</p>
+                                          <p className="mt-1 text-foreground">
+                                            {[
+                                              catalogDetail.enrichment?.therapeuticCategory,
+                                              catalogDetail.enrichment?.drugCategory,
+                                            ].filter(Boolean).join(' • ') || 'Not listed'}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Trade / Pack</p>
+                                          <p className="mt-1 text-foreground">
+                                            {[
+                                              catalogDetail.enrichment?.tradePrice,
+                                              catalogDetail.enrichment?.packInfo,
+                                            ].filter(Boolean).join(' • ') || 'Not listed'}
+                                          </p>
+                                        </div>
+                                      </div>
+
+                                      {[
+                                        { label: 'Indications', value: catalogDetail.enrichment?.indications },
+                                        { label: 'Dosage', value: catalogDetail.enrichment?.dosage },
+                                        { label: 'Administration', value: catalogDetail.enrichment?.administration },
+                                        { label: 'Contraindications', value: catalogDetail.enrichment?.contraindications },
+                                        { label: 'Precautions', value: catalogDetail.enrichment?.precautions },
+                                        { label: 'Adverse Effects', value: catalogDetail.enrichment?.adverseEffects },
+                                        { label: 'Alternatives', value: catalogDetail.enrichment?.alternativesSummary },
+                                      ].filter(section => section.value).map(section => (
+                                        <div key={section.label}>
+                                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{section.label}</p>
+                                          <p className="mt-1 whitespace-pre-line text-foreground">{section.value}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div className="rounded-md border border-dashed border-primary/25 bg-primary/5 px-3 py-2">
+                                      <p className="text-foreground">Detailed Pakistan medicine reference is not available yet for this product.</p>
+                                      <p className="mt-1 text-muted-foreground">You can still prescribe it using the DRAP base catalog and your own custom instructions.</p>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>

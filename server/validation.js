@@ -171,6 +171,28 @@ export const procedureLibrarySchema = z.object({
   notes: z.string().trim().max(1000).default(''),
 });
 
+export const medicationEnrichmentImportSchema = z.object({
+  registrationNo: z.string().trim().max(120).default(''),
+  brandName: z.string().trim().max(255).default(''),
+  genericName: z.string().trim().max(255).default(''),
+  strengthText: z.string().trim().max(120).default(''),
+  dosageForm: z.string().trim().max(120).default(''),
+  therapeuticCategory: z.string().trim().max(255).default(''),
+  drugCategory: z.string().trim().max(255).default(''),
+  tradePrice: z.string().trim().max(255).default(''),
+  packInfo: z.string().trim().max(255).default(''),
+  indications: z.string().trim().max(5000).default(''),
+  dosage: z.string().trim().max(5000).default(''),
+  administration: z.string().trim().max(5000).default(''),
+  contraindications: z.string().trim().max(5000).default(''),
+  precautions: z.string().trim().max(5000).default(''),
+  adverseEffects: z.string().trim().max(5000).default(''),
+  alternativesSummary: z.string().trim().max(5000).default(''),
+  sourceName: z.string().trim().max(255).default('Licensed Pakistan Source'),
+  sourceUpdatedAt: z.string().trim().max(120).nullable().default(null),
+  enrichmentStatus: z.enum(['missing', 'partial', 'complete']).default('partial'),
+});
+
 export const referralSpecialtySchema = z.object({
   name: trimmedString('Specialty name'),
 });

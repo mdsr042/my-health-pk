@@ -199,6 +199,51 @@ export interface MedicationCatalogDetail extends MedicationCatalogEntry {
   companyName: string;
   source: string;
   sourceUrl: string;
+  detailAvailability: 'base_only' | 'enriched';
+  enrichmentStatus: 'missing' | 'partial' | 'complete';
+  sourceUpdatedAt: string | null;
+  enrichment: MedicationCatalogEnrichment | null;
+}
+
+export interface MedicationCatalogEnrichment {
+  registrationNo: string;
+  lookupKey: string;
+  therapeuticCategory: string;
+  drugCategory: string;
+  tradePrice: string;
+  packInfo: string;
+  indications: string;
+  dosage: string;
+  administration: string;
+  contraindications: string;
+  precautions: string;
+  adverseEffects: string;
+  alternativesSummary: string;
+  sourceName: string;
+  sourceUpdatedAt: string | null;
+  enrichmentStatus: 'missing' | 'partial' | 'complete';
+}
+
+export interface MedicationEnrichmentImportItem {
+  registrationNo: string;
+  brandName: string;
+  genericName: string;
+  strengthText: string;
+  dosageForm: string;
+  therapeuticCategory: string;
+  drugCategory: string;
+  tradePrice: string;
+  packInfo: string;
+  indications: string;
+  dosage: string;
+  administration: string;
+  contraindications: string;
+  precautions: string;
+  adverseEffects: string;
+  alternativesSummary: string;
+  sourceName: string;
+  sourceUpdatedAt: string | null;
+  enrichmentStatus: 'missing' | 'partial' | 'complete';
 }
 
 export interface MedicationCatalogSearchResult {

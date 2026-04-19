@@ -29,6 +29,7 @@ import {
   passwordChangeSchema,
   passwordResetSchema,
   patientSchema,
+  medicationEnrichmentImportSchema,
   procedureLibrarySchema,
   referralFacilitySchema,
   referralSpecialtySchema,
@@ -597,6 +598,77 @@ function normalizeLookupKey(value) {
     .replace(/\s+/g, ' ')
     .replace(/[^\p{L}\p{N}%+./ -]+/gu, '')
     .trim();
+}
+
+function buildMedicationEnrichmentLookupKey(parts = {}) {
+  const registrationNo = String(parts.registrationNo ?? '').trim();
+  if (registrationNo) {
+    return `reg:${normalizeLookupKey(registrationNo)}`;
+  }
+
+  return [
+    'fallback',
+    normalizeLookupKey(parts.brandName),
+    normalizeLookupKey(parts.genericName),
+    normalizeLookupKey(parts.strengthText),
+    normalizeLookupKey(parts.dosageForm),
+  ].join('|');
+}
+
+function mapMedicationEnrichment(row) {
+  if (!row) return null;
+
+  return {
+    registrationNo: row.registration_no,
+    lookupKey: row.lookup_key,
+    therapeuticCategory: row.therapeutic_category ?? '',
+    drugCategory: row.drug_category ?? '',
+    tradePrice: row.trade_price ?? '',
+    packInfo: row.pack_info ?? '',
+    indications: row.indications ?? '',
+    dosage: row.dosage ?? '',
+    administration: row.administration ?? '',
+    contraindications: row.contraindications ?? '',
+    precautions: row.precautions ?? '',
+    adverseEffects: row.adverse_effects ?? '',
+    alternativesSummary: row.alternatives_summary ?? '',
+    sourceName: row.source_name ?? 'Licensed Pakistan Source',
+    sourceUpdatedAt: row.source_updated_at,
+    enrichmentStatus: row.enrichment_status ?? 'partial',
+  };
+}
+
+async function getMedicationCatalogDetailWithEnrichment(registrationNo) {
+  const entry = await getMedicationCatalogEntry(registrationNo);
+  if (!entry) return null;
+
+  const fallbackLookupKey = buildMedicationEnrichmentLookupKey({
+    brandName: entry.brandName,
+    genericName: entry.genericName,
+    strengthText: entry.strengthText,
+    dosageForm: entry.dosageForm,
+  });
+
+  const { rows } = await query(
+    `
+      SELECT *
+      FROM medication_enrichments
+      WHERE registration_no = $1
+         OR lookup_key = $2
+      ORDER BY CASE WHEN registration_no = $1 THEN 0 ELSE 1 END, updated_at DESC
+      LIMIT 1
+    `,
+    [String(registrationNo ?? '').trim(), fallbackLookupKey]
+  );
+
+  const enrichment = mapMedicationEnrichment(rows[0] ?? null);
+  return {
+    ...entry,
+    detailAvailability: enrichment ? 'enriched' : 'base_only',
+    enrichmentStatus: enrichment?.enrichmentStatus ?? 'missing',
+    sourceUpdatedAt: enrichment?.sourceUpdatedAt ?? null,
+    enrichment,
+  };
 }
 
 async function getDoctorMedicationPreferences(doctorUserId) {
@@ -1190,7 +1262,7 @@ app.get('/api/medication-catalog', requireAuth, asyncHandler(async (req, res) =>
 }));
 
 app.get('/api/medication-catalog/:registrationNo', requireAuth, asyncHandler(async (req, res) => {
-  const entry = await getMedicationCatalogEntry(String(req.params.registrationNo ?? ''));
+  const entry = await getMedicationCatalogDetailWithEnrichment(String(req.params.registrationNo ?? ''));
   if (!entry) {
     res.status(404).json({ error: 'Medication not found', code: 'MEDICATION_NOT_FOUND' });
     return;
@@ -2176,6 +2248,106 @@ app.get('/api/admin/doctors', requireAuth, requireRole('platform_admin'), asyncH
 
 app.get('/api/admin/diagnosis-catalog', requireAuth, requireRole('platform_admin'), asyncHandler(async (_req, res) => {
   res.json({ data: await listDiagnosisCatalogEntries() });
+}));
+
+app.post('/api/admin/medication-enrichments', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const itemsInput = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (itemsInput.length === 0) {
+    return res.status(400).json({ error: 'At least one medication enrichment item is required', code: 'INVALID_MEDICATION_ENRICHMENT_IMPORT' });
+  }
+
+  const items = itemsInput.map(item => parseOrThrow(medicationEnrichmentImportSchema, item, 'INVALID_MEDICATION_ENRICHMENT_IMPORT'));
+
+  await withTransaction(async client => {
+    for (const item of items) {
+      const lookupKey = buildMedicationEnrichmentLookupKey(item);
+      await client.query(
+        `
+          INSERT INTO medication_enrichments (
+            id,
+            registration_no,
+            lookup_key,
+            brand_name,
+            generic_name,
+            strength_text,
+            dosage_form,
+            therapeutic_category,
+            drug_category,
+            trade_price,
+            pack_info,
+            indications,
+            dosage,
+            administration,
+            contraindications,
+            precautions,
+            adverse_effects,
+            alternatives_summary,
+            source_name,
+            source_updated_at,
+            enrichment_status
+          )
+          VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+            NULLIF($20, '')::timestamptz,
+            $21
+          )
+          ON CONFLICT (lookup_key)
+          DO UPDATE SET
+            registration_no = EXCLUDED.registration_no,
+            brand_name = EXCLUDED.brand_name,
+            generic_name = EXCLUDED.generic_name,
+            strength_text = EXCLUDED.strength_text,
+            dosage_form = EXCLUDED.dosage_form,
+            therapeutic_category = EXCLUDED.therapeutic_category,
+            drug_category = EXCLUDED.drug_category,
+            trade_price = EXCLUDED.trade_price,
+            pack_info = EXCLUDED.pack_info,
+            indications = EXCLUDED.indications,
+            dosage = EXCLUDED.dosage,
+            administration = EXCLUDED.administration,
+            contraindications = EXCLUDED.contraindications,
+            precautions = EXCLUDED.precautions,
+            adverse_effects = EXCLUDED.adverse_effects,
+            alternatives_summary = EXCLUDED.alternatives_summary,
+            source_name = EXCLUDED.source_name,
+            source_updated_at = EXCLUDED.source_updated_at,
+            enrichment_status = EXCLUDED.enrichment_status,
+            updated_at = NOW()
+        `,
+        [
+          createId('medication_enrichment'),
+          item.registrationNo.trim(),
+          lookupKey,
+          item.brandName.trim(),
+          item.genericName.trim(),
+          item.strengthText.trim(),
+          item.dosageForm.trim(),
+          item.therapeuticCategory.trim(),
+          item.drugCategory.trim(),
+          item.tradePrice.trim(),
+          item.packInfo.trim(),
+          item.indications.trim(),
+          item.dosage.trim(),
+          item.administration.trim(),
+          item.contraindications.trim(),
+          item.precautions.trim(),
+          item.adverseEffects.trim(),
+          item.alternativesSummary.trim(),
+          item.sourceName.trim() || 'Licensed Pakistan Source',
+          item.sourceUpdatedAt ?? '',
+          item.enrichmentStatus,
+        ]
+      );
+    }
+  });
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    action: 'medication_enrichment_imported',
+    details: { itemCount: items.length },
+  });
+
+  res.status(201).json({ ok: true, imported: items.length });
 }));
 
 app.post('/api/admin/diagnosis-catalog', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {

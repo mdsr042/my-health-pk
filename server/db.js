@@ -148,6 +148,32 @@ async function createBaseSchema(client) {
       UNIQUE (doctor_user_id, medication_key)
     );
 
+    CREATE TABLE IF NOT EXISTS medication_enrichments (
+      id TEXT PRIMARY KEY,
+      registration_no TEXT NOT NULL DEFAULT '',
+      lookup_key TEXT NOT NULL UNIQUE,
+      brand_name TEXT NOT NULL DEFAULT '',
+      generic_name TEXT NOT NULL DEFAULT '',
+      strength_text TEXT NOT NULL DEFAULT '',
+      dosage_form TEXT NOT NULL DEFAULT '',
+      therapeutic_category TEXT NOT NULL DEFAULT '',
+      drug_category TEXT NOT NULL DEFAULT '',
+      trade_price TEXT NOT NULL DEFAULT '',
+      pack_info TEXT NOT NULL DEFAULT '',
+      indications TEXT NOT NULL DEFAULT '',
+      dosage TEXT NOT NULL DEFAULT '',
+      administration TEXT NOT NULL DEFAULT '',
+      contraindications TEXT NOT NULL DEFAULT '',
+      precautions TEXT NOT NULL DEFAULT '',
+      adverse_effects TEXT NOT NULL DEFAULT '',
+      alternatives_summary TEXT NOT NULL DEFAULT '',
+      source_name TEXT NOT NULL DEFAULT 'Licensed Pakistan Source',
+      source_updated_at TIMESTAMPTZ,
+      enrichment_status TEXT NOT NULL DEFAULT 'partial' CHECK (enrichment_status IN ('missing', 'partial', 'complete')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS treatment_templates (
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -1279,6 +1305,39 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_procedure_library_entries_doctor_name', 'procedure_library_entries', '(doctor_user_id, LOWER(name))');
     await ensureIndex(client, 'idx_procedure_library_entries_workspace_doctor', 'procedure_library_entries', '(workspace_id, doctor_user_id)');
     await ensureIndex(client, 'idx_procedures_note_id', 'procedures', '(note_id)');
+  });
+
+  await runMigration(client, '013_medication_enrichments', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS medication_enrichments (
+        id TEXT PRIMARY KEY,
+        registration_no TEXT NOT NULL DEFAULT '',
+        lookup_key TEXT NOT NULL UNIQUE,
+        brand_name TEXT NOT NULL DEFAULT '',
+        generic_name TEXT NOT NULL DEFAULT '',
+        strength_text TEXT NOT NULL DEFAULT '',
+        dosage_form TEXT NOT NULL DEFAULT '',
+        therapeutic_category TEXT NOT NULL DEFAULT '',
+        drug_category TEXT NOT NULL DEFAULT '',
+        trade_price TEXT NOT NULL DEFAULT '',
+        pack_info TEXT NOT NULL DEFAULT '',
+        indications TEXT NOT NULL DEFAULT '',
+        dosage TEXT NOT NULL DEFAULT '',
+        administration TEXT NOT NULL DEFAULT '',
+        contraindications TEXT NOT NULL DEFAULT '',
+        precautions TEXT NOT NULL DEFAULT '',
+        adverse_effects TEXT NOT NULL DEFAULT '',
+        alternatives_summary TEXT NOT NULL DEFAULT '',
+        source_name TEXT NOT NULL DEFAULT 'Licensed Pakistan Source',
+        source_updated_at TIMESTAMPTZ,
+        enrichment_status TEXT NOT NULL DEFAULT 'partial' CHECK (enrichment_status IN ('missing', 'partial', 'complete')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await ensureAuditColumns(client, 'medication_enrichments');
+    await ensureIndex(client, 'idx_medication_enrichments_registration_no', 'medication_enrichments', '(registration_no)');
+    await ensureIndex(client, 'idx_medication_enrichments_lookup_key', 'medication_enrichments', '(lookup_key)');
   });
 }
 
