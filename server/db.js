@@ -148,6 +148,21 @@ async function createBaseSchema(client) {
       UNIQUE (doctor_user_id, medication_key)
     );
 
+    CREATE TABLE IF NOT EXISTS custom_medications (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      lookup_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      generic_name TEXT NOT NULL DEFAULT '',
+      strength_text TEXT NOT NULL DEFAULT '',
+      dosage_form TEXT NOT NULL DEFAULT '',
+      route TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (doctor_user_id, lookup_key)
+    );
+
     CREATE TABLE IF NOT EXISTS medication_enrichments (
       id TEXT PRIMARY KEY,
       registration_no TEXT NOT NULL DEFAULT '',
@@ -1338,6 +1353,28 @@ async function runSchemaMigrations(client) {
     await ensureAuditColumns(client, 'medication_enrichments');
     await ensureIndex(client, 'idx_medication_enrichments_registration_no', 'medication_enrichments', '(registration_no)');
     await ensureIndex(client, 'idx_medication_enrichments_lookup_key', 'medication_enrichments', '(lookup_key)');
+  });
+
+  await runMigration(client, '014_doctor_custom_medications', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS custom_medications (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        lookup_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        generic_name TEXT NOT NULL DEFAULT '',
+        strength_text TEXT NOT NULL DEFAULT '',
+        dosage_form TEXT NOT NULL DEFAULT '',
+        route TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (doctor_user_id, lookup_key)
+      )
+    `);
+    await ensureAuditColumns(client, 'custom_medications');
+    await ensureIndex(client, 'idx_custom_medications_doctor_lookup', 'custom_medications', '(doctor_user_id, lookup_key)');
+    await ensureIndex(client, 'idx_custom_medications_doctor_name', 'custom_medications', '(doctor_user_id, lower(name))');
   });
 }
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -156,6 +156,23 @@ export default function MedicalRecords() {
     setExpandedPatientId(patientId);
     setExpandedVisitIds(prev => ({ ...prev, [patientId]: noteId }));
   };
+
+  useEffect(() => {
+    const focusPatientRecord = (event: Event) => {
+      const detail = (event as CustomEvent<{ patientId?: string }>).detail;
+      const patientId = detail?.patientId;
+      if (!patientId) return;
+
+      const patient = patients.find(item => item.id === patientId);
+      if (!patient) return;
+
+      setExpandedPatientId(patientId);
+      setSearch(patient.mrn || patient.name || '');
+    };
+
+    window.addEventListener('records:focus-patient', focusPatientRecord);
+    return () => window.removeEventListener('records:focus-patient', focusPatientRecord);
+  }, [patients]);
 
   return (
     <div className="p-4 lg:p-6 space-y-6 animate-fade-in">

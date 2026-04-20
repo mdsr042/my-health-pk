@@ -25,6 +25,7 @@ import {
   diagnosisSetSchema,
   investigationCatalogSchema,
   investigationSetSchema,
+  customMedicationSchema,
   parseOrThrow,
   passwordChangeSchema,
   passwordResetSchema,
@@ -615,6 +616,16 @@ function buildMedicationEnrichmentLookupKey(parts = {}) {
   ].join('|');
 }
 
+function buildCustomMedicationLookupKey(parts = {}) {
+  return [
+    normalizeLookupKey(parts.name),
+    normalizeLookupKey(parts.generic),
+    normalizeLookupKey(parts.strength),
+    normalizeLookupKey(parts.form),
+    normalizeLookupKey(parts.route),
+  ].join('|');
+}
+
 function mapMedicationEnrichment(row) {
   if (!row) return null;
 
@@ -689,6 +700,49 @@ async function getDoctorMedicationPreferences(doctorUserId) {
     payload: row.payload ?? {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }));
+}
+
+async function searchDoctorCustomMedications(workspaceId, doctorUserId, queryText, limit = 20) {
+  const normalized = normalizeLookupKey(queryText);
+  if (!normalized) return [];
+
+  const { rows } = await query(
+    `
+      SELECT id, name, generic_name, strength_text, dosage_form, route
+      FROM custom_medications
+      WHERE workspace_id = $1
+        AND doctor_user_id = $2
+        AND (
+          LOWER(name) LIKE $3
+          OR LOWER(generic_name) LIKE $3
+          OR LOWER(strength_text) LIKE $3
+          OR LOWER(dosage_form) LIKE $3
+          OR LOWER(route) LIKE $3
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(name) = $4 THEN 0
+          WHEN LOWER(name) LIKE $5 THEN 1
+          WHEN LOWER(generic_name) LIKE $5 THEN 2
+          ELSE 3
+        END,
+        updated_at DESC
+      LIMIT $6
+    `,
+    [workspaceId, doctorUserId, `%${normalized}%`, normalized, `${normalized}%`, limit]
+  );
+
+  return rows.map(row => ({
+    registrationNo: '',
+    brandName: row.name,
+    genericName: row.generic_name ?? '',
+    companyName: 'My custom medicine',
+    strengthText: row.strength_text ?? '',
+    dosageForm: row.dosage_form ?? '',
+    route: row.route ?? '',
+    sourceType: 'custom',
+    customMedicationId: row.id,
   }));
 }
 
@@ -1250,13 +1304,20 @@ app.get('/api/medication-catalog', requireAuth, asyncHandler(async (req, res) =>
   const queryText = String(req.query.q ?? '').trim();
   const limit = Number(req.query.limit ?? 20);
   const cursor = Number(req.query.cursor ?? 0);
-  const result = await searchMedicationCatalog(queryText, Number.isFinite(limit) ? limit : 20, Number.isFinite(cursor) ? cursor : 0);
+  const safeLimit = Number.isFinite(limit) ? limit : 20;
+  const safeCursor = Number.isFinite(cursor) ? cursor : 0;
+  const [result, customEntries] = await Promise.all([
+    searchMedicationCatalog(queryText, safeLimit, safeCursor),
+    req.auth.user.role === 'doctor_owner'
+      ? searchDoctorCustomMedications(req.auth.workspace.id, req.auth.user.id, queryText, Math.min(safeLimit, 20))
+      : Promise.resolve([]),
+  ]);
   res.json({
-    data: result.entries,
+    data: safeCursor > 0 ? result.entries : [...customEntries, ...result.entries].slice(0, 20),
     meta: {
       ...result.metadata,
-      hasMore: result.hasMore,
-      nextCursor: result.nextCursor,
+      hasMore: safeCursor > 0 ? result.hasMore : result.hasMore || result.entries.length + customEntries.length > 20,
+      nextCursor: safeCursor > 0 ? result.nextCursor : result.nextCursor,
     },
   });
 }));
@@ -1321,6 +1382,54 @@ app.delete('/api/medication-favorites/:registrationNo', requireAuth, requireRole
 app.get('/api/medication-preferences', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   const preferences = await getDoctorMedicationPreferences(req.auth.user.id);
   res.json({ data: preferences });
+}));
+
+app.post('/api/custom-medications', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const payload = parseOrThrow(customMedicationSchema, req.body ?? {}, 'INVALID_CUSTOM_MEDICATION');
+  const lookupKey = buildCustomMedicationLookupKey(payload);
+
+  const { rows } = await query(
+    `
+      INSERT INTO custom_medications (
+        id, workspace_id, doctor_user_id, lookup_key, name, generic_name, strength_text, dosage_form, route
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (doctor_user_id, lookup_key)
+      DO UPDATE SET
+        name = EXCLUDED.name,
+        generic_name = EXCLUDED.generic_name,
+        strength_text = EXCLUDED.strength_text,
+        dosage_form = EXCLUDED.dosage_form,
+        route = EXCLUDED.route,
+        updated_at = NOW()
+      RETURNING id, name, generic_name, strength_text, dosage_form, route
+    `,
+    [
+      createId('custom_medication'),
+      req.auth.workspace.id,
+      req.auth.user.id,
+      lookupKey,
+      payload.name.trim(),
+      payload.generic.trim(),
+      payload.strength.trim(),
+      payload.form.trim(),
+      payload.route.trim(),
+    ]
+  );
+
+  res.status(201).json({
+    data: {
+      registrationNo: '',
+      brandName: rows[0].name,
+      genericName: rows[0].generic_name ?? '',
+      companyName: 'My custom medicine',
+      strengthText: rows[0].strength_text ?? '',
+      dosageForm: rows[0].dosage_form ?? '',
+      route: rows[0].route ?? '',
+      sourceType: 'custom',
+      customMedicationId: rows[0].id,
+    },
+  });
 }));
 
 app.put('/api/medication-preferences', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {

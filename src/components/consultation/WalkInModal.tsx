@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,7 @@ interface WalkInModalProps {
 }
 
 export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInModalProps) {
-  const { addWalkIn, searchPatientsByPhone } = useData();
+  const { addWalkIn, searchPatients, searchPatientsByPhone } = useData();
   const { activeClinic } = useAuth();
   const emptyForm = {
     name: '', phone: '', age: '', gender: '' as string,
@@ -28,7 +28,7 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
   const [matchedPatients, setMatchedPatients] = useState<Patient[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [lookupPhone, setLookupPhone] = useState('');
+  const [lookupMrn, setLookupMrn] = useState('');
 
   const selectedPatient = useMemo(
     () => matchedPatients.find(patient => patient.id === selectedPatientId) ?? null,
@@ -54,11 +54,8 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
     setForm(prev => ({ ...prev, [field]: value }));
 
     if (field === 'phone') {
-      if (value.trim() !== lookupPhone) {
-        setMatchedPatients([]);
-        if (selectedPatientId) {
-          clearProfileFieldsForNewPatient(form.name);
-        }
+      if (selectedPatientId) {
+        clearProfileFieldsForNewPatient(form.name);
       }
       return;
     }
@@ -68,35 +65,54 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
     }
   };
 
-  const handlePhoneBlur = async () => {
-    const phone = form.phone.trim();
-    setLookupPhone(phone);
+  useEffect(() => {
+    if (!open) return;
 
-    if (!phone) {
+    const activeQuery = lookupMrn.trim() || form.phone.trim();
+    const mode: 'phone' | 'mrn' = lookupMrn.trim() ? 'mrn' : 'phone';
+
+    if (!activeQuery) {
       setMatchedPatients([]);
-      clearProfileFieldsForNewPatient(form.name);
+      setIsSearching(false);
       return;
     }
 
-    setIsSearching(true);
-    try {
-      const results = await searchPatientsByPhone(phone);
-      setMatchedPatients(results);
-      if (selectedPatientId && !results.some(patient => patient.id === selectedPatientId)) {
-        clearProfileFieldsForNewPatient(form.name);
-      }
-    } finally {
-      setIsSearching(false);
-    }
-  };
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void (mode === 'phone'
+        ? searchPatientsByPhone(activeQuery)
+        : searchPatients(activeQuery)
+      )
+        .then(results => {
+          if (!active) return;
+          setMatchedPatients(results);
+          if (selectedPatientId && !results.some(patient => patient.id === selectedPatientId)) {
+            clearProfileFieldsForNewPatient(form.name);
+          }
+        })
+        .finally(() => {
+          if (active) {
+            setIsSearching(false);
+          }
+        });
+      setIsSearching(true);
+    }, 250);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [form.name, form.phone, lookupMrn, open, searchPatients, searchPatientsByPhone, selectedPatientId]);
 
   const handleSelectMatchedPatient = (patientId: string) => {
     const patient = matchedPatients.find(item => item.id === patientId);
     if (!patient) return;
+    setLookupMrn(patient.mrn || '');
     setSelectedPatientId(patient.id);
     setForm(prev => ({
       ...prev,
       name: patient.name,
+      phone: patient.phone || prev.phone,
       age: String(patient.age || ''),
       gender: patient.gender || '',
       cnic: patient.cnic || '',
@@ -131,7 +147,7 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
     setForm(emptyForm);
     setMatchedPatients([]);
     setSelectedPatientId('');
-    setLookupPhone('');
+    setLookupMrn('');
     setIsSearching(false);
   };
 
@@ -151,35 +167,48 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
           </DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-2">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5 col-span-2">
-              <Label htmlFor="walkin-phone">Phone <span className="text-destructive">*</span></Label>
-              <div className="relative">
-                <Input
-                  id="walkin-phone"
-                  placeholder="03XX-XXXXXXX"
-                  value={form.phone}
-                  onChange={e => update('phone', e.target.value)}
-                  onBlur={() => void handlePhoneBlur()}
-                />
-                {isSearching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+          <div className="rounded-lg border border-border bg-muted/20 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Existing Patient Lookup</p>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="walkin-mrn">MRN Number</Label>
+                <div className="relative">
+                  <Input
+                    id="walkin-mrn"
+                    placeholder="Search by MRN"
+                    value={lookupMrn}
+                    onChange={e => setLookupMrn(e.target.value)}
+                  />
+                  {isSearching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+                </div>
               </div>
-              {matchedPatients.length > 0 && (
-                <p className="text-[11px] text-muted-foreground">
-                  Existing patients found for this number. Select one below or type a different name to create a new patient.
-                </p>
-              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="walkin-phone">Phone <span className="text-destructive">*</span></Label>
+                <div className="relative">
+                  <Input
+                    id="walkin-phone"
+                    placeholder="03XX-XXXXXXX"
+                    value={form.phone}
+                    onChange={e => update('phone', e.target.value)}
+                  />
+                  {isSearching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+                </div>
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="walkin-name">Full Name <span className="text-destructive">*</span></Label>
-              <Input
-                id="walkin-name"
-                placeholder="e.g. Muhammad Ali Khan"
-                value={form.name}
-                onChange={e => update('name', e.target.value)}
-              />
-              {matchedPatients.length > 0 && (
-                <div className="rounded-md border border-border bg-muted/20 p-2 space-y-1">
+            {selectedPatient && (
+              <div className="mt-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary">Existing Patient Selected</p>
+                <p className="text-sm text-foreground">
+                  Appointment will continue under MRN <span className="font-semibold">{selectedPatient.mrn}</span>.
+                </p>
+              </div>
+            )}
+            {matchedPatients.length > 0 && (
+              <div className="mt-3 space-y-1">
+                <p className="text-[11px] text-muted-foreground">
+                  Matching patient records found. Select one to continue on the same MRN, or keep typing a different name to create a new patient.
+                </p>
+                <div className="rounded-md border border-border bg-background p-2 space-y-1">
                   {matchedPatients.map(patient => (
                     <button
                       key={patient.id}
@@ -191,11 +220,22 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
                           : 'border-border bg-background hover:bg-muted'
                       }`}
                     >
-                      {patient.name} • {patient.mrn} • {patient.age}y / {patient.gender}
+                      {patient.name} • {patient.mrn} • {patient.phone || 'No phone'}
                     </button>
                   ))}
                 </div>
-              )}
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="walkin-name">Full Name <span className="text-destructive">*</span></Label>
+              <Input
+                id="walkin-name"
+                placeholder="e.g. Muhammad Ali Khan"
+                value={form.name}
+                onChange={e => update('name', e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="walkin-cnic">CNIC</Label>

@@ -8,20 +8,27 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Filter, UserPlus, Play, MoreHorizontal } from 'lucide-react';
-import WalkInModal from '@/components/consultation/WalkInModal';
+import { Search, Filter, Play, MoreHorizontal, CalendarPlus } from 'lucide-react';
+import AppointmentBookingDialog from '@/components/appointments/AppointmentBookingDialog';
 import { getLocalDateKey } from '@/lib/date';
+import type { Appointment, Patient } from '@/data/mockData';
 
 interface PatientQueueProps {
   onOpenPatient: (patientId: string) => void;
 }
 
+function getTomorrowDateKey() {
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  return getLocalDateKey(next);
+}
+
 export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
-  const { activeClinic } = useAuth();
-  const { getAppointmentsForClinic, getPatient, applyQueueAction } = useData();
+  const { activeClinic, doctorClinics, user } = useAuth();
+  const { getAppointmentsForClinic, getPatient, applyQueueAction, upsertAppointment, patients, searchPatients } = useData();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [walkInOpen, setWalkInOpen] = useState(false);
+  const [bookingPatient, setBookingPatient] = useState<Patient | null>(null);
   const todayKey = getLocalDateKey(new Date());
 
   const clinicAppointments = getAppointmentsForClinic(activeClinic?.id || '');
@@ -127,6 +134,39 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
     onOpenPatient(patientId);
   };
 
+  const handleBookNextAppointment = async (form: {
+    id: string;
+    patientId: string;
+    clinicId: string;
+    date: string;
+    time: string;
+    type: Appointment['type'];
+    status: Appointment['status'];
+    chiefComplaint: string;
+    tokenNumber: number;
+  }) => {
+    if (!form.patientId || !form.clinicId || !form.date || !form.time) {
+      toast.error('Please complete clinic, date, and time');
+      return;
+    }
+
+    await upsertAppointment({
+      id: '',
+      patientId: form.patientId,
+      clinicId: form.clinicId,
+      doctorId: user?.id || 'doctor',
+      date: form.date,
+      time: form.time,
+      status: form.status,
+      type: form.type,
+      chiefComplaint: form.chiefComplaint.trim(),
+      tokenNumber: 0,
+    });
+
+    toast.success('Next appointment booked');
+    setBookingPatient(null);
+  };
+
   return (
     <div className="p-4 lg:p-6 space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -134,7 +174,6 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
           <h1 className="text-2xl font-bold text-foreground">Patient Queue</h1>
           <p className="text-muted-foreground text-sm">{filtered.length} patients • {activeClinic?.name}</p>
         </div>
-        <Button className="gap-2" onClick={() => setWalkInOpen(true)}><UserPlus className="w-4 h-4" /> Walk-in</Button>
       </div>
 
       <Card className="border-0 shadow-sm">
@@ -236,6 +275,11 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
+                                {(apt.status === 'completed' || apt.status === 'cancelled' || apt.status === 'no-show') && (
+                                  <DropdownMenuItem onClick={() => setBookingPatient(pat ?? null)} disabled={!pat}>
+                                    <CalendarPlus className="mr-2 h-4 w-4" /> Book Next Appointment
+                                  </DropdownMenuItem>
+                                )}
                                 {apt.status === 'scheduled' && (
                                   <DropdownMenuItem onClick={() => void handleQueueAction(apt.id, pat?.name || '', 'arrived')}>
                                     Mark Arrived
@@ -291,12 +335,19 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
           </div>
         </CardContent>
       </Card>
-      <WalkInModal
-        open={walkInOpen}
-        onClose={() => setWalkInOpen(false)}
-        onPatientCreated={(id) => {
-          toast.success('Patient added to queue');
-        }}
+      <AppointmentBookingDialog
+        open={Boolean(bookingPatient)}
+        onOpenChange={open => !open && setBookingPatient(null)}
+        title="Book Next Appointment"
+        mode="next"
+        patient={bookingPatient}
+        patients={patients}
+        searchPatients={searchPatients}
+        clinics={doctorClinics}
+        defaultClinicId={activeClinic?.id}
+        defaultDate={getTomorrowDateKey()}
+        defaultType="follow-up"
+        onSubmit={handleBookNextAppointment}
       />
     </div>
   );

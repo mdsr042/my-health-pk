@@ -13,6 +13,7 @@ import {
   fetchMedicationPreferences,
   removeMedicationFavorite,
   saveMedicationPreference,
+  saveCustomMedication,
   searchMedicationCatalog,
 } from '@/lib/api';
 import type { MedicationCatalogDetail, MedicationCatalogEntry, MedicationFavorite, MedicationPreference } from '@/lib/app-types';
@@ -98,19 +99,20 @@ function inferLanguageMode(medication: Partial<Medication>): 'en' | 'ur' | 'bili
   const hasUrdu = Boolean(medication.frequencyUrdu || medication.instructionsUrdu);
   if (hasEnglish && hasUrdu) return 'bilingual';
   if (hasUrdu) return 'ur';
-  return 'en';
+  return 'ur';
 }
 
 function toMedication(entry: MedicationCatalogEntry): Medication {
+  const isCustom = entry.sourceType === 'custom';
   return {
-    id: `cat-${entry.registrationNo}`,
+    id: isCustom ? `customdb-${entry.customMedicationId ?? Date.now()}` : `cat-${entry.registrationNo}`,
     name: entry.brandName,
     nameUrdu: '',
     generic: entry.genericName || '',
     strength: entry.strengthText || '',
     form: entry.dosageForm || '',
     route: entry.route || '',
-    languageMode: 'bilingual',
+    languageMode: 'ur',
     frequency: '',
     frequencyUrdu: '',
     duration: '',
@@ -167,6 +169,7 @@ export default function MedicationModal({
   const [customInstructions, setCustomInstructions] = useState('');
   const [customInstructionsUrdu, setCustomInstructionsUrdu] = useState('');
   const [instructionPreset, setInstructionPreset] = useState<string>('select');
+  const [instructionSearch, setInstructionSearch] = useState('');
   const [catalogResults, setCatalogResults] = useState<MedicationCatalogEntry[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogHasMore, setCatalogHasMore] = useState(false);
@@ -178,7 +181,7 @@ export default function MedicationModal({
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set());
   const [catalogDetail, setCatalogDetail] = useState<MedicationCatalogDetail | null>(null);
   const [detailLoadingRegNo, setDetailLoadingRegNo] = useState('');
-  const [languageMode, setLanguageMode] = useState<'en' | 'ur' | 'bilingual'>('bilingual');
+  const [languageMode, setLanguageMode] = useState<'en' | 'ur' | 'bilingual'>('ur');
   const [savingFavorite, setSavingFavorite] = useState(false);
   const [updateConfirmationArmed, setUpdateConfirmationArmed] = useState(false);
   const [activeResultIndex, setActiveResultIndex] = useState(-1);
@@ -319,6 +322,14 @@ export default function MedicationModal({
     : sourceMode === 'recent'
       ? recentEntries
       : dedupedCatalogResults.map(toMedication);
+  const filteredInstructionPresets = useMemo(() => {
+    const query = normalizeMedicationKey(instructionSearch);
+    return instructionPresets.filter(preset => {
+      if (preset.value === 'custom') return false;
+      if (!query) return true;
+      return normalizeMedicationKey(preset.en).includes(query) || normalizeMedicationKey(preset.ur).includes(query);
+    });
+  }, [instructionSearch]);
   const isCustomMedication = selected?.id.startsWith('custom-') ?? false;
   const selectedRegistrationNo = selected?.id.startsWith('cat-') ? selected.id.replace('cat-', '') : '';
   const isSelectedFavorite = Boolean(selectedRegistrationNo && favoriteKeys.has(selectedRegistrationNo));
@@ -389,8 +400,9 @@ export default function MedicationModal({
         }
       : med;
 
+    const nextLanguageMode = inferLanguageMode(nextMedication);
     setSelected(nextMedication);
-    setLanguageMode(inferLanguageMode(nextMedication));
+    setLanguageMode(nextLanguageMode);
     setDosePattern(nextMedication.dosePattern || '');
     const parsed = nextMedication.dosePattern ? parseDosePattern(nextMedication.dosePattern, nextMedication) : null;
     setCustomFrequency(parsed?.frequency || nextMedication.frequency);
@@ -400,6 +412,11 @@ export default function MedicationModal({
     setCustomInstructionsUrdu(nextMedication.instructionsUrdu || '');
     const matchingPreset = instructionPresets.find(preset => preset.en === nextMedication.instructions);
     setInstructionPreset(matchingPreset?.value ?? (nextMedication.instructions ? 'custom' : 'select'));
+    setInstructionSearch(
+      matchingPreset
+        ? (nextLanguageMode === 'ur' && matchingPreset.ur ? matchingPreset.ur : matchingPreset.en)
+        : nextMedication.instructionsUrdu || nextMedication.instructions || ''
+    );
     setCatalogDetail(null);
     setUpdateConfirmationArmed(false);
   };
@@ -413,7 +430,7 @@ export default function MedicationModal({
       strength: '',
       form: 'Tablet',
       route: 'Oral',
-      languageMode: 'bilingual',
+      languageMode: 'ur',
       frequency: '',
       frequencyUrdu: '',
       duration: '',
@@ -514,7 +531,8 @@ export default function MedicationModal({
     setCustomInstructions('');
     setCustomInstructionsUrdu('');
     setInstructionPreset('select');
-    setLanguageMode('bilingual');
+    setInstructionSearch('');
+    setLanguageMode('ur');
     setCatalogDetail(null);
     setDetailLoadingRegNo('');
     setUpdateConfirmationArmed(false);
@@ -546,8 +564,26 @@ export default function MedicationModal({
   };
 
   const commitMedicationAdd = () => {
+    void commitMedicationAddAsync();
+  };
+
+  const commitMedicationAddAsync = async () => {
     const medicationToSave = buildMedicationFromForm();
     if (!medicationToSave) return;
+
+    if (isCustomMedication) {
+      try {
+        await saveCustomMedication({
+          name: medicationToSave.name,
+          generic: medicationToSave.generic,
+          strength: medicationToSave.strength,
+          form: medicationToSave.form,
+          route: medicationToSave.route,
+        });
+      } catch {
+        // Do not block prescribing if custom library persistence fails.
+      }
+    }
 
     onAdd(medicationToSave);
     setPendingRevealMedicationId(medicationToSave.id);
@@ -589,12 +625,14 @@ export default function MedicationModal({
     if (value === 'select' || value === 'custom') {
       setCustomInstructions('');
       setCustomInstructionsUrdu('');
+      if (value === 'select') setInstructionSearch('');
       return;
     }
     const preset = instructionPresets.find(item => item.value === value);
     if (!preset) return;
     setCustomInstructions(preset.en);
     setCustomInstructionsUrdu(preset.ur);
+    setInstructionSearch(languageMode === 'ur' && preset.ur ? preset.ur : preset.en);
   };
 
   const handleOpenCatalogDetail = async (entry: MedicationCatalogEntry) => {
@@ -1206,21 +1244,68 @@ export default function MedicationModal({
                           <h4 className="text-sm font-medium text-foreground">Instructions</h4>
                           <p className="text-[11px] text-muted-foreground">Keep this simple for the patient and editable when needed.</p>
                         </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Instruction Search / Preset</Label>
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                              value={instructionSearch}
+                              onChange={e => {
+                                const value = e.target.value;
+                                setInstructionSearch(value);
+                                setInstructionPreset(value.trim() ? 'custom' : 'select');
+                                if (languageMode === 'ur') {
+                                  setCustomInstructionsUrdu(value);
+                                } else {
+                                  setCustomInstructions(value);
+                                }
+                              }}
+                              placeholder={languageMode === 'ur' ? 'Search Urdu instruction...' : 'Search instruction...'}
+                              className="h-8 pl-9 pr-9 text-sm"
+                            />
+                            {instructionSearch && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInstructionSearch('');
+                                  setInstructionPreset('select');
+                                  if (languageMode === 'ur') {
+                                    setCustomInstructionsUrdu('');
+                                  } else {
+                                    setCustomInstructions('');
+                                  }
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          <div className="max-h-28 overflow-y-auto rounded-md border border-border bg-background scrollbar-thin">
+                            {filteredInstructionPresets.length > 0 ? (
+                              filteredInstructionPresets.map(preset => (
+                                <button
+                                  key={preset.value}
+                                  type="button"
+                                  onClick={() => handleInstructionPresetChange(preset.value)}
+                                  className="flex w-full items-start justify-between gap-3 border-b border-border/60 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/40"
+                                >
+                                  <span className="text-foreground">{preset.en}</span>
+                                  {preset.ur && (
+                                    <span className="text-xs text-muted-foreground" dir="rtl">{preset.ur}</span>
+                                  )}
+                                </button>
+                              ))
+                            ) : (
+                              <p className="px-3 py-2 text-xs text-muted-foreground">No preset matched. Keep typing to use a custom instruction.</p>
+                            )}
+                          </div>
+                        </div>
+
                         {languageMode !== 'ur' && (
                           <div className="space-y-1.5">
                             <Label className="text-xs">Instructions (English)</Label>
-                            <Select value={instructionPreset} onValueChange={handleInstructionPresetChange}>
-                              <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select instruction" /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="select">Select instruction</SelectItem>
-                                {instructionPresets.map(preset => (
-                                  <SelectItem key={preset.value} value={preset.value}>{preset.en}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {instructionPreset === 'custom' && (
-                              <Textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} rows={2} className="text-sm resize-none" />
-                            )}
+                            <Textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} rows={2} className="text-sm resize-none" />
                           </div>
                         )}
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { type Patient, type Diagnosis, type Medication, type Vitals } from '@/data/mockData';
+import { type Patient, type Diagnosis, type Medication, type Vitals, type LabOrder, type Procedure } from '@/data/mockData';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Printer } from 'lucide-react';
@@ -58,6 +58,8 @@ interface PrescriptionPreviewProps {
   pastHistory: string;
   allergies: string;
   vitals: Vitals;
+  labOrders: LabOrder[];
+  procedures: Procedure[];
   followUp: string;
   instructions: string;
 }
@@ -70,6 +72,8 @@ export default function PrescriptionPreview({
   pastHistory,
   allergies,
   vitals,
+  labOrders,
+  procedures,
   followUp,
   instructions,
 }: PrescriptionPreviewProps) {
@@ -154,28 +158,24 @@ export default function PrescriptionPreview({
         <div className="px-8 py-5 flex-1 flex flex-col">
           <div className="grid grid-cols-3 gap-x-4 gap-y-2 text-sm border-b border-border pb-3">
             <div>
-              <p className="text-muted-foreground text-xs">Patient</p>
-              <p className="font-medium text-foreground">{patient.name}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80">Patient</p>
+              <p className="text-sm text-foreground">{patient.name}</p>
             </div>
             <div>
-              <p className="text-muted-foreground text-xs">MRN</p>
-              <p className="font-medium text-foreground">{patient.mrn}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80">MRN</p>
+              <p className="text-sm text-foreground">{patient.mrn}</p>
             </div>
             <div className="text-right">
-              <p className="text-muted-foreground text-xs">Date</p>
-              <p className="font-medium text-foreground">{today}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80">Date</p>
+              <p className="text-sm text-foreground">{today}</p>
             </div>
             <div>
-              <p className="text-muted-foreground text-xs">Age / Gender</p>
-              <p className="font-medium text-foreground">{patient.age}y / {patient.gender}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80">Age / Gender</p>
+              <p className="text-sm text-foreground">{patient.age}y / {patient.gender}</p>
             </div>
             <div>
-              <p className="text-muted-foreground text-xs">Phone</p>
-              <p className="font-medium text-foreground">{patient.phone}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-muted-foreground text-xs">Blood Group</p>
-              <p className="font-medium text-foreground">{patient.bloodGroup || '-'}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80">Phone</p>
+              <p className="text-sm text-foreground">{patient.phone}</p>
             </div>
           </div>
 
@@ -183,10 +183,10 @@ export default function PrescriptionPreview({
             <div className="border-r border-border px-4 py-4 space-y-4">
               {diagnoses.length > 0 && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Diagnosis</h3>
+                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Diagnosis</h3>
                   <div className="space-y-1.5">
                     {diagnoses.map(dx => (
-                      <p key={dx.id} className="text-sm leading-5 text-foreground">
+                      <p key={dx.id} className="text-sm leading-5 font-normal text-foreground">
                         {dx.name}
                         {dx.code && <span className="text-muted-foreground"> ({dx.code})</span>}
                         {dx.isPrimary && <span className="text-xs text-primary font-medium"> Primary</span>}
@@ -198,28 +198,28 @@ export default function PrescriptionPreview({
 
               {chiefComplaint && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Chief Complaint</h3>
-                  <p className="text-sm leading-5 text-foreground whitespace-pre-line">{chiefComplaint}</p>
+                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Chief Complaint</h3>
+                  <p className="text-sm leading-5 font-normal text-foreground whitespace-pre-line">{chiefComplaint}</p>
                 </section>
               )}
 
               {pastHistory && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Past Medical History</h3>
-                  <p className="text-sm leading-5 text-foreground whitespace-pre-line">{pastHistory}</p>
+                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Past Medical History</h3>
+                  <p className="text-sm leading-5 font-normal text-foreground whitespace-pre-line">{pastHistory}</p>
                 </section>
               )}
 
               {allergies && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Allergies</h3>
-                  <p className="text-sm leading-5 text-foreground whitespace-pre-line">{allergies}</p>
+                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Allergies</h3>
+                  <p className="text-sm leading-5 font-normal text-foreground whitespace-pre-line">{allergies}</p>
                 </section>
               )}
 
               {compactVitals.length > 0 && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Vitals</h3>
+                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Vitals</h3>
                   <div className="flex flex-wrap gap-1.5">
                     {compactVitals.map(item => (
                       <span key={item.label} className="rounded-full border border-border bg-muted/40 px-2 py-1 text-[11px] text-foreground">
@@ -234,7 +234,7 @@ export default function PrescriptionPreview({
             <div className="px-5 py-4 flex flex-col">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-2xl font-serif font-bold text-primary">℞</span>
-                <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Prescription</h3>
+                <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider">Prescription</h3>
               </div>
 
               {medications.length === 0 ? (
@@ -250,7 +250,7 @@ export default function PrescriptionPreview({
 
                         return (
                           <>
-                      <p className="text-sm font-semibold leading-5 text-foreground">
+                      <p className="text-sm font-medium leading-5 text-foreground">
                         {index + 1}. {med.name}
                         {med.strength && <span className="font-medium"> - {med.strength}</span>}
                         {med.form && <span className="font-medium"> {med.form}</span>}
@@ -288,14 +288,52 @@ export default function PrescriptionPreview({
                 <div className="mt-4 space-y-2">
                   {instructions && (
                     <section>
-                      <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Instructions</h3>
-                      <p className="text-sm leading-5 text-foreground whitespace-pre-line">{instructions}</p>
+                      <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Instructions</h3>
+                      <p className="text-sm leading-5 font-normal text-foreground whitespace-pre-line">{instructions}</p>
                     </section>
                   )}
                   {followUp && (
                     <section>
-                      <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Follow-up</h3>
-                      <p className="text-sm leading-5 text-foreground whitespace-pre-line">{followUp}</p>
+                      <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Follow-up</h3>
+                      <p className="text-sm leading-5 font-normal text-foreground whitespace-pre-line">{followUp}</p>
+                    </section>
+                  )}
+                </div>
+              )}
+
+              {(procedures.length > 0 || labOrders.length > 0) && (
+                <div className="mt-5 space-y-3 border-t border-border pt-4">
+                  {procedures.length > 0 && (
+                    <section>
+                      <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Procedures</h3>
+                      <div className="space-y-1.5">
+                        {procedures.map((procedure, index) => (
+                          <div key={procedure.id} className="text-sm leading-5 text-foreground">
+                            <p>{index + 1}. {procedure.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {[procedure.category, procedure.notes].filter(Boolean).join(' • ') || 'Procedure added during consultation'}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {labOrders.length > 0 && (
+                    <section>
+                      <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">
+                        Investigations / Radiology
+                      </h3>
+                      <div className="space-y-1.5">
+                        {labOrders.map((order, index) => (
+                          <div key={order.id} className="text-sm leading-5 text-foreground">
+                            <p>{index + 1}. {order.testName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {[order.category, order.priority?.toUpperCase()].filter(Boolean).join(' • ')}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
                     </section>
                   )}
                 </div>

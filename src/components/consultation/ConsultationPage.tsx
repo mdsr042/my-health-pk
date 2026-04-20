@@ -183,6 +183,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [lastVisitExpanded, setLastVisitExpanded] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [diagnosisQuery, setDiagnosisQuery] = useState('');
   const [pastHistoryQuery, setPastHistoryQuery] = useState('');
 
@@ -299,6 +300,11 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     markUnsaved(patientId, true);
     toast.success(`${template.name} template applied`);
   }, [markUnsaved, patientId, templates]);
+
+  const applyQuickTemplateAndClose = useCallback((templateId: string) => {
+    applyConsultationTemplate(templateId);
+    setTemplatePickerOpen(false);
+  }, [applyConsultationTemplate]);
 
   const reusePreviousDiagnoses = useCallback(() => {
     if (!latestPreviousNote?.diagnoses.length) {
@@ -640,6 +646,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
   const quickActions = [
     { label: 'Diagnosis', icon: Plus, color: 'text-primary', action: () => setDiagnosisOpen(true) },
+    { label: 'Template', icon: LayoutTemplate, color: 'text-primary', action: () => setTemplatePickerOpen(true) },
     { label: 'Procedure', icon: Stethoscope, color: 'text-primary', action: () => setProcedureOpen(true) },
     { label: 'Medication', icon: Pill, color: 'text-success', action: () => setMedicationOpen(true) },
     { label: 'Lab Order', icon: FlaskConical, color: 'text-warning', action: () => openLabModal('lab') },
@@ -699,6 +706,16 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     vitals.temp ? `Temp ${vitals.temp}` : '',
     vitals.spo2 ? `SpO₂ ${vitals.spo2}%` : '',
   ].filter(Boolean);
+  const visibleVitals = [
+    { key: 'bp', label: 'Blood Pressure', value: vitals.bp },
+    { key: 'pulse', label: 'Pulse', value: vitals.pulse ? `${vitals.pulse}` : '' },
+    { key: 'temp', label: 'Temperature', value: vitals.temp ? `${vitals.temp} °F` : '' },
+    { key: 'spo2', label: 'SpO₂', value: vitals.spo2 ? `${vitals.spo2}%` : '' },
+    { key: 'weight', label: 'Weight', value: vitals.weight ? `${vitals.weight} kg` : '' },
+    { key: 'height', label: 'Height', value: vitals.height ? `${vitals.height} cm` : '' },
+    { key: 'bmi', label: 'BMI', value: vitals.bmi || '' },
+    { key: 'respiratoryRate', label: 'Resp. Rate', value: vitals.respiratoryRate ? `${vitals.respiratoryRate}/min` : '' },
+  ];
   const fullVitalFields = [
     { key: 'bp', label: 'Blood Pressure', icon: Heart },
     { key: 'pulse', label: 'Pulse', icon: Activity },
@@ -712,7 +729,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const clinicalFieldGroups = [
     {
       title: 'Symptoms & History',
-      fields: clinicalFieldConfigs.filter(field => ['chiefComplaint', 'hpi', 'pastHistory', 'allergies'].includes(field.key)),
+      fields: ['chiefComplaint', 'pastHistory', 'hpi', 'allergies']
+        .map(key => clinicalFieldConfigs.find(field => field.key === key))
+        .filter(Boolean),
     },
     {
       title: 'Assessment & Plan',
@@ -1004,18 +1023,21 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                           <h3 className="font-semibold text-foreground mb-1 flex items-center gap-2">
                             <Activity className="w-4 h-4 text-primary" /> Vitals
                           </h3>
-                          <p className="text-xs text-muted-foreground">Keep vitals compact here and open the full entry only when needed.</p>
+                          <p className="text-xs text-muted-foreground">All current vitals are visible here, and the edit button opens the full vitals form.</p>
                         </div>
                         <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setVitalsOpen(true)}>
                           <PencilLine className="w-3.5 h-3.5" /> {compactVitals.length > 0 ? 'Edit Vitals' : 'Add Vitals'}
                         </Button>
                       </div>
-                      {compactVitals.length === 0 ? (
+                      {visibleVitals.every(item => !item.value) ? (
                         <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No vitals added yet</p>
                       ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {compactVitals.map(item => (
-                            <Badge key={item} variant="outline" className="text-[10px]">{item}</Badge>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {visibleVitals.map(item => (
+                            <div key={item.key} className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{item.label}</p>
+                              <p className="mt-1 text-sm text-foreground">{item.value || 'Not added'}</p>
+                            </div>
                           ))}
                         </div>
                       )}
@@ -1399,6 +1421,8 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                 pastHistory={pastHistory}
                 allergies={allergies}
                 vitals={vitals}
+                labOrders={labOrders}
+                procedures={procedures}
                 followUp={followUp}
                 instructions={instructions}
               />
@@ -1490,6 +1514,46 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         template={null}
         onSave={handleCreateTemplate}
       />
+      <Dialog open={templatePickerOpen} onOpenChange={setTemplatePickerOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <LayoutTemplate className="w-5 h-5 text-primary" />
+              Treatment Templates
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {templatesLoading ? (
+              <p className="text-sm text-muted-foreground">Loading treatment templates...</p>
+            ) : templates.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No treatment templates saved yet.</p>
+            ) : (
+              <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1 scrollbar-thin">
+                {templates.map(template => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => applyQuickTemplateAndClose(template.id)}
+                    className="w-full rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">{template.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {[template.conditionLabel, `${template.diagnoses.length} diagnoses`, `${template.medications.length} medicines`, `${template.labOrders.length} investigations`]
+                            .filter(Boolean)
+                            .join(' • ')}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-[10px]">Apply</Badge>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={vitalsOpen} onOpenChange={setVitalsOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>

@@ -1,17 +1,24 @@
-import React, { ReactNode, useState } from 'react';
+import React, { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import { useData } from '@/contexts/DataContext';
+import AppointmentBookingDialog from '@/components/appointments/AppointmentBookingDialog';
+import WalkInModal from '@/components/consultation/WalkInModal';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { readStorage, writeStorage } from '@/lib/storage';
 import { mergeAppSettings, SETTINGS_SECTION_OVERVIEW, SETTINGS_STORAGE_KEY, SETTINGS_UPDATED_EVENT } from '@/lib/app-defaults';
 import {
   LayoutDashboard, Users, CalendarDays, FileText, Settings, LogOut,
-  Stethoscope, ChevronDown, Bell, Search, Menu, X, FolderOpen, PanelLeftClose, PanelLeftOpen, UserCircle2
+  Stethoscope, ChevronDown, Bell, Search, Menu, X, FolderOpen, PanelLeftClose, PanelLeftOpen, UserCircle2, UserPlus, CalendarPlus, PlayCircle, FileSearch, Eye
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
+import type { Appointment, Patient } from '@/data/mockData';
+import { getLocalDateKey } from '@/lib/date';
+import { toast } from 'sonner';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -28,28 +35,107 @@ const navItems = [
 ];
 
 export default function AppLayout({ children, currentPage, onNavigate, onOpenPatient }: AppLayoutProps) {
-  const { doctor, activeClinic, doctorClinics, switchClinic, logout } = useAuth();
+  const { doctor, activeClinic, doctorClinics, switchClinic, logout, user } = useAuth();
   const { tabs, activeTabId, setActiveTab, closeTab } = usePatientTabs();
-  const { patients } = useData();
+  const { patients, appointments, upsertAppointment, searchPatients, getPatientNotes } = useData();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => mergeAppSettings(readStorage(SETTINGS_STORAGE_KEY, {})).sidebarCollapsed);
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-
-  const searchResults = search.trim()
-    ? patients
-        .filter(patient =>
-          patient.name.toLowerCase().includes(search.toLowerCase()) ||
-          patient.mrn.toLowerCase().includes(search.toLowerCase()) ||
-          patient.phone.includes(search)
-        )
-        .slice(0, 6)
-    : [];
+  const [walkInOpen, setWalkInOpen] = useState(false);
+  const [bookingPatient, setBookingPatient] = useState<Patient | null>(null);
+  const [previewPatient, setPreviewPatient] = useState<Patient | null>(null);
+  const [searchResults, setSearchResults] = useState<Patient[]>([]);
+  const [isSearchingPatients, setIsSearchingPatients] = useState(false);
+  const [highlightedSearchIndex, setHighlightedSearchIndex] = useState(-1);
 
   const handleSelectPatient = (patientId: string) => {
     onOpenPatient(patientId);
     setSearch('');
     setSearchOpen(false);
+  };
+
+  const getLatestAppointment = (patientId: string) =>
+    appointments
+      .filter(appointment => appointment.patientId === patientId)
+      .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.tokenNumber - a.tokenNumber)[0] ?? null;
+
+  const getPatientSearchMeta = (patient: Patient) => {
+    const latestAppointment = getLatestAppointment(patient.id);
+    const latestStatus = latestAppointment?.status || '';
+    const latestNote = getPatientNotes(patient.id)[0];
+    const latestDiagnosis = latestNote?.diagnoses.find(dx => dx.isPrimary)?.name || latestNote?.diagnoses[0]?.name || '';
+    const latestVisitDate = latestNote?.date
+      ? new Date(latestNote.date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })
+      : '';
+
+    return {
+      latestAppointment,
+      latestStatus,
+      latestNote,
+      latestDiagnosis,
+      latestVisitDate,
+      hasRecord: Boolean(latestNote),
+      isCompletedPatient: latestStatus === 'completed',
+    };
+  };
+
+  const handleOpenPreview = (patient: Patient) => {
+    setPreviewPatient(patient);
+    setSearchOpen(false);
+  };
+
+  const handleOpenRecord = (patient: Patient) => {
+    if (getPatientNotes(patient.id).length === 0) {
+      setPreviewPatient(patient);
+      setSearchOpen(false);
+      toast.info('No visit record yet', { description: 'Showing patient summary and appointment continuity instead.' });
+      return;
+    }
+
+    onNavigate('records');
+    window.dispatchEvent(new CustomEvent('records:focus-patient', { detail: { patientId: patient.id } }));
+    setSearch('');
+    setSearchOpen(false);
+  };
+
+  const handleBookAppointment = (patient: Patient) => {
+    setBookingPatient(patient);
+    setSearchOpen(false);
+  };
+
+  const handleBookNextAppointment = async (form: {
+    id: string;
+    patientId: string;
+    clinicId: string;
+    date: string;
+    time: string;
+    type: Appointment['type'];
+    status: Appointment['status'];
+    chiefComplaint: string;
+    tokenNumber: number;
+  }) => {
+    if (!form.patientId || !form.clinicId || !form.date || !form.time) {
+      toast.error('Please complete clinic, date, and time');
+      return;
+    }
+
+    await upsertAppointment({
+      id: '',
+      patientId: form.patientId,
+      clinicId: form.clinicId,
+      doctorId: user?.id || 'doctor',
+      date: form.date,
+      time: form.time,
+      status: form.status,
+      type: form.type,
+      chiefComplaint: form.chiefComplaint.trim(),
+      tokenNumber: 0,
+    });
+
+    toast.success('Appointment booked');
+    setBookingPatient(null);
+    setSearch('');
   };
 
   const persistSidebarCollapsed = (nextCollapsed: boolean) => {
@@ -71,6 +157,52 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
     window.addEventListener(SETTINGS_UPDATED_EVENT, handleSettingsUpdate);
     return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, handleSettingsUpdate);
   }, []);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const trimmedSearch = search.trim();
+    if (!trimmedSearch) {
+      setSearchResults([]);
+      setIsSearchingPatients(false);
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setIsSearchingPatients(true);
+      void searchPatients(trimmedSearch)
+        .then(results => {
+          if (!active) return;
+          setSearchResults(results.slice(0, 6));
+        })
+        .catch(() => {
+          if (!active) return;
+          setSearchResults(
+            patients
+              .filter(patient =>
+                patient.name.toLowerCase().includes(trimmedSearch.toLowerCase())
+                || patient.mrn.toLowerCase().includes(trimmedSearch.toLowerCase())
+                || patient.phone.includes(trimmedSearch)
+              )
+              .slice(0, 6)
+          );
+        })
+        .finally(() => {
+          if (active) {
+            setIsSearchingPatients(false);
+          }
+        });
+    }, 250);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [patients, search, searchOpen, searchPatients]);
+
+  useEffect(() => {
+    setHighlightedSearchIndex(searchResults.length > 0 ? 0 : -1);
+  }, [searchResults]);
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -239,6 +371,10 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
 
           <div className="flex-1" />
 
+          <Button className="hidden md:inline-flex gap-2" onClick={() => setWalkInOpen(true)}>
+            <UserPlus className="w-4 h-4" /> Walk-in
+          </Button>
+
           <div className="relative hidden md:block">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -247,25 +383,129 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
               onFocus={() => setSearchOpen(true)}
               onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
               onChange={event => setSearch(event.target.value)}
+              onKeyDown={event => {
+                if (!searchOpen || searchResults.length === 0) return;
+
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setHighlightedSearchIndex(prev => (prev + 1) % searchResults.length);
+                  return;
+                }
+
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setHighlightedSearchIndex(prev => (prev <= 0 ? searchResults.length - 1 : prev - 1));
+                  return;
+                }
+
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  const targetPatient = searchResults[highlightedSearchIndex] ?? searchResults[0];
+                  if (targetPatient) {
+                    handleOpenPreview(targetPatient);
+                  }
+                  return;
+                }
+
+                if (event.key === 'Escape') {
+                  setSearchOpen(false);
+                }
+              }}
               className="w-64 h-9 pl-9 pr-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             {searchOpen && search.trim() && (
-              <div className="absolute top-11 left-0 w-80 rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+              <div className="absolute top-11 left-0 w-[28rem] rounded-lg border border-border bg-card shadow-lg overflow-hidden">
                 {searchResults.length > 0 ? (
-                  <div className="py-1">
-                    {searchResults.map(patient => (
-                      <button
-                        key={patient.id}
-                        type="button"
-                        onMouseDown={event => event.preventDefault()}
-                        onClick={() => handleSelectPatient(patient.id)}
-                        className="w-full px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
-                      >
-                        <p className="text-sm font-medium text-foreground">{patient.name}</p>
-                        <p className="text-xs text-muted-foreground">{patient.mrn} • {patient.phone}</p>
-                      </button>
-                    ))}
+                  <div className="py-2">
+                    {searchResults.map((patient, index) => {
+                      const {
+                        latestStatus,
+                        latestDiagnosis,
+                        latestVisitDate,
+                        hasRecord,
+                        isCompletedPatient,
+                      } = getPatientSearchMeta(patient);
+
+                      return (
+                        <div
+                          key={patient.id}
+                          className={`border-b border-border/60 px-4 py-3 last:border-b-0 ${index === highlightedSearchIndex ? 'bg-primary/5' : ''}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">{patient.name}</p>
+                              <p className="text-xs text-muted-foreground">{patient.mrn} • {patient.phone || 'No phone'}</p>
+                              <p className="mt-1 text-[11px] text-muted-foreground">
+                                {latestVisitDate ? `Last visit ${latestVisitDate}` : 'No completed visit yet'}
+                                {latestDiagnosis ? ` • ${latestDiagnosis}` : ''}
+                              </p>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                <Badge variant="outline">Patient</Badge>
+                                <Badge variant="outline" className={hasRecord ? 'border-slate-200 bg-slate-50 text-slate-700' : 'border-dashed'}>
+                                  {hasRecord ? 'Record Available' : 'No Record Yet'}
+                                </Badge>
+                                {latestStatus && (
+                                  <Badge
+                                    variant="outline"
+                                    className={
+                                      latestStatus === 'completed'
+                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                        : latestStatus === 'in-consultation'
+                                          ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                          : latestStatus === 'waiting'
+                                            ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                            : ''
+                                    }
+                                  >
+                                    {latestStatus === 'in-consultation' ? 'In Consultation' : latestStatus.replace('-', ' ')}
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 gap-1.5 text-xs"
+                              onMouseDown={event => event.preventDefault()}
+                              onClick={() => handleOpenPreview(patient)}
+                            >
+                              <Eye className="h-3.5 w-3.5" /> Preview
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 gap-1.5 text-xs"
+                              onMouseDown={event => event.preventDefault()}
+                              onClick={() => handleOpenRecord(patient)}
+                            >
+                              <FileSearch className="h-3.5 w-3.5" /> Open Record
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="h-8 gap-1.5 text-xs"
+                              onMouseDown={event => event.preventDefault()}
+                              onClick={() => handleSelectPatient(patient.id)}
+                            >
+                              <PlayCircle className="h-3.5 w-3.5" /> New Visit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={isCompletedPatient ? 'default' : 'outline'}
+                              className="h-8 gap-1.5 text-xs"
+                              onMouseDown={event => event.preventDefault()}
+                              onClick={() => handleBookAppointment(patient)}
+                            >
+                              <CalendarPlus className="h-3.5 w-3.5" /> {isCompletedPatient ? 'Book Next Appointment' : 'Book Appointment'}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
+                ) : isSearchingPatients ? (
+                  <div className="px-3 py-3 text-sm text-muted-foreground">Searching patients...</div>
                 ) : (
                   <div className="px-3 py-3 text-sm text-muted-foreground">No patients found</div>
                 )}
@@ -326,6 +566,109 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
           {children}
         </main>
       </div>
+
+      <Sheet open={Boolean(previewPatient)} onOpenChange={open => !open && setPreviewPatient(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-md">
+          {previewPatient && (() => {
+            const meta = getPatientSearchMeta(previewPatient);
+            return (
+              <>
+                <SheetHeader>
+                  <SheetTitle>{previewPatient.name}</SheetTitle>
+                  <SheetDescription>
+                    {previewPatient.mrn} • {previewPatient.phone || 'No phone on file'}
+                  </SheetDescription>
+                </SheetHeader>
+
+                <div className="mt-6 space-y-5">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                      <p className="text-[11px] font-medium text-muted-foreground">Current Status</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">
+                        {meta.latestStatus ? (meta.latestStatus === 'in-consultation' ? 'In Consultation' : meta.latestStatus.replace('-', ' ')) : 'No active appointment'}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                      <p className="text-[11px] font-medium text-muted-foreground">Last Visit</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">{meta.latestVisitDate || 'Not available yet'}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                      <p className="text-[11px] font-medium text-muted-foreground">Latest Diagnosis</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">{meta.latestDiagnosis || 'Not available yet'}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                      <p className="text-[11px] font-medium text-muted-foreground">Record Type</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">{meta.hasRecord ? 'Record Available' : 'Patient Summary Only'}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/60 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Patient Summary</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <p className="text-[11px] font-medium text-muted-foreground">Age / Gender</p>
+                        <p className="text-sm text-foreground">{previewPatient.age}y / {previewPatient.gender}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium text-muted-foreground">CNIC</p>
+                        <p className="text-sm text-foreground">{previewPatient.cnic || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium text-muted-foreground">Blood Group</p>
+                        <p className="text-sm text-foreground">{previewPatient.bloodGroup || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium text-muted-foreground">Emergency Contact</p>
+                        <p className="text-sm text-foreground">{previewPatient.emergencyContact || '-'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button className="gap-2" onClick={() => { setPreviewPatient(null); handleSelectPatient(previewPatient.id); }}>
+                      <PlayCircle className="h-4 w-4" /> New Visit
+                    </Button>
+                    <Button variant="outline" className="gap-2" onClick={() => { setPreviewPatient(null); handleBookAppointment(previewPatient); }}>
+                      <CalendarPlus className="h-4 w-4" /> {meta.isCompletedPatient ? 'Book Next Appointment' : 'Book Appointment'}
+                    </Button>
+                    <Button variant="outline" className="gap-2" onClick={() => { setPreviewPatient(null); handleOpenRecord(previewPatient); }}>
+                      <FileSearch className="h-4 w-4" /> Open Record
+                    </Button>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </SheetContent>
+      </Sheet>
+
+      <WalkInModal
+        open={walkInOpen}
+        onClose={() => setWalkInOpen(false)}
+        onPatientCreated={(patientId) => {
+          toast.success('Walk-in patient added to queue');
+          setWalkInOpen(false);
+          onOpenPatient(patientId);
+        }}
+      />
+      <AppointmentBookingDialog
+        open={Boolean(bookingPatient)}
+        onOpenChange={open => !open && setBookingPatient(null)}
+        title="Book Next Appointment"
+        mode="next"
+        patient={bookingPatient}
+        patients={patients}
+        searchPatients={searchPatients}
+        clinics={doctorClinics}
+        defaultClinicId={activeClinic?.id}
+        defaultDate={(() => {
+          const next = new Date();
+          next.setDate(next.getDate() + 1);
+          return getLocalDateKey(next);
+        })()}
+        defaultType="follow-up"
+        onSubmit={handleBookNextAppointment}
+      />
     </div>
   );
 }

@@ -191,6 +191,8 @@ export interface MedicationCatalogEntry {
   strengthText: string;
   dosageForm: string;
   route: string;
+  sourceType?: 'drap' | 'custom';
+  customMedicationId?: string;
 }
 
 export interface MedicationCatalogDetail extends MedicationCatalogEntry {

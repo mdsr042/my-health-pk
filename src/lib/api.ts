@@ -292,6 +292,20 @@ export async function fetchMedicationCatalogDetail(registrationNo: string) {
   return result.data;
 }
 
+export async function saveCustomMedication(payload: {
+  name: string;
+  generic: string;
+  strength: string;
+  form: string;
+  route: string;
+}) {
+  const result = await request<{ data: MedicationCatalogEntry }>('/custom-medications', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
 export async function fetchMedicationFavorites() {
   const result = await request<{ data: MedicationFavorite[] }>('/medication-favorites');
   return result.data;

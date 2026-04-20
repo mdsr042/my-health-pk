@@ -193,6 +193,14 @@ export const medicationEnrichmentImportSchema = z.object({
   enrichmentStatus: z.enum(['missing', 'partial', 'complete']).default('partial'),
 });
 
+export const customMedicationSchema = z.object({
+  name: trimmedString('Medication name'),
+  generic: z.string().trim().max(255).default(''),
+  strength: z.string().trim().max(120).default(''),
+  form: z.string().trim().max(120).default(''),
+  route: z.string().trim().max(120).default(''),
+});
+
 export const referralSpecialtySchema = z.object({
   name: trimmedString('Specialty name'),
 });
