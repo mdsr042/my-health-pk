@@ -57,6 +57,7 @@ const __dirname = path.dirname(__filename);
 const distDir = path.resolve(__dirname, '../dist');
 const isProduction = process.env.NODE_ENV === 'production';
 const enablePublicDemo = process.env.ENABLE_PUBLIC_DEMO === 'true';
+const warmMedicationCatalogOnBoot = process.env.WARM_MEDICATION_CATALOG === 'true';
 
 const authRateLimit = createRateLimitMiddleware({
   windowMs: 15 * 60 * 1000,
@@ -3313,10 +3314,16 @@ initDb()
       logWarn('public_demo_enabled_in_production', {});
     }
 
-    await warmMedicationCatalog();
+    if (warmMedicationCatalogOnBoot) {
+      await warmMedicationCatalog();
+    }
 
     app.listen(port, () => {
-      logInfo('server_started', { port, environment: process.env.NODE_ENV || 'development' });
+      logInfo('server_started', {
+        port,
+        environment: process.env.NODE_ENV || 'development',
+        warmMedicationCatalogOnBoot,
+      });
     });
   })
   .catch(error => {

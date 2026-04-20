@@ -44,17 +44,6 @@ async function loadCatalog() {
       const normalizedGeneric = normalizeText(entry.genericName);
       const normalizedCompany = normalizeText(entry.companyName);
       const normalizedRegNo = normalizeText(entry.registrationNo);
-      const searchText = normalizeText([
-        normalizedBrandName,
-        entry.rawDisplayName,
-        entry.genericName,
-        entry.strengthText,
-        entry.dosageForm,
-        entry.route,
-        entry.companyName,
-        entry.registrationNo,
-      ].filter(Boolean).join(' '));
-
       return {
         ...entry,
         brandName: normalizedBrandName,
@@ -62,36 +51,7 @@ async function loadCatalog() {
         _normalizedGeneric: normalizedGeneric,
         _normalizedCompany: normalizedCompany,
         _normalizedRegNo: normalizedRegNo,
-        _searchText: searchText,
       };
-    });
-
-    const prefixIndex = new Map();
-
-    indexedEntries.forEach((entry, index) => {
-      const tokens = new Set(
-        [
-          ...entry._normalizedBrand.split(/[\s/+.-]+/),
-          ...entry._normalizedGeneric.split(/[\s/+.-]+/),
-          ...entry._normalizedCompany.split(/[\s/+.-]+/),
-          ...entry._normalizedRegNo.split(/[\s/+.-]+/),
-        ]
-          .map(token => token.trim())
-          .filter(token => token.length >= 2)
-      );
-
-      tokens.forEach(token => {
-        const maxPrefix = Math.min(token.length, 5);
-        for (let length = 2; length <= maxPrefix; length += 1) {
-          const prefix = token.slice(0, length);
-          const bucket = prefixIndex.get(prefix);
-          if (bucket) {
-            bucket.push(index);
-          } else {
-            prefixIndex.set(prefix, [index]);
-          }
-        }
-      });
     });
 
     catalogCache = {
@@ -102,7 +62,6 @@ async function loadCatalog() {
       },
       entries: indexedEntries,
       entryByRegistrationNo: new Map(indexedEntries.map(entry => [String(entry.registrationNo), entry])),
-      prefixIndex,
     };
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -110,12 +69,11 @@ async function loadCatalog() {
         metadata: {
           generatedAt: null,
           source: 'DRAP Registered Product Data',
-          totalEntries: 0,
-        },
-        entries: [],
-        entryByRegistrationNo: new Map(),
-        prefixIndex: new Map(),
-      };
+        totalEntries: 0,
+      },
+      entries: [],
+      entryByRegistrationNo: new Map(),
+    };
     } else {
       throw error;
     }
@@ -126,6 +84,16 @@ async function loadCatalog() {
 
 function scoreEntry(entry, query) {
   let score = 0;
+  const searchableText = normalizeText([
+    entry.brandName,
+    entry.rawDisplayName,
+    entry.genericName,
+    entry.strengthText,
+    entry.dosageForm,
+    entry.route,
+    entry.companyName,
+    entry.registrationNo,
+  ].filter(Boolean).join(' '));
 
   if (entry._normalizedBrand === query) score += 120;
   if (entry._normalizedGeneric === query) score += 100;
@@ -135,14 +103,13 @@ function scoreEntry(entry, query) {
   if (entry._normalizedGeneric.startsWith(query)) score += 55;
   if (entry._normalizedCompany.startsWith(query)) score += 45;
   if (entry._normalizedRegNo.startsWith(query)) score += 50;
-  if (entry._searchText.includes(query)) score += 20;
+  if (searchableText.includes(query)) score += 20;
 
   return score;
 }
 
 function toSummary(entry) {
   const {
-    _searchText,
     _normalizedBrand,
     _normalizedGeneric,
     _normalizedCompany,
@@ -156,7 +123,7 @@ function toSummary(entry) {
 }
 
 function toDetail(entry) {
-  const { _searchText, _normalizedBrand, _normalizedGeneric, _normalizedCompany, _normalizedRegNo, ...detail } = entry;
+  const { _normalizedBrand, _normalizedGeneric, _normalizedCompany, _normalizedRegNo, ...detail } = entry;
   return detail;
 }
 
@@ -176,17 +143,6 @@ function setCachedQueryResult(cacheKey, result) {
   if (firstKey) {
     queryCache.delete(firstKey);
   }
-}
-
-function getCandidateEntries(catalog, normalizedQuery) {
-  for (let length = Math.min(5, normalizedQuery.length); length >= 2; length -= 1) {
-    const bucket = catalog.prefixIndex.get(normalizedQuery.slice(0, length));
-    if (bucket?.length) {
-      return bucket.map(index => catalog.entries[index]);
-    }
-  }
-
-  return catalog.entries;
 }
 
 export async function searchMedicationCatalog(query, limit = 20, cursor = 0) {
@@ -210,7 +166,7 @@ export async function searchMedicationCatalog(query, limit = 20, cursor = 0) {
     return cached;
   }
 
-  const allMatches = getCandidateEntries(catalog, normalizedQuery)
+  const allMatches = catalog.entries
     .map(entry => ({ entry, score: scoreEntry(entry, normalizedQuery) }))
     .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score || a.entry.brandName.localeCompare(b.entry.brandName));

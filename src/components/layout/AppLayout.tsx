@@ -371,8 +371,13 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
 
           <div className="flex-1" />
 
-          <Button className="hidden md:inline-flex gap-2" onClick={() => setWalkInOpen(true)}>
-            <UserPlus className="w-4 h-4" /> Walk-in
+          <Button
+            className="inline-flex gap-2 px-3 md:px-4"
+            size="sm"
+            onClick={() => setWalkInOpen(true)}
+          >
+            <UserPlus className="w-4 h-4" />
+            <span className="hidden sm:inline">Walk-in</span>
           </Button>
 
           <div className="relative hidden md:block">
