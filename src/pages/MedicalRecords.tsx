@@ -304,30 +304,41 @@ export default function MedicalRecords() {
                           {notes.length} visit{notes.length !== 1 ? 's' : ''} on record
                         </p>
                       </div>
-                      {isPatientExpanded ? (
-                        <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0 mt-1" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0 mt-1" />
-                      )}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5 text-xs"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setBookingPatient(patient);
+                          }}
+                        >
+                          <CalendarPlus className="w-3.5 h-3.5" /> Book Next Appointment
+                        </Button>
+                        {isPatientExpanded ? (
+                          <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                        )}
+                      </div>
                     </div>
                   </button>
 
                   {isPatientExpanded && (
-                    <div className="border-t border-border/60 px-4 pb-4 pt-4">
-                      <div className="space-y-4">
-                        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_320px]">
-                          <div className="rounded-xl border border-border bg-background/90 p-4 space-y-4">
+                    <div className="border-t border-border/60 px-4 pb-4 pt-3">
+                      <div className="space-y-3">
+                        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.7fr)_280px]">
+                          <div className="rounded-xl border border-border bg-background/90 p-3 space-y-3">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
                                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Patient Summary</p>
-                                <p className="text-sm text-muted-foreground mt-0.5">Profile details and continuity actions</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">Profile details and quick continuity actions</p>
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setEditingPatient(patient)}>
                                   <PencilLine className="w-3.5 h-3.5" /> Edit Patient
-                                </Button>
-                                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setBookingPatient(patient)}>
-                                  <CalendarPlus className="w-3.5 h-3.5" /> Book Next Appointment
                                 </Button>
                                 <Button
                                   variant="outline"
@@ -341,7 +352,7 @@ export default function MedicalRecords() {
                               </div>
                             </div>
 
-                            <div className="grid gap-3 rounded-lg border border-border bg-muted/20 p-3 md:grid-cols-2 lg:grid-cols-4">
+                            <div className="grid gap-2 rounded-lg border border-border bg-muted/20 p-3 md:grid-cols-2 xl:grid-cols-3">
                               {[
                                 { label: 'MRN', value: patient.mrn || '-' },
                                 { label: 'Age / Gender', value: `${patient.age}y / ${patient.gender}` },
@@ -349,7 +360,7 @@ export default function MedicalRecords() {
                                 { label: 'CNIC', value: patient.cnic || '-' },
                                 { label: 'Blood Group', value: patient.bloodGroup || '-' },
                                 { label: 'Emergency Contact', value: patient.emergencyContact || '-' },
-                                { label: 'Address', value: patient.address || '-', span: 'lg:col-span-2' },
+                                { label: 'Address', value: patient.address || '-', span: 'xl:col-span-3' },
                               ].map(field => (
                                 <div key={field.label} className={field.span || ''}>
                                   <p className="text-[11px] font-medium text-muted-foreground">{field.label}</p>
@@ -359,15 +370,15 @@ export default function MedicalRecords() {
                             </div>
                           </div>
 
-                          <div className="rounded-xl border border-border bg-muted/20 p-4">
+                          <div className="rounded-xl border border-border bg-muted/20 p-3">
                             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Record Snapshot</p>
-                            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                              <div className="rounded-lg border border-border/60 bg-background/80 p-3">
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-2">
+                              <div className="rounded-lg border border-border/60 bg-background/80 p-2.5">
                                 <p className="text-[11px] font-medium text-muted-foreground">Visits On Record</p>
                                 <p className="text-xl font-semibold text-foreground">{notes.length}</p>
                                 <p className="text-xs text-muted-foreground">{filteredNotes.length} matching current filters</p>
                               </div>
-                              <div className="rounded-lg border border-border/60 bg-background/80 p-3">
+                              <div className="rounded-lg border border-border/60 bg-background/80 p-2.5">
                                 <p className="text-[11px] font-medium text-muted-foreground">Latest Visit</p>
                                 <p className="text-sm font-medium text-foreground">{latestNote ? formatVisitDate(latestNote.date) : '-'}</p>
                                 <div className="mt-1">
@@ -376,13 +387,13 @@ export default function MedicalRecords() {
                                   </Badge>
                                 </div>
                               </div>
-                              <div className="rounded-lg border border-border/60 bg-background/80 p-3">
+                              <div className="rounded-lg border border-border/60 bg-background/80 p-2.5">
                                 <p className="text-[11px] font-medium text-muted-foreground">Primary Diagnosis</p>
                                 <p className="text-sm text-foreground">
                                   {latestNote?.diagnoses.find(dx => dx.isPrimary)?.name || latestNote?.diagnoses[0]?.name || '-'}
                                 </p>
                               </div>
-                              <div className="rounded-lg border border-border/60 bg-background/80 p-3">
+                              <div className="rounded-lg border border-border/60 bg-background/80 p-2.5">
                                 <p className="text-[11px] font-medium text-muted-foreground">Last Medication</p>
                                 <p className="text-sm text-foreground">{latestNote?.medications[0]?.name || '-'}</p>
                               </div>
@@ -391,7 +402,7 @@ export default function MedicalRecords() {
                         </div>
 
                         {latestNote && (
-                          <div className="rounded-xl border border-border bg-background/90 p-4 space-y-4">
+                          <div className="rounded-xl border border-border bg-background/90 p-3 space-y-3">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
                                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest Visit</p>
@@ -416,26 +427,26 @@ export default function MedicalRecords() {
                               </div>
                             </div>
 
-                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                              <div className="rounded-lg bg-muted/40 p-3">
+                            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                              <div className="rounded-lg bg-muted/40 p-2.5">
                                 <p className="text-[11px] font-medium text-muted-foreground">Primary Diagnosis</p>
                                 <p className="text-sm text-foreground">
                                   {latestNote.diagnoses.find(dx => dx.isPrimary)?.name || latestNote.diagnoses[0]?.name || '-'}
                                 </p>
                               </div>
-                              <div className="rounded-lg bg-muted/40 p-3">
+                              <div className="rounded-lg bg-muted/40 p-2.5">
                                 <p className="text-[11px] font-medium text-muted-foreground">Medications</p>
                                 <p className="text-sm text-foreground">
                                   {latestNote.medications.slice(0, 2).map(med => med.name).join(', ') || '-'}
                                 </p>
                               </div>
-                              <div className="rounded-lg bg-muted/40 p-3">
+                              <div className="rounded-lg bg-muted/40 p-2.5">
                                 <p className="text-[11px] font-medium text-muted-foreground">Investigations</p>
                                 <p className="text-sm text-foreground">
                                   {latestNote.labOrders.slice(0, 2).map(lab => lab.testName).join(', ') || '-'}
                                 </p>
                               </div>
-                              <div className="rounded-lg bg-muted/40 p-3">
+                              <div className="rounded-lg bg-muted/40 p-2.5">
                                 <p className="text-[11px] font-medium text-muted-foreground">Follow-up Advice</p>
                                 <p className="text-sm text-foreground">{latestNote.followUp || '-'}</p>
                               </div>

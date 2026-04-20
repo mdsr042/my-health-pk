@@ -166,7 +166,7 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
             <UserPlus className="w-5 h-5 text-primary" /> Register Walk-in Patient
           </DialogTitle>
         </DialogHeader>
-        <div className="grid gap-4 py-2">
+        <form className="grid gap-4 py-2" autoComplete="off">
           <div className="rounded-lg border border-border bg-muted/20 p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Existing Patient Lookup</p>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -178,6 +178,8 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
                     placeholder="Search by MRN"
                     value={lookupMrn}
                     onChange={e => setLookupMrn(e.target.value)}
+                    autoComplete="off"
+                    name="walkin-mrn-search"
                   />
                   {isSearching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
                 </div>
@@ -190,6 +192,8 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
                     placeholder="03XX-XXXXXXX"
                     value={form.phone}
                     onChange={e => update('phone', e.target.value)}
+                    autoComplete="off"
+                    name="walkin-phone"
                   />
                   {isSearching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
                 </div>
@@ -235,17 +239,19 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
                 placeholder="e.g. Muhammad Ali Khan"
                 value={form.name}
                 onChange={e => update('name', e.target.value)}
+                autoComplete="off"
+                name="walkin-full-name"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="walkin-cnic">CNIC</Label>
-              <Input id="walkin-cnic" placeholder="XXXXX-XXXXXXX-X" value={form.cnic} onChange={e => update('cnic', e.target.value)} disabled={isLocked} />
+              <Input id="walkin-cnic" placeholder="XXXXX-XXXXXXX-X" value={form.cnic} onChange={e => update('cnic', e.target.value)} disabled={isLocked} autoComplete="off" name="walkin-cnic" />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="walkin-age">Age <span className="text-destructive">*</span></Label>
-              <Input id="walkin-age" type="number" placeholder="Years" value={form.age} onChange={e => update('age', e.target.value)} disabled={isLocked} />
+              <Input id="walkin-age" type="number" placeholder="Years" value={form.age} onChange={e => update('age', e.target.value)} disabled={isLocked} autoComplete="off" name="walkin-age" />
             </div>
             <div className="space-y-1.5">
               <Label>Gender <span className="text-destructive">*</span></Label>
@@ -271,17 +277,17 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="walkin-address">Address</Label>
-            <Input id="walkin-address" placeholder="House / Street / Area" value={form.address} onChange={e => update('address', e.target.value)} disabled={isLocked} />
+            <Input id="walkin-address" placeholder="House / Street / Area" value={form.address} onChange={e => update('address', e.target.value)} disabled={isLocked} autoComplete="off" name="walkin-address" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="walkin-emergency">Emergency Contact</Label>
-            <Input id="walkin-emergency" placeholder="Name — Phone" value={form.emergencyContact} onChange={e => update('emergencyContact', e.target.value)} disabled={isLocked} />
+            <Input id="walkin-emergency" placeholder="Name — Phone" value={form.emergencyContact} onChange={e => update('emergencyContact', e.target.value)} disabled={isLocked} autoComplete="off" name="walkin-emergency-contact" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="walkin-complaint">Chief Complaint</Label>
-            <Textarea id="walkin-complaint" placeholder="Reason for visit..." rows={2} value={form.chiefComplaint} onChange={e => update('chiefComplaint', e.target.value)} />
+            <Textarea id="walkin-complaint" placeholder="Reason for visit..." rows={2} value={form.chiefComplaint} onChange={e => update('chiefComplaint', e.target.value)} autoComplete="off" name="walkin-chief-complaint" />
           </div>
-        </div>
+        </form>
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => handleOpenChange(false)}>Cancel</Button>
           <Button onClick={() => void handleSubmit()} className="gap-2">
