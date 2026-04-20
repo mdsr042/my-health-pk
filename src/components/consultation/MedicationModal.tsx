@@ -4,7 +4,6 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import type { Medication } from '@/data/mockData';
 import {
   addMedicationFavorite,
@@ -40,7 +39,7 @@ const instructionPresets = [
   { value: 'custom', en: 'Custom instruction', ur: '' },
 ] as const;
 
-const dosePatternSnippets = ['1+1+1', '1+0+1', '1+1'] as const;
+const dosePatternSnippets = ['1+1+1', '1+0+1', '1+1', '5+5', '0+0+3'] as const;
 
 const customForms = ['Tablet', 'Capsule', 'Syrup', 'Drops', 'Injection', 'Inhaler', 'Cream', 'Gel'] as const;
 const customRoutes = ['Oral', 'Injectable', 'Topical', 'Ophthalmic', 'Inhalation', 'Nasal'] as const;
@@ -447,7 +446,7 @@ export default function MedicationModal({
 
   const patternError = useMemo(() => {
     if (!dosePattern.trim() || parsedPattern) return '';
-    return 'Use 1, 1+1, 1+0+1, 1+1+1, or special codes SOS / HS.';
+    return 'Use patterns like 1, 1+1, 1+0+1, 5+5, 0+0+3, or special codes SOS / HS.';
   }, [dosePattern, parsedPattern]);
   const requiredDosePatternError = selected && !dosePattern.trim() ? 'Dose pattern is required before adding this medication.' : '';
   const canSubmitMedication = Boolean(selected && selected.name.trim() && dosePattern.trim() && parsedPattern);
@@ -1218,13 +1217,23 @@ export default function MedicationModal({
                             <Input
                               value={dosePattern}
                               onChange={e => handleDosePatternChange(e.target.value)}
-                              placeholder="1 / 1+1 / 1+0+1 / SOS / HS"
+                              placeholder="1 / 1+1 / 1+0+1 / 5+5 / 0+0+3 / SOS / HS"
                               className="h-8 text-sm"
                             />
-                            <p className="text-[11px] text-muted-foreground">Examples: 1, 1+1, 1+0+1, 1+1+1, SOS, HS</p>
+                            <p className="text-[11px] text-muted-foreground">Examples: 1, 1+1, 1+0+1, 5+5, 0+0+3, SOS, HS</p>
                             {(patternError || requiredDosePatternError) && (
                               <p className="text-[11px] text-destructive">{patternError || requiredDosePatternError}</p>
                             )}
+                            {parsedPattern?.slots?.length ? (
+                              <div className="flex flex-wrap gap-1.5 pt-1">
+                                {parsedPattern.slots.map(slot => (
+                                  <Badge key={`${slot.timing}-${slot.quantity}`} variant="outline" className="gap-1 px-2 py-1 text-[10px]">
+                                    <span>{slot.labelEn}</span>
+                                    {languageMode !== 'en' && <span dir="rtl" className="text-muted-foreground">{slot.labelUr}</span>}
+                                  </Badge>
+                                ))}
+                              </div>
+                            ) : null}
                           </div>
                           <div className="space-y-1.5">
                             <Label className="text-xs">Frequency</Label>
@@ -1305,14 +1314,14 @@ export default function MedicationModal({
                         {languageMode !== 'ur' && (
                           <div className="space-y-1.5">
                             <Label className="text-xs">Instructions (English)</Label>
-                            <Textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} rows={2} className="text-sm resize-none" />
+                            <Input value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} className="h-8 text-sm" />
                           </div>
                         )}
 
                         {languageMode !== 'en' && (
                           <div className="space-y-1.5">
                             <Label className="text-xs">Instructions (Urdu)</Label>
-                            <Textarea value={customInstructionsUrdu} onChange={e => setCustomInstructionsUrdu(e.target.value)} dir="rtl" rows={2} className="text-sm resize-none" />
+                            <Input value={customInstructionsUrdu} onChange={e => setCustomInstructionsUrdu(e.target.value)} dir="rtl" className="h-8 text-sm" />
                           </div>
                         )}
                       </div>

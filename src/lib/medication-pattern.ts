@@ -42,6 +42,17 @@ const urduDoseUnitsByForm: Record<string, { singular: string; plural: string }> 
   gel: { singular: 'مرتبہ', plural: 'مرتبہ' },
 };
 
+const englishDoseUnitsByForm: Record<string, { singular: string; plural: string }> = {
+  tablet: { singular: 'tablet', plural: 'tablets' },
+  capsule: { singular: 'capsule', plural: 'capsules' },
+  syrup: { singular: 'teaspoon', plural: 'teaspoons' },
+  drops: { singular: 'drop', plural: 'drops' },
+  injection: { singular: 'injection', plural: 'injections' },
+  inhaler: { singular: 'puff', plural: 'puffs' },
+  cream: { singular: 'application', plural: 'applications' },
+  gel: { singular: 'application', plural: 'applications' },
+};
+
 function normalizeForm(form: string) {
   return form.trim().toLowerCase();
 }
@@ -54,10 +65,9 @@ function getUrduDoseUnit(medication: Medication, quantity: number) {
 
 function getEnglishDoseLabel(quantity: number, medication: Medication) {
   const form = normalizeForm(medication.form) || 'dose';
-  const singular = form.endsWith('s') ? form.slice(0, -1) : form;
-  const plural = singular === 'syrup' ? 'teaspoonfuls' : `${singular}s`;
+  const units = englishDoseUnitsByForm[form] ?? { singular: 'dose', plural: 'doses' };
   const numberWord = englishNumberWords[quantity] ?? String(quantity);
-  return `${numberWord} ${quantity === 1 ? singular : plural}`;
+  return `${numberWord} ${quantity === 1 ? units.singular : units.plural}`;
 }
 
 function buildUrduTimingText(medication: Medication, slots: Array<{ timing: TimingSlot; quantity: number }>) {
@@ -85,6 +95,12 @@ export interface ParsedDosePattern {
   frequencyUrdu: string;
   instructions?: string;
   instructionsUrdu?: string;
+  slots: Array<{
+    timing: TimingSlot;
+    quantity: number;
+    labelEn: string;
+    labelUr: string;
+  }>;
 }
 
 export function parseDosePattern(input: string, medication: Medication): ParsedDosePattern | null {
@@ -102,7 +118,7 @@ export function parseDosePattern(input: string, medication: Medication): ParsedD
   if (parts.length < 1 || parts.length > 3) return null;
 
   const quantities = parts.map(part => Number.parseInt(part, 10));
-  if (quantities.some(quantity => Number.isNaN(quantity) || quantity < 0 || quantity > 9)) {
+  if (quantities.some(quantity => Number.isNaN(quantity) || quantity < 0 || quantity > 99)) {
     return null;
   }
 
@@ -125,5 +141,11 @@ export function parseDosePattern(input: string, medication: Medication): ParsedD
     normalizedPattern: expandedQuantities.join('+'),
     frequency: buildEnglishFrequency(slots, medication),
     frequencyUrdu: buildUrduTimingText(medication, slots),
+    slots: slots.map(slot => ({
+      timing: slot.timing,
+      quantity: slot.quantity,
+      labelEn: `${getEnglishDoseLabel(slot.quantity, medication)} in the ${timingLabels[slot.timing].en}`,
+      labelUr: `${slot.quantity} ${getUrduDoseUnit(medication, slot.quantity)} ${timingLabels[slot.timing].ur}`,
+    })),
   };
 }
