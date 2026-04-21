@@ -99,20 +99,20 @@ export default function PrescriptionPreview({
   const today = now.toLocaleDateString('en-PK', { year: 'numeric', month: 'long', day: 'numeric' });
   const printedAt = now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
   const vitalsList = [
-    { label: 'BP', value: vitals.bp },
-    { label: 'Pulse', value: vitals.pulse ? `${vitals.pulse} bpm` : '' },
-    { label: 'Temp', value: vitals.temp ? `${vitals.temp} °F` : '' },
-    { label: 'SpO2', value: vitals.spo2 ? `${vitals.spo2}%` : '' },
-    { label: 'Weight', value: vitals.weight ? `${vitals.weight} kg` : '' },
-    { label: 'Height', value: vitals.height ? `${vitals.height} cm` : '' },
-    { label: 'BMI', value: vitals.bmi },
-    { label: 'RR', value: vitals.respiratoryRate ? `${vitals.respiratoryRate}/min` : '' },
-  ].filter(item => item.value);
+    { label: 'BP', value: vitals.bp || 'N/A' },
+    { label: 'Pulse', value: vitals.pulse ? `${vitals.pulse} bpm` : 'N/A' },
+    { label: 'Temp', value: vitals.temp ? `${vitals.temp} °F` : 'N/A' },
+    { label: 'SpO2', value: vitals.spo2 ? `${vitals.spo2}%` : 'N/A' },
+    { label: 'Weight', value: vitals.weight ? `${vitals.weight} kg` : 'N/A' },
+    { label: 'Height', value: vitals.height ? `${vitals.height} cm` : 'N/A' },
+    { label: 'BMI', value: vitals.bmi || 'N/A' },
+    { label: 'RR', value: vitals.respiratoryRate ? `${vitals.respiratoryRate}/min` : 'N/A' },
+  ];
   const doctorName = doctor?.name?.trim() || 'Doctor';
   const doctorSpecialization = doctor?.specialization?.trim() || 'Specialization not added';
   const doctorQualifications = doctor?.qualifications?.trim() || 'Qualifications not added';
   const doctorPmcNumber = doctor?.pmcNumber?.trim() || 'Not added';
-  const compactVitals = vitalsList.slice(0, 4);
+  const displayedVitals = vitalsList;
 
   return (
     <div className="p-4 lg:p-6">
@@ -233,11 +233,11 @@ export default function PrescriptionPreview({
                 </section>
               )}
 
-              {compactVitals.length > 0 && (
+              {displayedVitals.length > 0 && (
                 <section>
                   <h3 className="mb-2 text-[13px] font-bold text-foreground uppercase tracking-wide">Vitals</h3>
                   <div className="flex flex-wrap gap-1.5">
-                    {compactVitals.map(item => (
+                    {displayedVitals.map(item => (
                       <span key={item.label} className="rounded-full border border-border bg-muted/30 px-2 py-1 text-[11px] font-normal text-foreground/90">
                         {item.label}: {item.value}
                       </span>

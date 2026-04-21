@@ -18,9 +18,10 @@ interface OrdersPanelProps {
   activeProcedures: Procedure[];
   activeCareActions: CareAction[];
   previousNotes: ClinicalNote[];
+  onQuickAdd: (categoryId: 'lab' | 'radiology' | 'procedure' | 'referral' | 'admission' | 'followup') => void;
 }
 
-export default function OrdersPanel({ activeOrders, activeProcedures, activeCareActions, previousNotes }: OrdersPanelProps) {
+export default function OrdersPanel({ activeOrders, activeProcedures, activeCareActions, previousNotes, onQuickAdd }: OrdersPanelProps) {
   const historicalOrders = previousNotes.flatMap(note =>
     note.labOrders.map(order => ({
       ...order,
@@ -42,7 +43,7 @@ export default function OrdersPanel({ activeOrders, activeProcedures, activeCare
         {orderCategories.map(cat => {
           const Icon = cat.icon;
           return (
-            <Button key={cat.id} variant="outline" size="sm" className="gap-1.5 text-xs">
+            <Button key={cat.id} variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => onQuickAdd(cat.id as 'lab' | 'radiology' | 'procedure' | 'referral' | 'admission' | 'followup')}>
               <Icon className={`w-3.5 h-3.5 ${cat.color}`} />
               {cat.label}
               <Plus className="w-3 h-3" />

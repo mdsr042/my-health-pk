@@ -265,9 +265,10 @@ export default function WalkInModal({ open, onClose, onPatientCreated }: WalkInM
             </div>
             <div className="space-y-1.5">
               <Label>Blood Group</Label>
-              <Select value={form.bloodGroup} onValueChange={v => update('bloodGroup', v)} disabled={isLocked}>
+              <Select value={form.bloodGroup || 'unknown'} onValueChange={v => update('bloodGroup', v === 'unknown' ? '' : v)} disabled={isLocked}>
                 <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="unknown">Unknown / Not Selected</SelectItem>
                   {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(bg => (
                     <SelectItem key={bg} value={bg}>{bg}</SelectItem>
                   ))}

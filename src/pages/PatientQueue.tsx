@@ -348,38 +348,44 @@ export default function PatientQueue({ onOpenPatient }: PatientQueueProps) {
         </CardContent>
       </Card>
 
-      <Card className="border-0 shadow-sm">
-        <CardContent className="p-0">
-          <div className="border-b border-border/60">
-            <div className="flex items-center justify-between px-4 py-3">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">Today&apos;s Queue</h2>
-                <p className="text-xs text-muted-foreground">Consultation first, then waiting, then the rest, with completed at the end.</p>
-              </div>
-              <Badge variant="outline">{todayAppointments.length}</Badge>
-            </div>
-            {renderQueueRows(todayAppointments)}
-          </div>
-
-          <div>
-            <button
-              type="button"
-              onClick={() => setPastQueueExpanded(current => !current)}
-              className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-muted/20"
-            >
-              <div className="flex items-center gap-2">
-                <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${pastQueueExpanded ? 'rotate-90' : ''}`} />
+      <div className="space-y-5">
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-0">
+            <div>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
                 <div>
-                  <h2 className="text-sm font-semibold text-foreground">Past Patient Queue</h2>
-                  <p className="text-xs text-muted-foreground">Previous dates in the same queue order. Collapsed by default.</p>
+                  <h2 className="text-sm font-semibold text-foreground">Today&apos;s Queue</h2>
+                  <p className="text-xs text-muted-foreground">Consultation first, then waiting, then the rest, with completed at the end.</p>
                 </div>
+                <Badge variant="outline">{todayAppointments.length}</Badge>
               </div>
-              <Badge variant="outline">{pastAppointments.length}</Badge>
-            </button>
+              {renderQueueRows(todayAppointments)}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-0">
+            <div className="flex items-center justify-between px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setPastQueueExpanded(current => !current)}
+                className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-muted/20"
+              >
+                <div className="flex items-center gap-2">
+                  <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${pastQueueExpanded ? 'rotate-90' : ''}`} />
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground">Past Patient Queue</h2>
+                    <p className="text-xs text-muted-foreground">Previous dates in the same queue order. Collapsed by default.</p>
+                  </div>
+                </div>
+                <Badge variant="outline">{pastAppointments.length}</Badge>
+              </button>
+            </div>
             {pastQueueExpanded && renderQueueRows(pastAppointments)}
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
       <AppointmentBookingDialog
         open={Boolean(bookingPatient)}
         onOpenChange={open => !open && setBookingPatient(null)}

@@ -308,6 +308,21 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const openLabModal = (type: 'lab' | 'radiology') => { setLabOrderType(type); setLabOrderOpen(true); };
   const openReferralModal = (type: 'referral' | 'admission' | 'followup') => { setReferralType(type); setReferralOpen(true); };
   const openFollowUpBooking = () => setBookingOpen(true);
+  const handleOrdersQuickAdd = useCallback((categoryId: 'lab' | 'radiology' | 'procedure' | 'referral' | 'admission' | 'followup') => {
+    if (categoryId === 'lab' || categoryId === 'radiology') {
+      openLabModal(categoryId);
+      return;
+    }
+    if (categoryId === 'procedure') {
+      setProcedureOpen(true);
+      return;
+    }
+    if (categoryId === 'followup') {
+      openFollowUpBooking();
+      return;
+    }
+    openReferralModal(categoryId);
+  }, []);
   const applyConsultationTemplate = useCallback((templateId: string) => {
     const template = templates.find(item => item.id === templateId);
     if (!template) return;
@@ -1566,7 +1581,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
             )}
 
             {activeView === 'notes' && <NotesTimeline notes={patientNotes} />}
-            {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} activeProcedures={procedures} activeCareActions={careActions} previousNotes={patientNotes} />}
+            {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} activeProcedures={procedures} activeCareActions={careActions} previousNotes={patientNotes} onQuickAdd={handleOrdersQuickAdd} />}
             {activeView === 'documents' && (
               <div className="p-6 text-center text-muted-foreground">
                 <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
