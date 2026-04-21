@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import { useData } from '@/contexts/DataContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -34,6 +34,7 @@ import {
   fetchDiagnosisSets,
   fetchInvestigationSets,
   fetchProcedureLibrary,
+  getStoredAuthToken,
   searchDiagnosisCatalog,
   fetchTreatmentTemplates,
 } from '@/lib/api';
@@ -61,7 +62,42 @@ interface ConsultationPageProps {
 }
 
 type TabView = 'consultation' | 'notes' | 'orders' | 'documents' | 'prescription';
+type VitalFieldKey = 'bp' | 'pulse' | 'temp' | 'spo2' | 'weight' | 'height' | 'bmi' | 'respiratoryRate';
 const SETTINGS_STORAGE_KEY = 'my-health/settings';
+
+const vitalInputConfig: Record<VitalFieldKey, { placeholder: string; inputMode: 'numeric' | 'decimal'; maxLength: number }> = {
+  bp: { placeholder: '120/80', inputMode: 'numeric', maxLength: 7 },
+  pulse: { placeholder: '72', inputMode: 'numeric', maxLength: 3 },
+  temp: { placeholder: '98.6', inputMode: 'decimal', maxLength: 4 },
+  spo2: { placeholder: '98', inputMode: 'numeric', maxLength: 3 },
+  weight: { placeholder: '70', inputMode: 'decimal', maxLength: 5 },
+  height: { placeholder: '170', inputMode: 'decimal', maxLength: 5 },
+  bmi: { placeholder: '24.2', inputMode: 'decimal', maxLength: 4 },
+  respiratoryRate: { placeholder: '18', inputMode: 'numeric', maxLength: 3 },
+};
+
+function sanitizeDecimalVital(value: string, { maxWhole = 3, maxFraction = 1 } = {}) {
+  const normalized = value.replace(/[^0-9.]/g, '');
+  const [wholeRaw = '', ...fractionParts] = normalized.split('.');
+  const whole = wholeRaw.slice(0, maxWhole);
+  const fraction = fractionParts.join('').slice(0, maxFraction);
+  if (!normalized.includes('.')) return whole;
+  return fraction ? `${whole}.${fraction}` : `${whole}.`;
+}
+
+function formatVitalInput(field: VitalFieldKey, value: string) {
+  if (field === 'bp') {
+    const digits = value.replace(/\D/g, '').slice(0, 6);
+    if (digits.length <= 3) return digits;
+    return `${digits.slice(0, 3)}/${digits.slice(3)}`;
+  }
+
+  if (field === 'temp' || field === 'weight' || field === 'height' || field === 'bmi') {
+    return sanitizeDecimalVital(value, field === 'temp' ? { maxWhole: 3, maxFraction: 1 } : { maxWhole: 3, maxFraction: 1 });
+  }
+
+  return value.replace(/\D/g, '').slice(0, vitalInputConfig[field].maxLength);
+}
 
 function normalizeMedicationIdentity(value: string) {
   return String(value ?? '')
@@ -136,6 +172,10 @@ function buildPayloadShape(payload: {
   };
 }
 
+function createConsultationDraftSignature(payload: Record<string, unknown>) {
+  return JSON.stringify(payload);
+}
+
 export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const { markUnsaved, closeTab } = usePatientTabs();
   const { activeClinic, doctorClinics, user } = useAuth();
@@ -169,6 +209,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [labOrderOpen, setLabOrderOpen] = useState(false);
   const [procedureOpen, setProcedureOpen] = useState(false);
   const [vitalsOpen, setVitalsOpen] = useState(false);
+  const [vitalsExpanded, setVitalsExpanded] = useState(false);
   const [labOrderType, setLabOrderType] = useState<'lab' | 'radiology'>('lab');
   const [referralOpen, setReferralOpen] = useState(false);
   const [referralType, setReferralType] = useState<'referral' | 'admission' | 'followup'>('referral');
@@ -186,6 +227,10 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [diagnosisQuery, setDiagnosisQuery] = useState('');
   const [pastHistoryQuery, setPastHistoryQuery] = useState('');
+  const hydratedDraftKeyRef = useRef('');
+  const latestPayloadSignatureRef = useRef('');
+  const lastPersistedSignatureRef = useRef('');
+  const hasLocalEditsRef = useRef(false);
 
   // Consultation form state
   const [chiefComplaint, setChiefComplaint] = useState(draft?.chiefComplaint || activeAppointment?.chiefComplaint || '');
@@ -204,25 +249,30 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [procedures, setProcedures] = useState<Procedure[]>(draft?.procedures || []);
   const [careActions, setCareActions] = useState<CareAction[]>(draft?.careActions || []);
 
+  const markLocalChange = useCallback(() => {
+    hasLocalEditsRef.current = true;
+    markUnsaved(patientId, true);
+  }, [markUnsaved, patientId]);
+
   const handleFieldChange = useCallback((setter: Function) => (value: string) => {
     setter(value);
-    markUnsaved(patientId, true);
-  }, [patientId, markUnsaved]);
+    markLocalChange();
+  }, [markLocalChange]);
 
   const appendSnippet = useCallback((setter: Function, currentValue: string, snippet: string) => {
     const nextValue = currentValue.trim() ? `${currentValue.trim()}\n${snippet}` : snippet;
     setter(nextValue);
-    markUnsaved(patientId, true);
-  }, [patientId, markUnsaved]);
+    markLocalChange();
+  }, [markLocalChange]);
 
   const addDiagnosis = (dx: Diagnosis) => {
     setDiagnoses(prev => {
       const exists = prev.some(item => item.id === dx.id);
       return exists ? prev.map(item => item.id === dx.id ? dx : item) : [...prev, dx];
     });
-    markUnsaved(patientId, true);
+    markLocalChange();
   };
-  const removeDiagnosis = (id: string) => { setDiagnoses(prev => prev.filter(d => d.id !== id)); markUnsaved(patientId, true); };
+  const removeDiagnosis = (id: string) => { setDiagnoses(prev => prev.filter(d => d.id !== id)); markLocalChange(); };
   const addMedication = (med: Medication) => {
     setMedications(prev => {
       const targetKey = getMedicationIdentityKey(med);
@@ -231,12 +281,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         ? prev.map(item => item.id === existingMedication.id ? { ...med, id: existingMedication.id } : item)
         : [...prev, med];
     });
-    markUnsaved(patientId, true);
+    markLocalChange();
   };
-  const removeMedication = (id: string) => { setMedications(prev => prev.filter(m => m.id !== id)); markUnsaved(patientId, true); };
+  const removeMedication = (id: string) => { setMedications(prev => prev.filter(m => m.id !== id)); markLocalChange(); };
   const addLabOrder = (order: LabOrder) => {
     setLabOrders(prev => [...prev, order]);
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success(`${order.testName} ordered`, { description: `Priority: ${order.priority}` });
   };
   const addProcedure = (procedure: Procedure) => {
@@ -247,12 +297,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         ? prev.map(item => (item.id === existing.id ? { ...procedure, id: existing.id } : item))
         : [...prev, { ...procedure, id: procedure.id || `procedure-${Date.now()}` }];
     });
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success(`${procedure.name} added to procedures`);
   };
   const removeProcedure = (id: string) => {
     setProcedures(prev => prev.filter(item => item.id !== id));
-    markUnsaved(patientId, true);
+    markLocalChange();
   };
 
   const openLabModal = (type: 'lab' | 'radiology') => { setLabOrderType(type); setLabOrderOpen(true); };
@@ -297,9 +347,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         }));
       return [...prev, ...additions];
     });
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success(`${template.name} template applied`);
-  }, [markUnsaved, patientId, templates]);
+  }, [markLocalChange, templates]);
 
   const applyQuickTemplateAndClose = useCallback((templateId: string) => {
     applyConsultationTemplate(templateId);
@@ -322,9 +372,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         }));
       return [...prev, ...additions];
     });
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success('Previous diagnoses added');
-  }, [latestPreviousNote, markUnsaved, patientId]);
+  }, [latestPreviousNote, markLocalChange]);
 
   const reusePreviousMedications = useCallback(() => {
     if (!latestPreviousNote?.medications.length) {
@@ -342,9 +392,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         }));
       return [...prev, ...additions];
     });
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success('Previous medications added');
-  }, [latestPreviousNote, markUnsaved, patientId]);
+  }, [latestPreviousNote, markLocalChange]);
 
   const reusePreviousInvestigations = useCallback(() => {
     if (!latestPreviousNote?.labOrders.length) {
@@ -364,9 +414,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         }));
       return [...prev, ...additions];
     });
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success('Previous investigations added');
-  }, [latestPreviousNote, markUnsaved, patientId]);
+  }, [latestPreviousNote, markLocalChange]);
 
   const reusePreviousAdvice = useCallback(() => {
     if (!latestPreviousNote?.instructions && !latestPreviousNote?.followUp) {
@@ -376,9 +426,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
     setInstructions(prev => prev || latestPreviousNote?.instructions || '');
     setFollowUp(prev => prev || latestPreviousNote?.followUp || '');
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success('Previous advice added');
-  }, [latestPreviousNote, markUnsaved, patientId]);
+  }, [latestPreviousNote, markLocalChange]);
 
   const buildConsultationPayload = useCallback(() => ({
     ...buildPayloadShape({
@@ -421,6 +471,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     patientId,
     plan,
     vitals,
+    draft?.appointmentId,
   ]);
 
   const addCareAction = useCallback((action: Omit<CareAction, 'id' | 'doctorId' | 'appointmentId' | 'patientId' | 'clinicId'>) => {
@@ -433,15 +484,20 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       doctorId: user?.id || 'doctor',
     };
     setCareActions(prev => [nextAction, ...prev]);
-    markUnsaved(patientId, true);
-  }, [activeAppointment?.clinicId, activeAppointment?.id, activeClinic?.id, draft?.appointmentId, markUnsaved, patientId, user?.id]);
+    markLocalChange();
+  }, [activeAppointment?.clinicId, activeAppointment?.id, activeClinic?.id, draft?.appointmentId, markLocalChange, patientId, user?.id]);
 
-    const handleSaveDraft = async () => {
+  const handleSaveDraft = async () => {
     if (!activeAppointment?.id) {
       toast.error('No active appointment found for this consultation');
       return;
     }
-    await saveConsultationDraft(buildConsultationPayload());
+    const payload = buildConsultationPayload();
+    await saveConsultationDraft(payload);
+    const signature = createConsultationDraftSignature(payload);
+    lastPersistedSignatureRef.current = signature;
+    latestPayloadSignatureRef.current = signature;
+    hasLocalEditsRef.current = false;
     markUnsaved(patientId, false);
     toast.success('Draft saved', { description: `${patient?.name} consultation saved as draft` });
   };
@@ -451,7 +507,12 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       toast.error('No active appointment found for this consultation');
       return;
     }
-    await saveConsultationDraft(buildConsultationPayload());
+    const payload = buildConsultationPayload();
+    await saveConsultationDraft(payload);
+    const signature = createConsultationDraftSignature(payload);
+    lastPersistedSignatureRef.current = signature;
+    latestPayloadSignatureRef.current = signature;
+    hasLocalEditsRef.current = false;
     markUnsaved(patientId, false);
     toast.info('Consultation on hold', { description: `${patient?.name} — will appear in your pending list` });
   };
@@ -559,6 +620,47 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   }, []);
 
   useEffect(() => {
+    const incomingDraft = draft;
+    const hydrationKey = `${activeAppointment?.id || incomingDraft?.appointmentId || ''}:${incomingDraft?.savedAt || ''}`;
+    if (!incomingDraft || !hydrationKey || hydratedDraftKeyRef.current === hydrationKey || hasLocalEditsRef.current) {
+      return;
+    }
+
+    setChiefComplaint(incomingDraft.chiefComplaint || activeAppointment?.chiefComplaint || '');
+    setHpi(incomingDraft.hpi || '');
+    setPastHistory(incomingDraft.pastHistory || '');
+    setAllergies(incomingDraft.allergies || '');
+    setExamination(incomingDraft.examination || '');
+    setAssessment(incomingDraft.assessment || '');
+    setPlan(incomingDraft.plan || '');
+    setInstructions(incomingDraft.instructions || '');
+    setFollowUp(incomingDraft.followUp || '');
+    setVitals(incomingDraft.vitals || sampleVitals);
+    setDiagnoses(incomingDraft.diagnoses || []);
+    setMedications(incomingDraft.medications || []);
+    setLabOrders(incomingDraft.labOrders || []);
+    setProcedures(incomingDraft.procedures || []);
+    setCareActions(incomingDraft.careActions || []);
+    hydratedDraftKeyRef.current = hydrationKey;
+    lastPersistedSignatureRef.current = createConsultationDraftSignature({
+      ...incomingDraft,
+      appointmentId: incomingDraft.appointmentId || activeAppointment?.id || '',
+      clinicId: incomingDraft.clinicId || activeClinic?.id || activeAppointment?.clinicId || 'clinic-1',
+    });
+    latestPayloadSignatureRef.current = lastPersistedSignatureRef.current;
+    hasLocalEditsRef.current = false;
+    markUnsaved(patientId, false);
+  }, [
+    activeAppointment?.chiefComplaint,
+    activeAppointment?.clinicId,
+    activeAppointment?.id,
+    activeClinic?.id,
+    draft,
+    markUnsaved,
+    patientId,
+  ]);
+
+  useEffect(() => {
     const query = diagnosisQuery.trim();
     if (!query) {
       setDiagnosisCatalogSuggestions([]);
@@ -588,30 +690,27 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
 
   useEffect(() => {
     const settings = readStorage(SETTINGS_STORAGE_KEY, { autoSave: true });
-    if (!settings.autoSave) return;
+    const payload = buildConsultationPayload();
+    const signature = createConsultationDraftSignature(payload);
+    latestPayloadSignatureRef.current = signature;
 
-    const hasDraftableContent = Boolean(
-      chiefComplaint ||
-      hpi ||
-      pastHistory ||
-      allergies ||
-      examination ||
-      assessment ||
-      plan ||
-      instructions ||
-      followUp ||
-      diagnoses.length ||
-      medications.length ||
-      labOrders.length
-      || procedures.length
-    );
-
-    if (!hasDraftableContent) return;
+    if (!settings.autoSave || !payload.appointmentId || !hasLocalEditsRef.current || signature === lastPersistedSignatureRef.current) {
+      return;
+    }
 
     const timer = window.setTimeout(() => {
-      void saveConsultationDraft(buildConsultationPayload());
-      markUnsaved(patientId, false);
-    }, 30000);
+      void saveConsultationDraft(payload)
+        .then(() => {
+          lastPersistedSignatureRef.current = signature;
+          if (latestPayloadSignatureRef.current === signature) {
+            hasLocalEditsRef.current = false;
+            markUnsaved(patientId, false);
+          }
+        })
+        .catch(() => {
+          markUnsaved(patientId, true);
+        });
+    }, 1200);
 
     return () => window.clearTimeout(timer);
   }, [
@@ -619,20 +718,65 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     assessment,
     buildConsultationPayload,
     chiefComplaint,
-    diagnoses.length,
+    diagnoses,
     examination,
     followUp,
     hpi,
     instructions,
-    labOrders.length,
-    procedures.length,
+    labOrders,
+    procedures,
+    careActions,
     markUnsaved,
-    medications.length,
+    medications,
     pastHistory,
     patientId,
     plan,
     saveConsultationDraft,
+    vitals,
   ]);
+
+  useEffect(() => {
+    const settings = readStorage(SETTINGS_STORAGE_KEY, { autoSave: true });
+    if (!settings.autoSave) return;
+
+    const persistBeforeLeave = () => {
+      const payload = buildConsultationPayload();
+      const signature = createConsultationDraftSignature(payload);
+      if (!payload.appointmentId || !hasLocalEditsRef.current || signature === lastPersistedSignatureRef.current) {
+        return;
+      }
+
+      const token = getStoredAuthToken();
+      if (!token) return;
+
+      void fetch(`/api/consultation-drafts/${encodeURIComponent(payload.appointmentId)}`, {
+        method: 'PUT',
+        keepalive: true,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ...payload,
+          savedAt: new Date().toISOString(),
+        }),
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        persistBeforeLeave();
+      }
+    };
+
+    window.addEventListener('pagehide', persistBeforeLeave);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('pagehide', persistBeforeLeave);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [buildConsultationPayload]);
 
   if (!patient) return <div className="p-6 text-muted-foreground">Patient not found</div>;
 
@@ -749,7 +893,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         .map(item => ({ ...item, id: `dx-set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }));
       return [...prev, ...additions];
     });
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success(`${set.name} diagnosis set applied`);
   };
 
@@ -768,7 +912,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
         }));
       return [...prev, ...additions];
     });
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success(`${set.name} investigation set applied`);
   };
 
@@ -777,7 +921,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     if (!template) return;
     setInstructions(prev => prev || template.instructions);
     setFollowUp(prev => prev || template.followUp);
-    markUnsaved(patientId, true);
+    markLocalChange();
     toast.success(`${template.name} advice applied`);
   };
 
@@ -802,7 +946,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       return current.trim() ? `${current.trim()}\n${line}` : line;
     });
     setPastHistoryQuery('');
-    markUnsaved(patientId, true);
+    markLocalChange();
   };
 
   const savePastHistoryCondition = async () => {
@@ -1023,22 +1167,43 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                           <h3 className="font-semibold text-foreground mb-1 flex items-center gap-2">
                             <Activity className="w-4 h-4 text-primary" /> Vitals
                           </h3>
-                          <p className="text-xs text-muted-foreground">All current vitals are visible here, and the edit button opens the full vitals form.</p>
+                          <p className="text-xs text-muted-foreground">Keep vitals collapsed by default and expand only when you need the full set.</p>
                         </div>
-                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setVitalsOpen(true)}>
-                          <PencilLine className="w-3.5 h-3.5" /> {compactVitals.length > 0 ? 'Edit Vitals' : 'Add Vitals'}
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setVitalsExpanded(current => !current)}>
+                            <ChevronRight className={`w-3.5 h-3.5 transition-transform ${vitalsExpanded ? 'rotate-90' : ''}`} />
+                            {vitalsExpanded ? 'Hide Vitals' : 'Show Vitals'}
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setVitalsOpen(true)}>
+                            <PencilLine className="w-3.5 h-3.5" /> {compactVitals.length > 0 ? 'Edit Vitals' : 'Add Vitals'}
+                          </Button>
+                        </div>
                       </div>
                       {visibleVitals.every(item => !item.value) ? (
-                        <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No vitals added yet</p>
+                        <p className="mt-3 text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No vitals added yet</p>
                       ) : (
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          {visibleVitals.map(item => (
-                            <div key={item.key} className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-                              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{item.label}</p>
-                              <p className="mt-1 text-sm text-foreground">{item.value || 'Not added'}</p>
+                        <div className="mt-3 space-y-3">
+                          <div className="flex flex-wrap gap-2">
+                            {compactVitals.length > 0 ? compactVitals.map(item => (
+                              <Badge key={item} variant="outline" className="bg-muted/30 text-foreground/90">
+                                {item}
+                              </Badge>
+                            )) : (
+                              <Badge variant="outline" className="bg-muted/30 text-muted-foreground">
+                                Vitals available
+                              </Badge>
+                            )}
+                          </div>
+                          {vitalsExpanded && (
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {visibleVitals.map(item => (
+                                <div key={item.key} className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{item.label}</p>
+                                  <p className="mt-1 text-sm text-foreground">{item.value || 'Not added'}</p>
+                                </div>
+                              ))}
                             </div>
-                          ))}
+                          )}
                         </div>
                       )}
                     </CardContent>
@@ -1173,9 +1338,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                               <div className="min-w-0 flex-1">
                                 <p className="font-medium text-foreground text-sm">{med.name}</p>
                                 <p className="text-xs text-muted-foreground">
-                                  {med.form} • {med.route} • {med.frequency || med.frequencyUrdu || 'Frequency not set'} • {med.duration}
+                                  {med.form} • {med.route} • {med.prescriptionLine || med.frequency || med.prescriptionLineUrdu || med.frequencyUrdu || 'Instruction not set'}
                                 </p>
-                                {med.frequencyUrdu && <p className="text-xs text-muted-foreground" dir="rtl">{med.frequencyUrdu}</p>}
+                                {(med.prescriptionLineUrdu || med.frequencyUrdu) && <p className="text-xs text-muted-foreground" dir="rtl">{med.prescriptionLineUrdu || med.frequencyUrdu}</p>}
                                 {med.instructions && <p className="text-xs text-muted-foreground mt-1">{med.instructions}</p>}
                                 {med.instructionsUrdu && <p className="text-xs text-muted-foreground" dir="rtl">{med.instructionsUrdu}</p>}
                               </div>
@@ -1565,6 +1730,7 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
           <div className="grid gap-3 sm:grid-cols-2">
             {fullVitalFields.map(field => {
               const Icon = field.icon;
+              const inputConfig = vitalInputConfig[field.key as VitalFieldKey];
               return (
                 <div key={field.key} className="space-y-1.5">
                   <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
@@ -1574,11 +1740,16 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                   <Input
                     value={String(vitals[field.key] ?? '')}
                     onChange={event => {
-                      setVitals(current => ({ ...current, [field.key]: event.target.value }));
-                      markUnsaved(patientId, true);
+                      setVitals(current => ({ ...current, [field.key]: formatVitalInput(field.key as VitalFieldKey, event.target.value) }));
+                      markLocalChange();
                     }}
-                    placeholder={`Enter ${field.label.toLowerCase()}`}
+                    placeholder={inputConfig.placeholder}
+                    inputMode={inputConfig.inputMode}
+                    maxLength={inputConfig.maxLength}
                   />
+                  <p className="text-[11px] text-muted-foreground">
+                    {field.key === 'bp' ? 'Format: systolic/diastolic, e.g. 120/80' : `Expected format: ${inputConfig.placeholder}`}
+                  </p>
                 </div>
               );
             })}

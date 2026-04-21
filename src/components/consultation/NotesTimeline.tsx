@@ -93,9 +93,9 @@ export default function NotesTimeline({ notes }: NotesTimelineProps) {
                       {note.medications.map(med => (
                         <div key={med.id}>
                           <p className="text-sm text-foreground">
-                            {med.name} — {med.frequency} × {med.duration}
+                            {med.name} — {med.prescriptionLine || med.frequency || med.prescriptionLineUrdu || med.frequencyUrdu || 'Instruction not set'}
                           </p>
-                          {med.frequencyUrdu && <p className="text-xs text-muted-foreground text-right" dir="rtl">{med.frequencyUrdu}</p>}
+                          {(med.prescriptionLineUrdu || med.frequencyUrdu) && <p className="text-xs text-muted-foreground text-right" dir="rtl">{med.prescriptionLineUrdu || med.frequencyUrdu}</p>}
                         </div>
                       ))}
                     </div>

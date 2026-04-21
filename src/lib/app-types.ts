@@ -369,8 +369,11 @@ export interface TreatmentTemplateMedication {
   strength: string;
   form: string;
   route: string;
+  injectionRouteType?: 'IM' | 'IV' | 'SC' | '';
   languageMode: 'en' | 'ur' | 'bilingual';
   dosePattern: string;
+  prescriptionLine?: string;
+  prescriptionLineUrdu?: string;
   frequency: string;
   frequencyUrdu: string;
   duration: string;

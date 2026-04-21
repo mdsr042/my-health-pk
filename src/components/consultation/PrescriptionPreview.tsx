@@ -4,41 +4,57 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Printer } from 'lucide-react';
 
-function compactPrintableFrequency(frequency: string) {
-  if (!frequency) return '';
+function translateDurationToUrdu(duration: string) {
+  const trimmed = duration.trim();
+  if (!trimmed) return '';
 
-  const normalized = frequency.replaceAll(' in the ', ' in ');
-  const segments = normalized.split(/, | and /).map(item => item.trim()).filter(Boolean);
-  if (segments.length < 2) {
-    return normalized;
-  }
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'continue') return 'جاری رکھیں';
 
-  const parsed = segments.map(segment => {
-    const match = segment.match(/^(.+?) in (morning|noon|evening)$/i);
-    if (!match) return null;
-    return {
-      dose: match[1].trim(),
-      timing: match[2].toLowerCase(),
-    };
-  });
+  const match = normalized.match(/^(\d+)\s*(day|days|d|week|weeks|w|month|months|m)$/i);
+  if (!match) return trimmed;
 
-  if (parsed.some(item => !item) || !parsed[0]) {
-    return normalized;
-  }
+  const [, count, unit] = match;
+  if (['day', 'days', 'd'].includes(unit)) return `${count} دن`;
+  if (['week', 'weeks', 'w'].includes(unit)) return `${count} ہفتے`;
+  if (['month', 'months', 'm'].includes(unit)) return `${count} ماہ`;
+  return trimmed;
+}
 
-  const firstDose = parsed[0].dose;
-  const first = `${firstDose} in ${parsed[0].timing}`;
-  const rest = parsed.slice(1).map(item => {
-    const doseWords = item!.dose.split(' ');
-    return `${doseWords[0]} in ${item!.timing}`;
-  });
+function normalizeDisplayValue(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
 
-  if (rest.length === 1) return `${first} and ${rest[0]}`;
-  return `${first}, ${rest.slice(0, -1).join(', ')}, and ${rest.at(-1)}`;
+function stripDurationSuffix(value: string) {
+  return value.split(' - ')[0]?.trim() || value.trim();
+}
+
+function buildMedicationTitle(med: Medication) {
+  const normalizedName = normalizeDisplayValue(med.name);
+  const normalizedStrength = normalizeDisplayValue(med.strength);
+  const normalizedForm = normalizeDisplayValue(med.form);
+
+  const includesStrength = normalizedStrength && normalizedName.includes(normalizedStrength);
+  const includesForm = normalizedForm && normalizedName.includes(normalizedForm);
+
+  const extras = [
+    includesStrength ? '' : med.strength,
+    includesForm ? '' : med.form,
+  ].filter(Boolean);
+
+  return extras.length > 0 ? `${med.name} - ${extras.join(' ')}` : med.name;
 }
 
 function buildCompactUrduLine(med: Medication) {
-  return [med.frequencyUrdu, med.instructionsUrdu].filter(Boolean).join(' • ');
+  const urduBase = med.prescriptionLineUrdu || med.frequencyUrdu || '';
+  const fallbackWithDuration =
+    !urduBase && med.prescriptionLine
+      ? `${stripDurationSuffix(med.prescriptionLine)}${med.duration ? ` - ${translateDurationToUrdu(med.duration)}` : ''}`
+      : '';
+  const lineWithDuration = urduBase
+    ? `${stripDurationSuffix(urduBase)}${med.duration ? ` - ${translateDurationToUrdu(med.duration)}` : ''}`
+    : fallbackWithDuration;
+  return [lineWithDuration.trim(), med.instructionsUrdu].filter(Boolean).join(' • ');
 }
 
 function inferMedicationLanguageMode(med: Medication) {
@@ -183,10 +199,10 @@ export default function PrescriptionPreview({
             <div className="border-r border-border px-4 py-4 space-y-4">
               {diagnoses.length > 0 && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Diagnosis</h3>
+                  <h3 className="mb-2 text-[13px] font-bold text-foreground uppercase tracking-wide">Diagnosis</h3>
                   <div className="space-y-1.5">
                     {diagnoses.map(dx => (
-                      <p key={dx.id} className="text-sm leading-5 font-normal text-foreground">
+                      <p key={dx.id} className="text-[12px] leading-5 font-normal text-foreground/90">
                         {dx.name}
                         {dx.code && <span className="text-muted-foreground"> ({dx.code})</span>}
                         {dx.isPrimary && <span className="text-xs text-primary font-medium"> Primary</span>}
@@ -198,31 +214,31 @@ export default function PrescriptionPreview({
 
               {chiefComplaint && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Chief Complaint</h3>
-                  <p className="text-sm leading-5 font-normal text-foreground whitespace-pre-line">{chiefComplaint}</p>
+                  <h3 className="mb-2 text-[13px] font-bold text-foreground uppercase tracking-wide">Chief Complaint</h3>
+                  <p className="text-[12px] leading-5 font-normal text-foreground/90 whitespace-pre-line">{chiefComplaint}</p>
                 </section>
               )}
 
               {pastHistory && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Past Medical History</h3>
-                  <p className="text-sm leading-5 font-normal text-foreground whitespace-pre-line">{pastHistory}</p>
+                  <h3 className="mb-2 text-[13px] font-bold text-foreground uppercase tracking-wide">Past Medical History</h3>
+                  <p className="text-[12px] leading-5 font-normal text-foreground/90 whitespace-pre-line">{pastHistory}</p>
                 </section>
               )}
 
               {allergies && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Allergies</h3>
-                  <p className="text-sm leading-5 font-normal text-foreground whitespace-pre-line">{allergies}</p>
+                  <h3 className="mb-2 text-[13px] font-bold text-foreground uppercase tracking-wide">Allergies</h3>
+                  <p className="text-[12px] leading-5 font-normal text-foreground/90 whitespace-pre-line">{allergies}</p>
                 </section>
               )}
 
               {compactVitals.length > 0 && (
                 <section>
-                  <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Vitals</h3>
+                  <h3 className="mb-2 text-[13px] font-bold text-foreground uppercase tracking-wide">Vitals</h3>
                   <div className="flex flex-wrap gap-1.5">
                     {compactVitals.map(item => (
-                      <span key={item.label} className="rounded-full border border-border bg-muted/40 px-2 py-1 text-[11px] text-foreground">
+                      <span key={item.label} className="rounded-full border border-border bg-muted/30 px-2 py-1 text-[11px] font-normal text-foreground/90">
                         {item.label}: {item.value}
                       </span>
                     ))}
@@ -245,20 +261,17 @@ export default function PrescriptionPreview({
                     <div key={med.id} className="pb-2 border-b border-dashed border-border/80 last:border-b-0">
                       {(() => {
                         const languageMode = inferMedicationLanguageMode(med);
-                        const englishLine = [compactPrintableFrequency(med.frequency), med.instructions].filter(Boolean).join(' • ');
+                        const englishLine = [med.prescriptionLine || med.frequency, med.instructions].filter(Boolean).join(' • ');
                         const urduLine = buildCompactUrduLine(med);
 
                         return (
                           <>
                       <p className="text-sm font-medium leading-5 text-foreground">
-                        {index + 1}. {med.name}
-                        {med.strength && <span className="font-medium"> - {med.strength}</span>}
-                        {med.form && <span className="font-medium"> {med.form}</span>}
+                        {index + 1}. {buildMedicationTitle(med)}
                       </p>
                       <p className="text-xs leading-4 text-muted-foreground">
                         {med.generic}
                         {med.route && ` • ${med.route}`}
-                        {med.duration && ` • ${med.duration}`}
                       </p>
                       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                         {languageMode !== 'ur' && englishLine && (
@@ -268,7 +281,7 @@ export default function PrescriptionPreview({
                         )}
                         {languageMode !== 'en' && urduLine && (
                           <p
-                            className="max-w-full text-xs leading-5 text-foreground text-right sm:max-w-[45%]"
+                            className="ml-auto w-full text-xs leading-5 text-foreground text-right sm:w-auto sm:min-w-[260px] sm:max-w-[45%]"
                             dir="rtl"
                             style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
                           >

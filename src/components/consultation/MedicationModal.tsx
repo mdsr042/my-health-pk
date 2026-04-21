@@ -17,7 +17,7 @@ import {
 } from '@/lib/api';
 import type { MedicationCatalogDetail, MedicationCatalogEntry, MedicationFavorite, MedicationPreference } from '@/lib/app-types';
 import { Badge } from '@/components/ui/badge';
-import { parseDosePattern } from '@/lib/medication-pattern';
+import { buildMedicationPrescriptionLines, parseDosePattern } from '@/lib/medication-pattern';
 import { Search, Star, Plus, Pencil, Trash2, Info, X } from 'lucide-react';
 
 interface MedicationModalProps {
@@ -40,9 +40,18 @@ const instructionPresets = [
 ] as const;
 
 const dosePatternSnippets = ['1+1+1', '1+0+1', '1+1', '5+5', '0+0+3'] as const;
+const durationSnippets = [
+  { label: '3d', value: '3 days' },
+  { label: '5d', value: '5 days' },
+  { label: '7d', value: '7 days' },
+  { label: '10d', value: '10 days' },
+  { label: '2w', value: '2 weeks' },
+  { label: 'Continue', value: 'Continue' },
+] as const;
 
 const customForms = ['Tablet', 'Capsule', 'Syrup', 'Drops', 'Injection', 'Inhaler', 'Cream', 'Gel'] as const;
 const customRoutes = ['Oral', 'Injectable', 'Topical', 'Ophthalmic', 'Inhalation', 'Nasal'] as const;
+const injectionRouteOptions = ['IM', 'IV', 'SC'] as const;
 const prescriptionLanguageOptions = [
   { value: 'en', label: 'English Only' },
   { value: 'ur', label: 'Urdu Only' },
@@ -112,6 +121,9 @@ function toMedication(entry: MedicationCatalogEntry): Medication {
     form: entry.dosageForm || '',
     route: entry.route || '',
     languageMode: 'ur',
+    injectionRouteType: '',
+    prescriptionLine: '',
+    prescriptionLineUrdu: '',
     frequency: '',
     frequencyUrdu: '',
     duration: '',
@@ -294,7 +306,10 @@ export default function MedicationModal({
           form: String(payload.form ?? ''),
           route: String(payload.route ?? ''),
           languageMode: inferLanguageMode(payload),
+          injectionRouteType: (payload.injectionRouteType as Medication['injectionRouteType']) ?? '',
           dosePattern: String(payload.dosePattern ?? ''),
+          prescriptionLine: String(payload.prescriptionLine ?? ''),
+          prescriptionLineUrdu: String(payload.prescriptionLineUrdu ?? ''),
           frequency: String(payload.frequency ?? ''),
           frequencyUrdu: String(payload.frequencyUrdu ?? ''),
           duration: String(payload.duration ?? ''),
@@ -342,13 +357,16 @@ export default function MedicationModal({
     const nextMedicationId = existingMedication?.id
       ?? (selected.id.startsWith('cat-') ? selected.id : `rx-${Date.now()}`);
 
-    return {
+      return {
       ...selected,
       id: nextMedicationId,
       languageMode,
+      injectionRouteType: selected.injectionRouteType || '',
       dosePattern: parsedPattern?.normalizedPattern || dosePattern.trim() || selected.dosePattern,
-      frequency: languageMode === 'ur' ? '' : (customFrequency || selected.frequency),
-      frequencyUrdu: languageMode === 'en' ? '' : (customFrequencyUrdu || selected.frequencyUrdu),
+      prescriptionLine: languageMode === 'ur' ? '' : customFrequency,
+      prescriptionLineUrdu: languageMode === 'en' ? '' : customFrequencyUrdu,
+      frequency: languageMode === 'ur' ? '' : customFrequency,
+      frequencyUrdu: languageMode === 'en' ? '' : customFrequencyUrdu,
       duration: customDuration || selected.duration,
       instructions: languageMode === 'ur' ? '' : (customInstructions || selected.instructions),
       instructionsUrdu: languageMode === 'en' ? '' : (customInstructionsUrdu || selected.instructionsUrdu),
@@ -366,8 +384,11 @@ export default function MedicationModal({
         strength: medicationToSave.strength,
         form: medicationToSave.form,
         route: medicationToSave.route,
+        injectionRouteType: medicationToSave.injectionRouteType || '',
         languageMode: medicationToSave.languageMode,
         dosePattern: medicationToSave.dosePattern || '',
+        prescriptionLine: medicationToSave.prescriptionLine || '',
+        prescriptionLineUrdu: medicationToSave.prescriptionLineUrdu || '',
         frequency: medicationToSave.frequency,
         frequencyUrdu: medicationToSave.frequencyUrdu,
         duration: medicationToSave.duration,
@@ -404,8 +425,9 @@ export default function MedicationModal({
     setLanguageMode(nextLanguageMode);
     setDosePattern(nextMedication.dosePattern || '');
     const parsed = nextMedication.dosePattern ? parseDosePattern(nextMedication.dosePattern, nextMedication) : null;
-    setCustomFrequency(parsed?.frequency || nextMedication.frequency);
-    setCustomFrequencyUrdu(parsed?.frequencyUrdu || nextMedication.frequencyUrdu || '');
+    const derivedLines = buildMedicationPrescriptionLines(nextMedication, parsed, nextMedication.duration || '');
+    setCustomFrequency(nextMedication.prescriptionLine || derivedLines.english || nextMedication.frequency);
+    setCustomFrequencyUrdu(nextMedication.prescriptionLineUrdu || derivedLines.urdu || nextMedication.frequencyUrdu || '');
     setCustomDuration(nextMedication.duration);
     setCustomInstructions(nextMedication.instructions);
     setCustomInstructionsUrdu(nextMedication.instructionsUrdu || '');
@@ -429,7 +451,10 @@ export default function MedicationModal({
       strength: '',
       form: 'Tablet',
       route: 'Oral',
+      injectionRouteType: '',
       languageMode: 'ur',
+      prescriptionLine: '',
+      prescriptionLineUrdu: '',
       frequency: '',
       frequencyUrdu: '',
       duration: '',
@@ -549,9 +574,13 @@ export default function MedicationModal({
       }
       return;
     }
-
-    setCustomFrequency(parsed.frequency);
-    setCustomFrequencyUrdu(parsed.frequencyUrdu);
+    const derivedLines = buildMedicationPrescriptionLines(
+      { ...selected, injectionRouteType: selected.injectionRouteType || '' },
+      parsed,
+      customDuration
+    );
+    setCustomFrequency(derivedLines.english);
+    setCustomFrequencyUrdu(derivedLines.urdu);
 
     if (parsed.instructions && (!customInstructions || customInstructions === selected.instructions)) {
       setCustomInstructions(parsed.instructions);
@@ -561,6 +590,15 @@ export default function MedicationModal({
       setCustomInstructionsUrdu(parsed.instructionsUrdu);
     }
   };
+
+  useEffect(() => {
+    if (!selected) return;
+    const parsed = dosePattern.trim() ? parseDosePattern(dosePattern, selected) : null;
+    if (!parsed) return;
+    const derivedLines = buildMedicationPrescriptionLines(selected, parsed, customDuration);
+    setCustomFrequency(current => current === '' || current === selected.prescriptionLine || current === selected.frequency || current.includes('morning') || current.includes('evening') || current.includes('noon') ? derivedLines.english : current);
+    setCustomFrequencyUrdu(current => current === '' || current === selected.prescriptionLineUrdu || current === selected.frequencyUrdu || current.includes('صبح') || current.includes('شام') || current.includes('دوپہر') ? derivedLines.urdu : current);
+  }, [customDuration, dosePattern, selected]);
 
   const commitMedicationAdd = () => {
     void commitMedicationAddAsync();
@@ -955,10 +993,10 @@ export default function MedicationModal({
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            {(med.frequency || med.frequencyUrdu || 'Frequency not set')} • {med.duration} • {med.route}
+                            {(med.prescriptionLine || med.frequency || med.prescriptionLineUrdu || med.frequencyUrdu || 'Instruction not set')} • {med.route}
                           </p>
-                          {med.frequencyUrdu && (
-                            <p className="text-xs text-muted-foreground text-right" dir="rtl">{med.frequencyUrdu}</p>
+                          {(med.prescriptionLineUrdu || med.frequencyUrdu) && (
+                            <p className="text-xs text-muted-foreground text-right" dir="rtl">{med.prescriptionLineUrdu || med.frequencyUrdu}</p>
                           )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0 self-center">
@@ -1176,6 +1214,22 @@ export default function MedicationModal({
                             <Label className="text-xs">Route</Label>
                             <Input value={selected.route} readOnly className="h-8 text-sm bg-muted/30" />
                           </div>
+                          {selected.form.toLowerCase() === 'injection' && (
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">Injection Route Type</Label>
+                              <Select
+                                value={selected.injectionRouteType || 'IM'}
+                                onValueChange={value => setSelected(current => current ? { ...current, injectionRouteType: value as Medication['injectionRouteType'] } : current)}
+                              >
+                                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {injectionRouteOptions.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
                           <div className="space-y-1.5">
                             <Label className="text-xs">Prescription Language</Label>
                             <Select value={languageMode} onValueChange={value => setLanguageMode(value as 'en' | 'ur' | 'bilingual')}>
@@ -1191,6 +1245,25 @@ export default function MedicationModal({
                           <div className="space-y-1.5">
                             <Label className="text-xs">Duration</Label>
                             <Input value={customDuration} onChange={e => setCustomDuration(e.target.value)} className="h-8 text-sm" placeholder="5 days / 2 weeks" />
+                            <div className="flex flex-wrap gap-1.5">
+                              {durationSnippets.map(snippet => {
+                                const isActive = customDuration.trim().toLowerCase() === snippet.value.toLowerCase();
+                                return (
+                                  <button
+                                    key={snippet.label}
+                                    type="button"
+                                    onClick={() => setCustomDuration(snippet.value)}
+                                    className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                                      isActive
+                                        ? 'border-primary/50 bg-primary/10 text-foreground'
+                                        : 'border-primary/25 bg-muted/40 text-muted-foreground hover:border-primary/45 hover:bg-muted hover:text-foreground'
+                                    }`}
+                                  >
+                                    {snippet.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1236,12 +1309,12 @@ export default function MedicationModal({
                             ) : null}
                           </div>
                           <div className="space-y-1.5">
-                            <Label className="text-xs">Frequency</Label>
-                            <Input value={customFrequency} readOnly className="h-8 text-sm bg-muted/30" placeholder="Derived from dose pattern" />
+                            <Label className="text-xs">Prescription Line</Label>
+                            <Input value={customFrequency} onChange={e => setCustomFrequency(e.target.value)} className="h-8 text-sm" placeholder="Generated from dose pattern" />
                           </div>
                           {languageMode !== 'en' && (
                             <div className="space-y-1.5">
-                              <Label className="text-xs">Frequency (Urdu)</Label>
+                              <Label className="text-xs">Prescription Line (Urdu)</Label>
                               <Input value={customFrequencyUrdu} onChange={e => setCustomFrequencyUrdu(e.target.value)} dir="rtl" className="h-8 text-sm" />
                             </div>
                           )}
@@ -1250,11 +1323,11 @@ export default function MedicationModal({
 
                       <div className="rounded-lg border border-border/70 p-3 space-y-3">
                         <div>
-                          <h4 className="text-sm font-medium text-foreground">Instructions</h4>
-                          <p className="text-[11px] text-muted-foreground">Keep this simple for the patient and editable when needed.</p>
+                          <h4 className="text-sm font-medium text-foreground">Extra Note</h4>
+                          <p className="text-[11px] text-muted-foreground">Optional short note like after food, before breakfast, or when needed.</p>
                         </div>
                         <div className="space-y-1.5">
-                          <Label className="text-xs">Instruction Search / Preset</Label>
+                          <Label className="text-xs">Note Search / Preset</Label>
                           <div className="relative">
                             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                             <Input
@@ -1269,7 +1342,7 @@ export default function MedicationModal({
                                   setCustomInstructions(value);
                                 }
                               }}
-                              placeholder={languageMode === 'ur' ? 'Search Urdu instruction...' : 'Search instruction...'}
+                              placeholder={languageMode === 'ur' ? 'Search Urdu note...' : 'Search note...'}
                               className="h-8 pl-9 pr-9 text-sm"
                             />
                             {instructionSearch && (
@@ -1306,21 +1379,21 @@ export default function MedicationModal({
                                 </button>
                               ))
                             ) : (
-                              <p className="px-3 py-2 text-xs text-muted-foreground">No preset matched. Keep typing to use a custom instruction.</p>
+                              <p className="px-3 py-2 text-xs text-muted-foreground">No preset matched. Keep typing to use a custom short note.</p>
                             )}
                           </div>
                         </div>
 
                         {languageMode !== 'ur' && (
                           <div className="space-y-1.5">
-                            <Label className="text-xs">Instructions (English)</Label>
+                            <Label className="text-xs">Extra Note (English)</Label>
                             <Input value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} className="h-8 text-sm" />
                           </div>
                         )}
 
                         {languageMode !== 'en' && (
                           <div className="space-y-1.5">
-                            <Label className="text-xs">Instructions (Urdu)</Label>
+                            <Label className="text-xs">Extra Note (Urdu)</Label>
                             <Input value={customInstructionsUrdu} onChange={e => setCustomInstructionsUrdu(e.target.value)} dir="rtl" className="h-8 text-sm" />
                           </div>
                         )}

@@ -72,21 +72,68 @@ function getEnglishDoseLabel(quantity: number, medication: Medication) {
 
 function buildUrduTimingText(medication: Medication, slots: Array<{ timing: TimingSlot; quantity: number }>) {
   return slots
-    .map(({ timing, quantity }) => `${timingLabels[timing].ur} ${quantity} ${getUrduDoseUnit(medication, quantity)}`)
+    .map(({ timing, quantity }) => `${quantity} ${getUrduDoseUnit(medication, quantity)} ${timingLabels[timing].ur}`)
     .join('، ');
 }
 
 function buildEnglishFrequency(slots: Array<{ timing: TimingSlot; quantity: number }>, medication: Medication) {
-  if (slots.length === 1 && slots[0]?.timing === 'morning') {
-    return `${getEnglishDoseLabel(slots[0].quantity, medication)} once daily`;
+  return slots
+    .map(({ timing, quantity }) => `${quantity} ${quantity === 1 ? (englishDoseUnitsByForm[normalizeForm(medication.form)]?.singular ?? 'dose') : (englishDoseUnitsByForm[normalizeForm(medication.form)]?.plural ?? 'doses')} ${timingLabels[timing].en}`)
+    .join(' + ');
+}
+
+function getDurationSuffix(duration: string, language: 'en' | 'ur') {
+  const trimmed = duration.trim();
+  if (!trimmed) return '';
+  if (language === 'ur') {
+    return ` - ${translateDurationToUrdu(trimmed)}`;
+  }
+  return ` - ${trimmed}`;
+}
+
+function translateDurationToUrdu(duration: string) {
+  const trimmed = duration.trim();
+  if (!trimmed) return '';
+
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'continue') return 'جاری رکھیں';
+
+  const match = normalized.match(/^(\d+)\s*(day|days|d|week|weeks|w|month|months|m)$/i);
+  if (!match) return trimmed;
+
+  const [, count, unit] = match;
+  if (['day', 'days', 'd'].includes(unit)) {
+    return `${count} دن`;
+  }
+  if (['week', 'weeks', 'w'].includes(unit)) {
+    return `${count} ہفتے`;
+  }
+  if (['month', 'months', 'm'].includes(unit)) {
+    return `${count} ماہ`;
   }
 
-  const activeTimings = slots.map(({ timing, quantity }) => `${getEnglishDoseLabel(quantity, medication)} in the ${timingLabels[timing].en}`);
+  return trimmed;
+}
 
-  if (activeTimings.length === 1) return activeTimings[0];
-  if (activeTimings.length === 2) return `${activeTimings[0]} and ${activeTimings[1]}`;
+function getInjectionRouteSuffix(medication: Medication) {
+  if (normalizeForm(medication.form) !== 'injection') return '';
+  const type = medication.injectionRouteType?.trim();
+  return type ? ` ${type}` : '';
+}
 
-  return `${activeTimings.slice(0, -1).join(', ')}, and ${activeTimings.at(-1)}`;
+export function buildMedicationPrescriptionLines(
+  medication: Medication,
+  parsedPattern: Pick<ParsedDosePattern, 'frequency' | 'frequencyUrdu'> | null,
+  duration: string
+) {
+  const routeSuffix = getInjectionRouteSuffix(medication);
+  const englishBase = parsedPattern?.frequency || medication.frequency || '';
+  const urduBase = parsedPattern?.frequencyUrdu || medication.frequencyUrdu || '';
+
+  return {
+    english: `${englishBase}${routeSuffix}${getDurationSuffix(duration, 'en')}`.trim(),
+    urdu: `${urduBase}${routeSuffix}${getDurationSuffix(duration, 'ur')}`.trim(),
+  };
 }
 
 export interface ParsedDosePattern {
@@ -110,6 +157,7 @@ export function parseDosePattern(input: string, medication: Medication): ParsedD
   if (specialPatterns[value]) {
     return {
       normalizedPattern: value,
+      slots: [],
       ...specialPatterns[value],
     };
   }

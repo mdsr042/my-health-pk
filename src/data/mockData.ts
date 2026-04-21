@@ -74,8 +74,11 @@ export interface Medication {
   strength: string;
   form: string;
   route: string;
+  injectionRouteType?: 'IM' | 'IV' | 'SC' | '';
   languageMode?: 'en' | 'ur' | 'bilingual';
   dosePattern?: string;
+  prescriptionLine?: string;
+  prescriptionLineUrdu?: string;
   doseUnitUrdu?: {
     singular: string;
     plural: string;

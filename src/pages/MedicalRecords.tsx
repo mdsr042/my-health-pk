@@ -514,11 +514,10 @@ export default function MedicalRecords() {
                                               {[med.strength, med.form, med.route].filter(Boolean).join(' • ') || 'Details not set'}
                                             </p>
                                             <p className="text-sm text-foreground">
-                                              {med.frequency || med.frequencyUrdu || 'Frequency not set'}
-                                              {med.duration ? ` • ${med.duration}` : ''}
+                                              {med.prescriptionLine || med.frequency || med.prescriptionLineUrdu || med.frequencyUrdu || 'Instruction not set'}
                                             </p>
                                             {med.instructions && <p className="text-xs text-muted-foreground">{med.instructions}</p>}
-                                            {med.frequencyUrdu && <p className="text-xs text-muted-foreground text-right" dir="rtl">{med.frequencyUrdu}</p>}
+                                            {(med.prescriptionLineUrdu || med.frequencyUrdu) && <p className="text-xs text-muted-foreground text-right" dir="rtl">{med.prescriptionLineUrdu || med.frequencyUrdu}</p>}
                                             {med.instructionsUrdu && <p className="text-xs text-muted-foreground text-right" dir="rtl">{med.instructionsUrdu}</p>}
                                           </div>
                                         ))}
@@ -648,8 +647,7 @@ export default function MedicalRecords() {
                                                       {[med.strength, med.form, med.route].filter(Boolean).join(' • ') || 'Details not set'}
                                                     </p>
                                                     <p className="text-sm text-foreground">
-                                                      {med.frequency || med.frequencyUrdu || 'Frequency not set'}
-                                                      {med.duration ? ` • ${med.duration}` : ''}
+                                                      {med.prescriptionLine || med.frequency || med.prescriptionLineUrdu || med.frequencyUrdu || 'Instruction not set'}
                                                     </p>
                                                   </div>
                                                 ))}
