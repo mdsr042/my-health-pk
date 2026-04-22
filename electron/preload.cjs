@@ -1,0 +1,22 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('desktopApp', {
+  isDesktop: true,
+  getRuntimeInfoSync: () => ipcRenderer.sendSync('desktop:runtime-info'),
+  getAuthTokenSync: () => ipcRenderer.sendSync('desktop:auth-token:get'),
+  clearAuthTokenSync: () => ipcRenderer.sendSync('desktop:auth-token:clear'),
+  bootstrapSession: payload => ipcRenderer.invoke('desktop:bootstrap-session', payload),
+  updateBootstrapSnapshot: snapshot => ipcRenderer.invoke('desktop:bootstrap:update', snapshot),
+  setupPin: pin => ipcRenderer.invoke('desktop:pin:setup', pin),
+  unlockWithPin: pin => ipcRenderer.invoke('desktop:pin:unlock', pin),
+  lockNow: () => ipcRenderer.invoke('desktop:lock'),
+  getCachedBootstrap: () => ipcRenderer.invoke('desktop:bootstrap:get-cached'),
+  enqueueMutation: mutation => ipcRenderer.invoke('desktop:sync:enqueue-mutation', mutation),
+  getSyncIssues: () => ipcRenderer.invoke('desktop:sync:get-issues'),
+  runSync: () => ipcRenderer.invoke('desktop:sync:run'),
+  rebuildCache: () => ipcRenderer.invoke('desktop:sync:rebuild-cache'),
+  exportDiagnostics: () => ipcRenderer.invoke('desktop:sync:export-diagnostics'),
+  queueAttachment: attachment => ipcRenderer.invoke('desktop:sync:queue-attachment', attachment),
+  pickAndStoreAttachment: payload => ipcRenderer.invoke('desktop:attachments:pick-store', payload),
+  listAttachments: filters => ipcRenderer.invoke('desktop:attachments:list', filters),
+});

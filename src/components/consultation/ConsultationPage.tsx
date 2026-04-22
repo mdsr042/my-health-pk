@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { usePatientTabs } from '@/contexts/PatientTabsContext';
 import { useData } from '@/contexts/DataContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDesktop } from '@/contexts/DesktopContext';
 import { sampleVitals, type CareAction, type Diagnosis, type Medication, type LabOrder, type Procedure } from '@/data/mockData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -43,6 +44,7 @@ import { getLocalDateKey } from '@/lib/date';
 import type {
   AdviceTemplate,
   ConditionLibraryEntry,
+  DesktopAttachmentTransfer,
   DiagnosisCatalogEntry,
   DiagnosisSet,
   InvestigationSet,
@@ -50,6 +52,13 @@ import type {
   TreatmentTemplatePayload,
 } from '@/lib/app-types';
 import { APP_NAVIGATE_EVENT, SETTINGS_SECTION_TEMPLATES } from '@/lib/app-defaults';
+import {
+  enqueueDesktopMutation,
+  getDesktopRuntimeInfoSync,
+  isDesktopRuntime,
+  listDesktopAttachments,
+  pickAndStoreDesktopAttachment,
+} from '@/lib/desktop';
 
 function getTomorrowDateKey() {
   const next = new Date();
@@ -178,7 +187,8 @@ function createConsultationDraftSignature(payload: Record<string, unknown>) {
 
 export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const { markUnsaved, closeTab } = usePatientTabs();
-  const { activeClinic, doctorClinics, user } = useAuth();
+  const { activeClinic, doctorClinics, user, workspace } = useAuth();
+  const { runtime } = useDesktop();
   const {
     getPatient,
     appointments,
@@ -227,6 +237,8 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [diagnosisQuery, setDiagnosisQuery] = useState('');
   const [pastHistoryQuery, setPastHistoryQuery] = useState('');
+  const [documents, setDocuments] = useState<DesktopAttachmentTransfer[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
   const hydratedDraftKeyRef = useRef('');
   const latestPayloadSignatureRef = useRef('');
   const lastPersistedSignatureRef = useRef('');
@@ -502,6 +514,74 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     markLocalChange();
   }, [activeAppointment?.clinicId, activeAppointment?.id, activeClinic?.id, draft?.appointmentId, markLocalChange, patientId, user?.id]);
 
+  const loadDocuments = useCallback(async () => {
+    if (!isDesktopRuntime() || !patient?.id) {
+      setDocuments([]);
+      return;
+    }
+
+    setDocumentsLoading(true);
+    try {
+      const nextDocuments = await listDesktopAttachments({
+        patientId: patient.id,
+        appointmentId: activeAppointment?.id || '',
+      });
+      setDocuments(nextDocuments);
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, [activeAppointment?.id, patient?.id]);
+
+  const handleUploadDocument = useCallback(async () => {
+    if (!patient?.id) {
+      toast.error('Patient not found');
+      return;
+    }
+
+    if (!isDesktopRuntime()) {
+      toast.info('Desktop document storage is available in the desktop app.');
+      return;
+    }
+
+    if (!workspace?.id) {
+      toast.error('Workspace not available yet');
+      return;
+    }
+
+    const result = await pickAndStoreDesktopAttachment({
+      workspaceId: workspace.id,
+      patientId: patient.id,
+      appointmentId: activeAppointment?.id || '',
+      entityType: activeAppointment?.id ? 'appointment' : 'patient',
+      entityId: activeAppointment?.id || patient.id,
+    });
+
+    if (!result.ok || !result.attachment) {
+      return;
+    }
+
+    setDocuments(prev => [result.attachment!, ...prev.filter(item => item.id !== result.attachment!.id)]);
+
+    const runtimeInfo = getDesktopRuntimeInfoSync();
+    if (runtimeInfo.deviceId) {
+      await enqueueDesktopMutation({
+        mutationId: `mutation_${crypto.randomUUID()}`,
+        deviceId: runtimeInfo.deviceId,
+        workspaceId: workspace.id,
+        entityType: 'attachment',
+        entityId: result.attachment.attachmentId,
+        operationType: 'create',
+        payload: result.attachment as unknown as Record<string, unknown>,
+        createdLocalAt: new Date().toISOString(),
+        status: 'pending',
+      });
+    }
+
+    toast.success('Document added locally', {
+      description: 'It is stored on this device and queued for cloud sync.',
+    });
+  }, [activeAppointment?.id, patient, workspace?.id]);
+
   const handleSaveDraft = async () => {
     if (!activeAppointment?.id) {
       toast.error('No active appointment found for this consultation');
@@ -633,6 +713,11 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (activeView !== 'documents') return;
+    void loadDocuments();
+  }, [activeView, loadDocuments, runtime?.lastSuccessfulSyncAt]);
 
   useEffect(() => {
     const incomingDraft = draft;
@@ -1583,13 +1668,47 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
             {activeView === 'notes' && <NotesTimeline notes={patientNotes} />}
             {activeView === 'orders' && <OrdersPanel activeOrders={labOrders} activeProcedures={procedures} activeCareActions={careActions} previousNotes={patientNotes} onQuickAdd={handleOrdersQuickAdd} />}
             {activeView === 'documents' && (
-              <div className="p-6 text-center text-muted-foreground">
-                <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-                <p className="font-medium">Documents</p>
-                <p className="text-sm">Upload and manage patient documents (PDF, JPG, PNG)</p>
-                <Button variant="outline" className="mt-4 gap-2">
-                  <Plus className="w-4 h-4" /> Upload Document
-                </Button>
+              <div className="p-6 space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="font-medium text-foreground">Documents</p>
+                    <p className="text-sm text-muted-foreground">Store PDF, JPG, and PNG files locally and sync their metadata when internet is available.</p>
+                  </div>
+                  <Button variant="outline" className="gap-2" onClick={() => void handleUploadDocument()}>
+                    <Plus className="w-4 h-4" /> Upload Document
+                  </Button>
+                </div>
+
+                {documentsLoading ? (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 p-5 text-sm text-muted-foreground">
+                    Loading local documents...
+                  </div>
+                ) : documents.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 p-8 text-center text-muted-foreground">
+                    <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
+                    <p className="font-medium">No documents added yet</p>
+                    <p className="text-sm">Upload the first patient document to keep it available on this device and queue it for sync.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {documents.map(document => (
+                      <div key={document.id} className="rounded-lg border border-border bg-card px-4 py-3 flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm text-foreground truncate">{document.fileName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(document.mimeType || 'Document').replace('application/', '').replace('image/', '').toUpperCase()} • {Math.max(1, Math.round(document.fileSize / 1024))} KB
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {document.appointmentId ? 'Linked to current visit' : 'Patient document'}{document.updatedAt ? ` • ${new Date(document.updatedAt).toLocaleString()}` : ''}
+                          </p>
+                        </div>
+                        <Badge variant={document.status === 'uploaded' ? 'default' : 'secondary'}>
+                          {document.status === 'uploaded' ? 'Synced' : 'Pending Sync'}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {activeView === 'prescription' && (

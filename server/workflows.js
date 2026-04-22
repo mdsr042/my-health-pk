@@ -51,7 +51,7 @@ export async function requireOwnedAppointment(client, workspaceId, appointmentId
   return result.rows[0];
 }
 
-async function getNextTokenNumber(client, workspaceId, clinicId, date) {
+export async function getNextTokenNumber(client, workspaceId, clinicId, date) {
   await requireOwnedClinic(client, workspaceId, clinicId, { lock: true });
   const result = await client.query(
     `

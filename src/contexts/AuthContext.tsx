@@ -1,15 +1,25 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Clinic } from '@/data/mockData';
 import {
+  bootstrapDesktopSession,
+  getCachedDesktopBootstrap,
+  getDesktopRuntimeInfoSync,
+  isDesktopRuntime,
+} from '@/lib/desktop';
+import {
   clearStoredAuthToken,
   createDemoSession,
   fetchCurrentSession,
+  fetchDesktopBootstrapSnapshot,
+  getStoredAuthToken,
   loginWithPassword,
   logoutSession,
+  registerDesktopDevice,
   setStoredAuthToken,
   signupDoctor,
 } from '@/lib/api';
 import type { SessionPayload, SignupPayload } from '@/lib/app-types';
+import { useDesktop } from '@/contexts/DesktopContext';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -58,14 +68,41 @@ function normalizeClinic(clinic: Clinic): Clinic {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { refreshRuntime } = useDesktop();
   const [isLoading, setIsLoading] = useState(true);
   const [session, setSession] = useState<SessionPayload | null>(null);
   const [activeClinicId, setActiveClinicId] = useState(readStoredClinicId);
 
+  const syncDesktopBootstrap = useCallback(async (token: string, nextSession: SessionPayload) => {
+    if (!isDesktopRuntime() || !nextSession.user || nextSession.user.role !== 'doctor_owner') return;
+
+    const runtime = getDesktopRuntimeInfoSync();
+    await registerDesktopDevice({
+      deviceId: runtime.deviceId,
+      deviceName: typeof window !== 'undefined' ? window.navigator.platform || 'Desktop Device' : 'Desktop Device',
+      platform: 'windows-desktop',
+      appVersion: '0.0.0',
+    });
+
+    const bootstrap = await fetchDesktopBootstrapSnapshot();
+    await bootstrapDesktopSession({
+      token,
+      session: nextSession,
+      bootstrap,
+    });
+    refreshRuntime();
+  }, [refreshRuntime]);
+
   const refreshSession = useCallback(async () => {
     const nextSession = await fetchCurrentSession();
     setSession(nextSession);
-  }, []);
+    if (isDesktopRuntime()) {
+      const token = getStoredAuthToken();
+      if (token) {
+        await syncDesktopBootstrap(token, nextSession);
+      }
+    }
+  }, [syncDesktopBootstrap]);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,7 +112,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const nextSession = await fetchCurrentSession();
         if (cancelled) return;
         setSession(nextSession);
+        if (isDesktopRuntime()) {
+          const token = getStoredAuthToken();
+          if (token) {
+            await syncDesktopBootstrap(token, nextSession);
+          }
+        }
       } catch {
+        if (isDesktopRuntime()) {
+          const cached = await getCachedDesktopBootstrap();
+          if (!cancelled && cached.session) {
+            setSession(cached.session);
+            setIsLoading(false);
+            return;
+          }
+        }
+
         clearStoredAuthToken();
         if (!cancelled) {
           setSession(null);
@@ -120,14 +172,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStoredAuthToken(result.token);
     setSession(result.session);
     setActiveClinicId(result.session.clinics[0]?.id ?? '');
-  }, []);
+    await syncDesktopBootstrap(result.token, result.session);
+  }, [syncDesktopBootstrap]);
 
   const openDemo = useCallback(async () => {
     const result = await createDemoSession();
     setStoredAuthToken(result.token, 'session');
     setSession(result.session);
     setActiveClinicId(result.session.clinics[0]?.id ?? '');
-  }, []);
+    await syncDesktopBootstrap(result.token, result.session);
+  }, [syncDesktopBootstrap]);
 
   const signup = useCallback(async (payload: SignupPayload) => {
     const result = await signupDoctor(payload);

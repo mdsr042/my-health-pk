@@ -9,6 +9,10 @@
     "api": "node server/index.js",
     "start": "node server/index.js",
     "dev:full": "concurrently \"npm run api\" \"npm run dev\"",
+    "desktop": "electron electron/main.cjs",
+    "desktop:dev": "concurrently \"npm run api\" \"npm run dev\" \"wait-on tcp:4001 tcp:8080 && cross-env ELECTRON_RENDERER_URL=http://localhost:8080 electron electron/main.cjs\"",
+    "desktop:pack": "npm run build && electron-builder --dir",
+    "desktop:dist": "npm run build && electron-builder",
     "catalog:fetch:pk": "node scripts/fetch-drap-medicines.mjs",
     "catalog:import:pk-enrichment": "node scripts/import-medication-enrichments.mjs",
     "smoke:core-flow": "node scripts/smoke-core-flow.mjs",
@@ -57,6 +61,7 @@
     "concurrently": "^9.2.1",
     "cors": "^2.8.6",
     "date-fns": "^3.6.0",
+    "electron-store": "^11.0.2",
     "embla-carousel-react": "^8.6.0",
     "express": "^5.2.1",
     "input-otp": "^1.4.2",
@@ -88,6 +93,9 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "autoprefixer": "^10.4.21",
+    "cross-env": "^10.1.0",
+    "electron": "^41.2.2",
+    "electron-builder": "^26.8.1",
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
@@ -99,6 +107,38 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^5.4.19",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wait-on": "^9.0.5"
+  },
+  "build": {
+    "appId": "pk.myhealth.desktop",
+    "productName": "My Health Desktop",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server/**/*",
+      "data/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "public"
+    },
+    "extraMetadata": {
+      "main": "electron/main.cjs"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

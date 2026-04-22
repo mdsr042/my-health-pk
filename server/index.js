@@ -44,6 +44,10 @@ import {
   completeConsultationEncounter,
   createAppointmentForWorkspace,
   createWalkInEncounter,
+  getNextTokenNumber,
+  requireOwnedAppointment,
+  requireOwnedClinic,
+  requireOwnedPatient,
   searchPatientsByPhone,
   saveConsultationDraftForEncounter,
   updateAppointmentForWorkspace,
@@ -239,6 +243,27 @@ function mapCareAction(row) {
     urgency: row.urgency,
     actionDate: row.action_date,
     createdAt: row.created_at,
+  };
+}
+
+function mapPatientDocument(row) {
+  return {
+    id: row.id,
+    attachmentId: row.id,
+    workspaceId: row.workspace_id,
+    entityType: row.entity_type ?? 'patient',
+    entityId: row.entity_id ?? row.patient_id,
+    patientId: row.patient_id,
+    appointmentId: row.appointment_id ?? '',
+    fileName: row.file_name ?? '',
+    mimeType: row.mime_type ?? '',
+    fileSize: Number(row.file_size ?? 0),
+    checksum: row.checksum ?? '',
+    localPath: '',
+    remoteKey: row.remote_key ?? '',
+    status: 'uploaded',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -557,6 +582,500 @@ async function getWorkspaceDrafts(workspaceId) {
       },
     ])
   );
+}
+
+async function getWorkspaceAttachments(workspaceId) {
+  const { rows } = await query(
+    `
+      SELECT *
+      FROM patient_documents
+      WHERE workspace_id = $1
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1000
+    `,
+    [workspaceId]
+  );
+
+  return rows.map(mapPatientDocument);
+}
+
+async function getDesktopBootstrapData(auth) {
+  const [patientsResult, appointmentsResult, notes, drafts, clinics, settings, attachments] = await Promise.all([
+    query(
+      `
+        SELECT *
+        FROM patients
+        WHERE workspace_id = $1
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1000
+      `,
+      [auth.workspace.id]
+    ),
+    query(
+      `
+        SELECT *
+        FROM appointments
+        WHERE workspace_id = $1
+        ORDER BY date DESC, time DESC, token_number DESC
+        LIMIT 1500
+      `,
+      [auth.workspace.id]
+    ),
+    getWorkspaceNotes(auth.workspace.id),
+    getWorkspaceDrafts(auth.workspace.id),
+    getWorkspaceClinics(auth.workspace.id),
+    getWorkspaceSettings(auth.workspace.id),
+    getWorkspaceAttachments(auth.workspace.id),
+  ]);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    patients: patientsResult.rows.map(mapPatient),
+    appointments: appointmentsResult.rows.map(mapAppointment),
+    notes,
+    drafts,
+    clinics,
+    settings,
+    attachments,
+  };
+}
+
+function parseSyncCheckpoint(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+function buildDraftBaseVersion(payload = {}, savedAt = '') {
+  return JSON.stringify({
+    appointmentId: String(payload?.appointmentId ?? '').trim(),
+    patientId: String(payload?.patientId ?? '').trim(),
+    clinicId: String(payload?.clinicId ?? '').trim(),
+    chiefComplaint: String(payload?.chiefComplaint ?? ''),
+    hpi: String(payload?.hpi ?? ''),
+    pastHistory: String(payload?.pastHistory ?? ''),
+    allergies: String(payload?.allergies ?? ''),
+    examination: String(payload?.examination ?? ''),
+    assessment: String(payload?.assessment ?? ''),
+    plan: String(payload?.plan ?? ''),
+    instructions: String(payload?.instructions ?? ''),
+    followUp: String(payload?.followUp ?? ''),
+    vitals: payload?.vitals ?? {},
+    diagnoses: payload?.diagnoses ?? [],
+    medications: payload?.medications ?? [],
+    labOrders: payload?.labOrders ?? [],
+    procedures: payload?.procedures ?? [],
+    careActions: payload?.careActions ?? [],
+    savedAt: String(savedAt || payload?.savedAt || ''),
+  });
+}
+
+async function getDesktopChangeSet(auth, checkpoint) {
+  const normalizedCheckpoint = parseSyncCheckpoint(checkpoint);
+  if (!normalizedCheckpoint) {
+    return {
+      patients: [],
+      appointments: [],
+      drafts: {},
+      notes: [],
+      attachments: [],
+    };
+  }
+
+  const [patientsResult, appointmentsResult, draftRows, noteIdsResult, attachmentResult] = await Promise.all([
+    query(
+      `
+        SELECT *
+        FROM patients
+        WHERE workspace_id = $1 AND updated_at > $2
+        ORDER BY updated_at ASC
+      `,
+      [auth.workspace.id, normalizedCheckpoint]
+    ),
+    query(
+      `
+        SELECT *
+        FROM appointments
+        WHERE workspace_id = $1 AND updated_at > $2
+        ORDER BY updated_at ASC
+      `,
+      [auth.workspace.id, normalizedCheckpoint]
+    ),
+    query(
+      `
+        SELECT appointment_id, patient_id, payload, saved_at
+        FROM consultation_drafts
+        WHERE workspace_id = $1 AND updated_at > $2
+        ORDER BY updated_at ASC
+      `,
+      [auth.workspace.id, normalizedCheckpoint]
+    ),
+    query(
+      `
+        SELECT id
+        FROM clinical_notes
+        WHERE workspace_id = $1 AND updated_at > $2
+        ORDER BY updated_at ASC
+      `,
+      [auth.workspace.id, normalizedCheckpoint]
+    ),
+    query(
+      `
+        SELECT *
+        FROM patient_documents
+        WHERE workspace_id = $1 AND updated_at > $2
+        ORDER BY updated_at ASC
+      `,
+      [auth.workspace.id, normalizedCheckpoint]
+    ),
+  ]);
+
+  const notes = await Promise.all(noteIdsResult.rows.map(row => getWorkspaceNoteById(auth.workspace.id, row.id)));
+
+  return {
+    patients: patientsResult.rows.map(mapPatient),
+    appointments: appointmentsResult.rows.map(mapAppointment),
+    drafts: Object.fromEntries(
+      draftRows.rows.map(row => [
+        row.appointment_id || `orphan:${row.patient_id}`,
+        {
+          ...row.payload,
+          appointmentId: row.appointment_id || row.payload?.appointmentId || '',
+          savedAt: row.saved_at,
+        },
+      ])
+    ),
+    notes: notes.filter(Boolean),
+    attachments: attachmentResult.rows.map(mapPatientDocument),
+  };
+}
+
+async function processDesktopMutation(client, auth, mutation) {
+  const entityType = String(mutation?.entityType ?? '').trim();
+  const operationType = String(mutation?.operationType ?? '').trim();
+  const payload = mutation?.payload ?? {};
+
+  if (entityType === 'patient' && operationType === 'create') {
+    const patient = parseOrThrow(patientSchema, payload, 'INVALID_PATIENT');
+    const id = patient.id || createId('patient');
+    const mrn = patient.mrn || `MRN-${Date.now().toString().slice(-8)}`;
+
+    const result = await client.query(
+      `
+        INSERT INTO patients (
+          id, workspace_id, mrn, name, phone, age, gender, cnic, address, blood_group, emergency_contact
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT (id) DO UPDATE SET
+          mrn = EXCLUDED.mrn,
+          name = EXCLUDED.name,
+          phone = EXCLUDED.phone,
+          age = EXCLUDED.age,
+          gender = EXCLUDED.gender,
+          cnic = EXCLUDED.cnic,
+          address = EXCLUDED.address,
+          blood_group = EXCLUDED.blood_group,
+          emergency_contact = EXCLUDED.emergency_contact,
+          updated_at = NOW()
+        RETURNING *
+      `,
+      [
+        id,
+        auth.workspace.id,
+        mrn,
+        patient.name,
+        patient.phone || '',
+        patient.age || 0,
+        patient.gender || 'Male',
+        patient.cnic || '',
+        patient.address || '',
+        patient.bloodGroup || '',
+        patient.emergencyContact || '',
+      ]
+    );
+
+    return { entityType, operationType, patient: mapPatient(result.rows[0]) };
+  }
+
+  if (entityType === 'patient' && operationType === 'update') {
+    const patient = parseOrThrow(patientSchema, payload, 'INVALID_PATIENT');
+    const result = await client.query(
+      `
+        UPDATE patients
+        SET
+          name = $3,
+          phone = $4,
+          age = $5,
+          gender = $6,
+          cnic = $7,
+          address = $8,
+          blood_group = $9,
+          emergency_contact = $10,
+          updated_at = NOW()
+        WHERE id = $1 AND workspace_id = $2
+        RETURNING *
+      `,
+      [
+        patient.id,
+        auth.workspace.id,
+        patient.name,
+        patient.phone || '',
+        patient.age || 0,
+        patient.gender || 'Male',
+        patient.cnic || '',
+        patient.address || '',
+        patient.bloodGroup || '',
+        patient.emergencyContact || '',
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      throw new Error('Patient not found for update');
+    }
+
+    return { entityType, operationType, patient: mapPatient(result.rows[0]) };
+  }
+
+  if (entityType === 'appointment' && operationType === 'create') {
+    const appointment = parseOrThrow(appointmentSchema, payload, 'INVALID_APPOINTMENT');
+    await requireOwnedPatient(client, auth.workspace.id, appointment.patientId);
+    await requireOwnedClinic(client, auth.workspace.id, appointment.clinicId);
+
+    const tokenNumber = appointment.tokenNumber > 0
+      ? appointment.tokenNumber
+      : await getNextTokenNumber(client, auth.workspace.id, appointment.clinicId, appointment.date);
+
+    const result = await client.query(
+      `
+        INSERT INTO appointments (
+          id, workspace_id, clinic_id, patient_id, doctor_user_id, date, time, status, type, chief_complaint, token_number, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          patient_id = EXCLUDED.patient_id,
+          clinic_id = EXCLUDED.clinic_id,
+          date = EXCLUDED.date,
+          time = EXCLUDED.time,
+          status = EXCLUDED.status,
+          type = EXCLUDED.type,
+          chief_complaint = EXCLUDED.chief_complaint,
+          token_number = EXCLUDED.token_number,
+          updated_at = NOW()
+        RETURNING id, patient_id, clinic_id, doctor_user_id, date, time, status, type, chief_complaint, token_number
+      `,
+      [
+        appointment.id || createId('appointment'),
+        auth.workspace.id,
+        appointment.clinicId,
+        appointment.patientId,
+        auth.user.id,
+        appointment.date,
+        appointment.time,
+        appointment.status || 'scheduled',
+        appointment.type || 'new',
+        appointment.chiefComplaint || '',
+        tokenNumber,
+      ]
+    );
+
+    return { entityType, operationType, appointment: mapAppointment(result.rows[0]) };
+  }
+
+  if (entityType === 'appointment' && operationType === 'update') {
+    const appointment = parseOrThrow(appointmentSchema, payload, 'INVALID_APPOINTMENT');
+    const saved = await updateAppointmentForWorkspace(client, {
+      workspaceId: auth.workspace.id,
+      appointmentId: appointment.id,
+      appointment,
+    });
+    return { entityType, operationType, appointment: mapAppointment(saved) };
+  }
+
+  if (entityType === 'appointment' && operationType === 'status_update') {
+    const appointmentId = String(mutation?.entityId ?? payload?.appointmentId ?? '').trim();
+    const status = String(payload?.status ?? '').trim();
+    if (!appointmentId || !status) {
+      throw new Error('Appointment status mutation is incomplete');
+    }
+
+    const appointment = await requireOwnedAppointment(client, auth.workspace.id, appointmentId, { lock: true });
+    if (status === 'in-consultation') {
+      const conflict = await client.query(
+        `
+          SELECT id
+          FROM appointments
+          WHERE workspace_id = $1
+            AND clinic_id = $2
+            AND date = $3
+            AND status = 'in-consultation'
+            AND id <> $4
+          LIMIT 1
+        `,
+        [auth.workspace.id, appointment.clinic_id, appointment.date, appointmentId]
+      );
+      if (conflict.rowCount > 0) {
+        throw new Error('Appointment status conflict: another visit is already in consultation');
+      }
+    }
+
+    await client.query(
+      `
+        UPDATE appointments
+        SET status = $3, updated_at = NOW()
+        WHERE id = $1 AND workspace_id = $2
+      `,
+      [appointmentId, auth.workspace.id, status]
+    );
+
+    return { entityType, operationType, appointmentId, status };
+  }
+
+  if (entityType === 'consultation_draft' && operationType === 'upsert') {
+    const appointmentId = String(mutation?.entityId ?? payload?.appointmentId ?? '').trim();
+    const existingDraft = await client.query(
+      `
+        SELECT payload, saved_at
+        FROM consultation_drafts
+        WHERE workspace_id = $1 AND appointment_id = $2
+        LIMIT 1
+      `,
+      [auth.workspace.id, appointmentId]
+    );
+    const existingBaseVersion = existingDraft.rows[0]
+      ? buildDraftBaseVersion(existingDraft.rows[0].payload ?? {}, existingDraft.rows[0].saved_at)
+      : '';
+    const incomingBaseVersion = String(mutation?.baseVersion ?? '').trim();
+    if (existingDraft.rows[0] && incomingBaseVersion && existingBaseVersion && incomingBaseVersion !== existingBaseVersion) {
+      throw new Error('Draft conflict: the consultation draft changed on another client');
+    }
+    await saveConsultationDraftForEncounter(client, {
+      workspaceId: auth.workspace.id,
+      doctorUserId: auth.user.id,
+      appointmentId,
+      payload,
+    });
+    return {
+      entityType,
+      operationType,
+      appointmentId,
+      draft: {
+        ...payload,
+        appointmentId,
+        savedAt: payload?.savedAt ?? new Date().toISOString(),
+      },
+    };
+  }
+
+  if (entityType === 'walk_in' && operationType === 'create') {
+    const walkInPayload = payload?.appointment && payload?.patient
+      ? {
+          patientId: payload.patient.id || '',
+          name: payload.patient.name || '',
+          phone: payload.patient.phone || '',
+          age: Number(payload.patient.age || 0),
+          gender: payload.patient.gender || 'Male',
+          cnic: payload.patient.cnic || '',
+          address: payload.patient.address || '',
+          bloodGroup: payload.patient.bloodGroup || '',
+          emergencyContact: payload.patient.emergencyContact || '',
+          chiefComplaint: payload.chiefComplaint || payload.appointment.chiefComplaint || 'Walk-in',
+          date: payload.appointment.date,
+        }
+      : payload;
+
+    const result = await createWalkInEncounter(client, {
+      workspaceId: auth.workspace.id,
+      doctorUserId: auth.user.id,
+      clinicId: String(payload?.clinicId ?? payload?.appointment?.clinicId ?? '').trim(),
+      payload: walkInPayload,
+    });
+
+    return {
+      entityType,
+      operationType,
+      patient: mapPatient(result.patient),
+      appointment: mapAppointment(result.appointment),
+      reusedPatient: result.reusedPatient,
+      matchedBy: result.matchedBy,
+    };
+  }
+
+  if (entityType === 'consultation' && operationType === 'complete') {
+    const { noteId } = await completeConsultationEncounter(client, {
+      workspaceId: auth.workspace.id,
+      doctorUserId: auth.user.id,
+      payload,
+    });
+    const note = await getWorkspaceNoteById(auth.workspace.id, noteId);
+    return {
+      entityType,
+      operationType,
+      noteId,
+      note,
+    };
+  }
+
+  if (entityType === 'attachment' && operationType === 'create') {
+    const patientId = String(payload?.patientId ?? '').trim();
+    const appointmentId = String(payload?.appointmentId ?? '').trim();
+    if (!patientId) {
+      throw new Error('Attachment is missing patient linkage');
+    }
+
+    await requireOwnedPatient(client, auth.workspace.id, patientId);
+    if (appointmentId) {
+      await requireOwnedAppointment(client, auth.workspace.id, appointmentId);
+    }
+
+    const attachmentId = String(payload?.attachmentId ?? mutation?.entityId ?? '').trim() || createId('patient_document');
+    const result = await client.query(
+      `
+        INSERT INTO patient_documents (
+          id, workspace_id, patient_id, appointment_id, uploaded_by_user_id, entity_type, entity_id,
+          file_name, mime_type, file_size, checksum, remote_key, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          patient_id = EXCLUDED.patient_id,
+          appointment_id = EXCLUDED.appointment_id,
+          entity_type = EXCLUDED.entity_type,
+          entity_id = EXCLUDED.entity_id,
+          file_name = EXCLUDED.file_name,
+          mime_type = EXCLUDED.mime_type,
+          file_size = EXCLUDED.file_size,
+          checksum = EXCLUDED.checksum,
+          remote_key = EXCLUDED.remote_key,
+          updated_at = NOW()
+        RETURNING *
+      `,
+      [
+        attachmentId,
+        auth.workspace.id,
+        patientId,
+        appointmentId || null,
+        auth.user.id,
+        String(payload?.entityType ?? (appointmentId ? 'appointment' : 'patient')).trim(),
+        String(payload?.entityId ?? appointmentId ?? patientId).trim(),
+        String(payload?.fileName ?? '').trim(),
+        String(payload?.mimeType ?? '').trim(),
+        Number(payload?.fileSize ?? 0),
+        String(payload?.checksum ?? '').trim(),
+        String(payload?.remoteKey ?? `workspace/${auth.workspace.id}/attachments/${attachmentId}`).trim(),
+      ]
+    );
+
+    return {
+      entityType,
+      operationType,
+      attachmentId,
+      remoteKey: result.rows[0].remote_key,
+      attachment: mapPatientDocument(result.rows[0]),
+    };
+  }
+
+  return { entityType, operationType, skipped: true };
 }
 
 async function getDoctorMedicationFavorites(doctorUserId) {
@@ -2170,6 +2689,215 @@ app.post('/api/auth/demo', authRateLimit, asyncHandler(async (_req, res) => {
 app.get('/api/auth/me', requireAuth, asyncHandler(async (req, res) => {
   const session = await getSessionPayload(req.auth.user.id);
   res.json({ data: session });
+}));
+
+app.post('/api/desktop/devices/register', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const { deviceId, deviceName, platform, appVersion } = req.body ?? {};
+  if (!deviceId) {
+    return res.status(400).json({ error: 'Device ID is required', code: 'INVALID_DEVICE' });
+  }
+
+  const result = await query(
+    `
+      INSERT INTO desktop_devices (
+        id, workspace_id, doctor_user_id, device_id, device_name, platform, app_version, status, last_seen_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', NOW())
+      ON CONFLICT (device_id) DO UPDATE SET
+        workspace_id = EXCLUDED.workspace_id,
+        doctor_user_id = EXCLUDED.doctor_user_id,
+        device_name = EXCLUDED.device_name,
+        platform = EXCLUDED.platform,
+        app_version = EXCLUDED.app_version,
+        status = 'active',
+        last_seen_at = NOW(),
+        updated_at = NOW()
+      RETURNING id, device_id, status, last_seen_at
+    `,
+    [
+      createId('desktop_device'),
+      req.auth.workspace.id,
+      req.auth.user.id,
+      String(deviceId).trim(),
+      String(deviceName ?? 'Desktop Device').trim(),
+      String(platform ?? 'windows-desktop').trim(),
+      String(appVersion ?? '0.0.0').trim(),
+    ]
+  );
+
+  res.json({
+    ok: true,
+    data: {
+      id: result.rows[0].id,
+      deviceId: result.rows[0].device_id,
+      status: result.rows[0].status,
+      lastSeenAt: result.rows[0].last_seen_at,
+    },
+  });
+}));
+
+app.get('/api/desktop/bootstrap', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const snapshot = await getDesktopBootstrapData(req.auth);
+  res.json({ data: snapshot });
+}));
+
+app.get('/api/desktop/entitlement', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const session = await getSessionPayload(req.auth.user.id);
+  const subscription = session?.workspace?.subscription ?? null;
+  const status = subscription?.status === 'active'
+    ? 'valid'
+    : subscription?.status === 'trial'
+      ? 'valid_but_recheck_due'
+      : subscription?.status === 'suspended'
+        ? 'restricted'
+        : subscription?.status === 'cancelled'
+          ? 'locked'
+          : 'unknown';
+
+  res.json({
+    data: {
+      status,
+      planName: subscription?.planName ?? '',
+      trialEndsAt: subscription?.trialEndsAt ?? null,
+      entitlementValidUntil: subscription?.trialEndsAt ?? null,
+      graceDeadline: subscription?.trialEndsAt ?? null,
+      lockMessage: status === 'locked' ? 'Your trial/subscription has ended. Renew it to continue using the app.' : '',
+      lastCheckedAt: new Date().toISOString(),
+    },
+  });
+}));
+
+app.post('/api/sync/push', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const mutations = Array.isArray(req.body?.mutations) ? req.body.mutations : [];
+  const results = [];
+
+  for (const mutation of mutations) {
+    const mutationId = String(mutation?.mutationId ?? '').trim();
+    if (!mutationId) {
+      results.push({
+        mutationId: '',
+        status: 'validation_rejected',
+        error: 'Missing mutationId',
+      });
+      continue;
+    }
+
+    const existing = await query(
+      `SELECT result_status, response_payload FROM processed_mutations WHERE mutation_id = $1 LIMIT 1`,
+      [mutationId]
+    );
+
+    if (existing.rowCount > 0) {
+      results.push({
+        mutationId,
+        entityType: String(mutation.entityType ?? '').trim(),
+        entityId: String(mutation.entityId ?? '').trim(),
+        status: 'accepted_already_processed',
+        result: existing.rows[0].response_payload ?? {},
+      });
+      continue;
+    }
+
+    try {
+      const responsePayload = await withTransaction(client =>
+        processDesktopMutation(client, req.auth, mutation)
+      );
+
+      await query(
+        `
+          INSERT INTO processed_mutations (
+            id, mutation_id, device_id, workspace_id, entity_type, entity_id, operation_type, result_status, response_payload
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'accepted', $8)
+        `,
+        [
+          createId('processed_mutation'),
+          mutationId,
+          String(mutation.deviceId ?? '').trim(),
+          req.auth.workspace.id,
+          String(mutation.entityType ?? '').trim(),
+          String(mutation.entityId ?? '').trim(),
+          String(mutation.operationType ?? '').trim(),
+          responsePayload,
+        ]
+      );
+
+      results.push({
+        mutationId,
+        entityType: String(mutation.entityType ?? '').trim(),
+        entityId: String(mutation.entityId ?? '').trim(),
+        status: 'accepted',
+        result: responsePayload,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Mutation failed';
+      const conflictType = /draft conflict/i.test(message)
+        ? 'draft_conflict'
+        : /appointment status conflict/i.test(message)
+          ? 'appointment_conflict'
+          : /conflict/i.test(message)
+            ? 'generic_conflict'
+            : '';
+      const status = /conflict/i.test(message)
+        ? 'conflict'
+        : /entitlement|subscription|trial/i.test(message)
+          ? 'entitlement_rejected'
+          : /not found|invalid/i.test(message)
+            ? 'validation_rejected'
+            : 'retryable_failure';
+      results.push({
+        mutationId,
+        entityType: String(mutation.entityType ?? '').trim(),
+        entityId: String(mutation.entityId ?? '').trim(),
+        conflictType,
+        status,
+        error: message,
+      });
+    }
+  }
+
+  res.json({
+    data: {
+      checkpoint: new Date().toISOString(),
+      results,
+    },
+  });
+}));
+
+app.get('/api/sync/pull', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const session = await getSessionPayload(req.auth.user.id);
+  const snapshot = await getDesktopBootstrapData(req.auth);
+  const changes = await getDesktopChangeSet(req.auth, req.query?.checkpoint ?? '');
+  const subscription = session?.workspace?.subscription ?? null;
+  const entitlement = {
+    workspaceId: req.auth.workspace.id,
+    status: subscription?.status === 'active'
+      ? 'valid'
+      : subscription?.status === 'trial'
+        ? 'valid_but_recheck_due'
+        : subscription?.status === 'suspended'
+          ? 'restricted'
+          : subscription?.status === 'cancelled'
+            ? 'locked'
+            : 'unknown',
+    planName: subscription?.planName ?? '',
+    trialEndsAt: subscription?.trialEndsAt ?? null,
+    entitlementValidUntil: subscription?.trialEndsAt ?? null,
+    graceDeadline: subscription?.trialEndsAt ?? null,
+    lockMessage: subscription?.status === 'cancelled'
+      ? 'Your trial/subscription has ended. Renew it to continue using the app.'
+      : '',
+    lastCheckedAt: new Date().toISOString(),
+  };
+
+  res.json({
+    data: {
+      checkpoint: new Date().toISOString(),
+      snapshot,
+      changes,
+      entitlement,
+    },
+  });
 }));
 
 app.post('/api/auth/logout', requireAuth, (_req, res) => {

@@ -35,8 +35,11 @@ import type {
   TreatmentTemplatePayload,
   WalkInPayload,
   WalkInResult,
-} from '@/lib/app-types';
+  DesktopBootstrapSnapshot,
+  DesktopDeviceRegistrationPayload,
+  } from '@/lib/app-types';
 import type { Appointment, CareAction, Clinic, ClinicalNote, Patient } from '@/data/mockData';
+import { clearDesktopStoredTokenSync, getDesktopStoredTokenSync, isDesktopRuntime } from '@/lib/desktop';
 
 const API_BASE = '/api';
 const AUTH_TOKEN_KEY = 'my-health/auth-token';
@@ -55,6 +58,10 @@ export class ApiError extends Error {
 
 export function getStoredAuthToken() {
   if (typeof window === 'undefined') return '';
+  if (isDesktopRuntime()) {
+    const token = getDesktopStoredTokenSync();
+    if (token) return token;
+  }
   return window.sessionStorage.getItem(AUTH_SESSION_TOKEN_KEY)
     ?? window.localStorage.getItem(AUTH_TOKEN_KEY)
     ?? '';
@@ -74,6 +81,9 @@ export function setStoredAuthToken(token: string, mode: 'persistent' | 'session'
 
 export function clearStoredAuthToken() {
   if (typeof window === 'undefined') return;
+  if (isDesktopRuntime()) {
+    clearDesktopStoredTokenSync();
+  }
   window.localStorage.removeItem(AUTH_TOKEN_KEY);
   window.sessionStorage.removeItem(AUTH_SESSION_TOKEN_KEY);
 }
@@ -121,6 +131,18 @@ export async function createDemoSession() {
 
 export async function fetchCurrentSession() {
   const result = await request<{ data: SessionPayload }>('/auth/me');
+  return result.data;
+}
+
+export async function registerDesktopDevice(payload: DesktopDeviceRegistrationPayload) {
+  return request<{ ok: true; data: { id: string; deviceId: string; status: string; lastSeenAt: string } }>('/desktop/devices/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchDesktopBootstrapSnapshot() {
+  const result = await request<{ data: DesktopBootstrapSnapshot }>('/desktop/bootstrap');
   return result.data;
 }
 

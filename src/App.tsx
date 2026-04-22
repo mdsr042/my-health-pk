@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { DesktopProvider, useDesktop } from '@/contexts/DesktopContext';
 import { PatientTabsProvider, usePatientTabs } from '@/contexts/PatientTabsContext';
 import { DataProvider, useData } from '@/contexts/DataContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -21,11 +22,14 @@ import SettingsPage from '@/pages/Settings';
 import ClinicsPage from '@/pages/Clinics';
 import AdminDashboard from '@/pages/AdminDashboard';
 import { useEffect } from 'react';
+import DesktopUnlockScreen from '@/components/desktop/DesktopUnlockScreen';
+import DesktopPinSetupDialog from '@/components/desktop/DesktopPinSetupDialog';
 
 const queryClient = new QueryClient();
 
 function AppContent() {
   const { isAuthenticated, isLoading, clinicSelected, user } = useAuth();
+  const { runtime } = useDesktop();
   const { openTab } = usePatientTabs();
   const { getPatient } = useData();
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -72,16 +76,37 @@ function AppContent() {
   if (!clinicSelected) return <ClinicSelection />;
 
   return (
-    <AppLayout currentPage={currentPage} onNavigate={navigateToPage} onOpenPatient={handleOpenPatient}>
-      {currentPage === 'dashboard' && <Dashboard onOpenPatient={handleOpenPatient} onNavigate={navigateToPage} />}
-      {currentPage === 'queue' && <PatientQueue onOpenPatient={handleOpenPatient} />}
-      {currentPage === 'workspace' && <PatientWorkspace />}
-      {currentPage === 'appointments' && <Appointments />}
-      {currentPage === 'records' && <MedicalRecords />}
-      {currentPage === 'clinics' && <ClinicsPage />}
-      {currentPage === 'profile' && <Profile />}
-      {currentPage === 'settings' && <SettingsPage initialSection={settingsSection} />}
-    </AppLayout>
+    <>
+      <AppLayout currentPage={currentPage} onNavigate={navigateToPage} onOpenPatient={handleOpenPatient}>
+        {currentPage === 'dashboard' && <Dashboard onOpenPatient={handleOpenPatient} onNavigate={navigateToPage} />}
+        {currentPage === 'queue' && <PatientQueue onOpenPatient={handleOpenPatient} />}
+        {currentPage === 'workspace' && <PatientWorkspace />}
+        {currentPage === 'appointments' && <Appointments />}
+        {currentPage === 'records' && <MedicalRecords />}
+        {currentPage === 'clinics' && <ClinicsPage />}
+        {currentPage === 'profile' && <Profile />}
+        {currentPage === 'settings' && <SettingsPage initialSection={settingsSection} />}
+      </AppLayout>
+      <DesktopPinSetupDialog open={runtime.isDesktop && isAuthenticated && !runtime.pinConfigured} />
+    </>
+  );
+}
+
+function DesktopAwareApp() {
+  const { runtime } = useDesktop();
+
+  if (runtime.isDesktop && runtime.pinConfigured && runtime.locked) {
+    return <DesktopUnlockScreen />;
+  }
+
+  return (
+    <AuthProvider>
+      <DataProvider>
+        <PatientTabsProvider>
+          <AppContent />
+        </PatientTabsProvider>
+      </DataProvider>
+    </AuthProvider>
   );
 }
 
@@ -90,13 +115,9 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <AuthProvider>
-        <DataProvider>
-          <PatientTabsProvider>
-            <AppContent />
-          </PatientTabsProvider>
-        </DataProvider>
-      </AuthProvider>
+      <DesktopProvider>
+        <DesktopAwareApp />
+      </DesktopProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

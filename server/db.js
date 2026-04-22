@@ -1376,6 +1376,74 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_custom_medications_doctor_lookup', 'custom_medications', '(doctor_user_id, lookup_key)');
     await ensureIndex(client, 'idx_custom_medications_doctor_name', 'custom_medications', '(doctor_user_id, lower(name))');
   });
+
+  await runMigration(client, '015_desktop_offline_foundation', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS desktop_devices (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        doctor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        device_id TEXT NOT NULL UNIQUE,
+        device_name TEXT NOT NULL DEFAULT '',
+        platform TEXT NOT NULL DEFAULT 'windows-desktop',
+        app_version TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        revoked_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS processed_mutations (
+        id TEXT PRIMARY KEY,
+        mutation_id TEXT NOT NULL UNIQUE,
+        device_id TEXT NOT NULL DEFAULT '',
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        entity_type TEXT NOT NULL DEFAULT '',
+        entity_id TEXT NOT NULL DEFAULT '',
+        operation_type TEXT NOT NULL DEFAULT '',
+        result_status TEXT NOT NULL DEFAULT 'accepted',
+        response_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await ensureAuditColumns(client, 'desktop_devices');
+    await ensureAuditColumns(client, 'processed_mutations');
+    await ensureIndex(client, 'idx_desktop_devices_workspace_doctor', 'desktop_devices', '(workspace_id, doctor_user_id)');
+    await ensureIndex(client, 'idx_desktop_devices_device_id', 'desktop_devices', '(device_id)');
+    await ensureIndex(client, 'idx_processed_mutations_workspace_processed', 'processed_mutations', '(workspace_id, processed_at DESC)');
+    await ensureIndex(client, 'idx_processed_mutations_mutation_id', 'processed_mutations', '(mutation_id)');
+  });
+
+  await runMigration(client, '016_patient_documents', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS patient_documents (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+        appointment_id TEXT REFERENCES appointments(id) ON DELETE SET NULL,
+        uploaded_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        entity_type TEXT NOT NULL DEFAULT 'patient',
+        entity_id TEXT NOT NULL DEFAULT '',
+        file_name TEXT NOT NULL DEFAULT '',
+        mime_type TEXT NOT NULL DEFAULT '',
+        file_size INTEGER NOT NULL DEFAULT 0,
+        checksum TEXT NOT NULL DEFAULT '',
+        remote_key TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await ensureAuditColumns(client, 'patient_documents');
+    await ensureIndex(client, 'idx_patient_documents_workspace_patient', 'patient_documents', '(workspace_id, patient_id, created_at DESC)');
+    await ensureIndex(client, 'idx_patient_documents_workspace_appointment', 'patient_documents', '(workspace_id, appointment_id, created_at DESC)');
+    await ensureIndex(client, 'idx_patient_documents_workspace_entity', 'patient_documents', '(workspace_id, entity_type, entity_id)');
+  });
 }
 
 export async function initDb() {

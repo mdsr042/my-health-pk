@@ -99,6 +99,120 @@ export interface SessionPayload {
   settings: AppSettings | null;
 }
 
+export interface DesktopBootstrapSnapshot {
+  generatedAt: string;
+  patients: Patient[];
+  appointments: Appointment[];
+  notes: ClinicalNote[];
+  drafts: Record<string, ConsultationDraft>;
+  clinics: Clinic[];
+  settings: AppSettings | null;
+  attachments?: DesktopAttachmentTransfer[];
+}
+
+export interface DesktopRuntimeInfo {
+  isDesktop: boolean;
+  deviceId: string;
+  pinConfigured: boolean;
+  locked: boolean;
+  syncStatus: 'idle' | 'syncing' | 'up_to_date' | 'offline' | 'attention' | 'web';
+  lastSuccessfulSyncAt: string;
+  backupOverdue: boolean;
+  pendingMutations: number;
+  failedMutations: number;
+  oldestPendingAt: string;
+  entitlement: {
+    status: 'valid' | 'valid_but_recheck_due' | 'grace' | 'restricted' | 'locked' | 'trial' | 'active' | 'suspended' | 'cancelled' | 'unknown';
+    planName: string;
+    trialEndsAt: string | null;
+    entitlementValidUntil: string | null;
+    graceDeadline: string | null;
+    lastCheckedAt: string | null;
+    lockMessage: string;
+  } | null;
+}
+
+export interface DesktopSyncIssueSummary {
+  pending: Array<{
+    mutation_id: string;
+    entity_type: string;
+    entity_id: string;
+    operation_type: string;
+    created_local_at: string;
+    status: string;
+    retry_count: number;
+    last_error_code: string;
+    last_error_message: string;
+  }>;
+  deadLetters: Array<{
+    id: string;
+    mutation_id: string;
+    reason_code: string;
+    reason_message: string;
+    created_at: string;
+  }>;
+  conflicts: Array<{
+    id: string;
+    entity_type: string;
+    entity_id: string;
+    conflict_type: string;
+    details_json: string;
+    created_at: string;
+    resolved_at: string;
+  }>;
+}
+
+export interface DesktopDiagnosticsExportResult {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  filePath?: string;
+}
+
+export interface DesktopAttachmentTransfer {
+  id: string;
+  attachmentId: string;
+  workspaceId: string;
+  entityType: string;
+  entityId: string;
+  patientId?: string;
+  appointmentId?: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  checksum: string;
+  localPath: string;
+  remoteKey?: string;
+  status: 'pending' | 'uploading' | 'uploaded' | 'failed' | 'retryable';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DesktopOutboxMutation {
+  mutationId: string;
+  deviceId: string;
+  workspaceId: string;
+  entityType: string;
+  entityId: string;
+  operationType: string;
+  payload: Record<string, unknown>;
+  baseVersion?: string;
+  createdLocalAt?: string;
+  status?: string;
+  retryCount?: number;
+  lastErrorCode?: string;
+  lastErrorMessage?: string;
+  nextRetryAt?: string;
+  processedAt?: string;
+}
+
+export interface DesktopDeviceRegistrationPayload {
+  deviceId: string;
+  deviceName: string;
+  platform: string;
+  appVersion: string;
+}
+
 export interface SignupPayload {
   fullName: string;
   email: string;
