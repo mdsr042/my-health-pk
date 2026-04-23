@@ -24,6 +24,14 @@
   - `npm run desktop:trace-sync -- --device <device-id>`
 - Run desktop sync integration coverage:
   - `npm run test:desktop:integration`
+- Run 100-doctor rollout gate:
+  - `npm run rollout:100`
+  - `npm run rollout:100:quick` (fast check, not final rollout decision)
+
+## Release process
+
+- Manual desktop release workflow and upload path:
+  - see `docs/desktop-release.md`
 
 ## What to inspect when sync looks wrong
 

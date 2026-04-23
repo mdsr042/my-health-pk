@@ -17,6 +17,8 @@
     "desktop:rebuild-native": "electron-rebuild -f -w better-sqlite3",
     "desktop:pack": "npm run build && electron-builder --dir",
     "desktop:dist": "npm run build && electron-builder",
+    "rollout:100": "node scripts/rollout-gate-100.mjs",
+    "rollout:100:quick": "node scripts/rollout-gate-100.mjs --quick",
     "catalog:fetch:pk": "node scripts/fetch-drap-medicines.mjs",
     "catalog:import:pk-enrichment": "node scripts/import-medication-enrichments.mjs",
     "smoke:core-flow": "node scripts/smoke-core-flow.mjs",
