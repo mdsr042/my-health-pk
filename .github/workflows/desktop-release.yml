@@ -36,8 +36,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build desktop distribution
-        run: npm run desktop:dist
+      - name: Build desktop distribution (no implicit publish)
+        run: npm run build && npx electron-builder --publish never
 
       - name: Ensure tag exists in repository
         shell: bash
