@@ -22,6 +22,7 @@ import {
   fetchAdminDoctors,
   fetchAdminInvestigationCatalog,
   fetchAdminOverview,
+  fetchAdminPatients,
   fetchAdminReferralFacilities,
   fetchAdminReferralSpecialties,
   fetchApprovalRequests,
@@ -38,6 +39,7 @@ import type {
   AdminAuditLog,
   AdminDoctorAccount,
   AdminOverview,
+  AdminPatientRecord,
   ApprovalRequest,
   DiagnosisCatalogEntry,
   DiagnosisCatalogPayload,
@@ -122,10 +124,18 @@ function getSubscriptionStatusBadgeClass(status: AdminDoctorAccount['subscriptio
   }
 }
 
+function formatDateLabel(value: string | null) {
+  if (!value) return 'No visits yet';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 export default function AdminDashboard() {
   const [overview, setOverview] = useState<AdminOverview>(emptyOverview);
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const [doctors, setDoctors] = useState<AdminDoctorAccount[]>([]);
+  const [adminPatients, setAdminPatients] = useState<AdminPatientRecord[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [diagnosisCatalog, setDiagnosisCatalog] = useState<DiagnosisCatalogEntry[]>([]);
   const [investigationCatalog, setInvestigationCatalog] = useState<InvestigationCatalogEntry[]>([]);
@@ -142,6 +152,9 @@ export default function AdminDashboard() {
   const [editingInvestigationId, setEditingInvestigationId] = useState<string | null>(null);
   const [editingReferralSpecialtyId, setEditingReferralSpecialtyId] = useState<string | null>(null);
   const [editingReferralFacilityId, setEditingReferralFacilityId] = useState<string | null>(null);
+  const [doctorSearchQuery, setDoctorSearchQuery] = useState('');
+  const [patientSearchQuery, setPatientSearchQuery] = useState('');
+  const [patientWorkspaceFilter, setPatientWorkspaceFilter] = useState('all');
 
   const load = async () => {
     setLoading(true);
@@ -150,6 +163,7 @@ export default function AdminDashboard() {
         nextOverview,
         nextApprovals,
         nextDoctors,
+        nextPatients,
         nextAuditLogs,
         nextDiagnosisCatalog,
         nextInvestigationCatalog,
@@ -159,6 +173,7 @@ export default function AdminDashboard() {
         fetchAdminOverview(),
         fetchApprovalRequests(),
         fetchAdminDoctors(),
+        fetchAdminPatients({ limit: 500 }),
         fetchAdminAuditLogs(),
         fetchAdminDiagnosisCatalog(),
         fetchAdminInvestigationCatalog(),
@@ -169,6 +184,7 @@ export default function AdminDashboard() {
       setOverview(nextOverview);
       setApprovalRequests(nextApprovals);
       setDoctors(nextDoctors);
+      setAdminPatients(nextPatients);
       setAuditLogs(nextAuditLogs);
       setDiagnosisCatalog(nextDiagnosisCatalog);
       setInvestigationCatalog(nextInvestigationCatalog);
@@ -199,6 +215,40 @@ export default function AdminDashboard() {
     () => approvalRequests.filter(request => request.status === 'pending'),
     [approvalRequests]
   );
+
+  const doctorWorkspaceOptions = useMemo(
+    () => doctors
+      .map(doctor => doctor.workspace)
+      .filter((workspace, index, all) => all.findIndex(item => item.id === workspace.id) === index)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [doctors]
+  );
+
+  const filteredDoctors = useMemo(() => {
+    const query = doctorSearchQuery.trim().toLowerCase();
+    if (!query) return doctors;
+    return doctors.filter(doctor =>
+      doctor.name.toLowerCase().includes(query)
+      || doctor.email.toLowerCase().includes(query)
+      || doctor.workspace.name.toLowerCase().includes(query)
+      || doctor.pmcNumber.toLowerCase().includes(query)
+    );
+  }, [doctorSearchQuery, doctors]);
+
+  const filteredPatients = useMemo(() => {
+    const query = patientSearchQuery.trim().toLowerCase();
+    return adminPatients.filter(patient => {
+      if (patientWorkspaceFilter !== 'all' && patient.workspace.id !== patientWorkspaceFilter) {
+        return false;
+      }
+      if (!query) return true;
+      return patient.name.toLowerCase().includes(query)
+        || patient.mrn.toLowerCase().includes(query)
+        || patient.phone.toLowerCase().includes(query)
+        || patient.cnic.toLowerCase().includes(query)
+        || patient.workspace.name.toLowerCase().includes(query);
+    });
+  }, [adminPatients, patientSearchQuery, patientWorkspaceFilter]);
 
   const handleApprove = async (approvalRequestId: string) => {
     await approveDoctor(approvalRequestId);
@@ -408,6 +458,69 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                   {request.notes && <p className="text-sm text-muted-foreground mt-3">{request.notes}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-0 shadow-sm">
+        <CardContent className="p-5 space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Patient Management</h2>
+            <p className="text-xs text-muted-foreground">Search patient records across all workspaces to monitor growth and recent activity.</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_220px_auto] gap-3">
+            <Input
+              value={patientSearchQuery}
+              onChange={event => setPatientSearchQuery(event.target.value)}
+              placeholder="Search by patient name, MRN, phone, CNIC, or workspace"
+            />
+            <Select value={patientWorkspaceFilter} onValueChange={setPatientWorkspaceFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="All workspaces" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Workspaces</SelectItem>
+                {doctorWorkspaceOptions.map(workspace => (
+                  <SelectItem key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground flex items-center">
+              Showing <span className="mx-1 font-medium text-foreground">{filteredPatients.length}</span> of {adminPatients.length}
+            </div>
+          </div>
+
+          {filteredPatients.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No patients match this filter.</p>
+          ) : (
+            <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+              {filteredPatients.map(patient => (
+                <div key={patient.id} className="rounded-lg border border-border px-4 py-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-foreground">{patient.name}</p>
+                        <Badge variant="outline" className="text-[10px]">{patient.gender}, {patient.age}y</Badge>
+                        <Badge variant="outline" className="text-[10px] border-sky-200 bg-sky-50 text-sky-700">{patient.mrn}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {patient.phone || 'No phone'}{patient.cnic ? ` • ${patient.cnic}` : ''}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {patient.workspace.name}, {patient.workspace.city}
+                      </p>
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground">
+                      <p>Appointments: <span className="font-medium text-foreground">{patient.totalAppointments}</span></p>
+                      <p className="mt-1">Last visit: <span className="font-medium text-foreground">{formatDateLabel(patient.lastAppointmentDate)}</span></p>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -639,8 +752,19 @@ export default function AdminDashboard() {
             <p className="text-xs text-muted-foreground">Monitor account status, plan assignments, and workspace usage.</p>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+            <Input
+              value={doctorSearchQuery}
+              onChange={event => setDoctorSearchQuery(event.target.value)}
+              placeholder="Search doctors by name, email, workspace, or PMC"
+            />
+            <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground flex items-center">
+              Showing <span className="mx-1 font-medium text-foreground">{filteredDoctors.length}</span> of {doctors.length}
+            </div>
+          </div>
+
           <div className="space-y-4">
-            {doctors.map(doctor => {
+            {filteredDoctors.map(doctor => {
               const planDraft = planDrafts[doctor.workspace.id];
               return (
                 <div key={doctor.id} className="rounded-lg border border-border p-4 space-y-4">
@@ -723,6 +847,9 @@ export default function AdminDashboard() {
                 </div>
               );
             })}
+            {filteredDoctors.length === 0 && (
+              <p className="text-sm text-muted-foreground">No doctor accounts match this search.</p>
+            )}
           </div>
         </CardContent>
       </Card>

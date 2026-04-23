@@ -1,4 +1,5 @@
 import type {
+  AdminPatientRecord,
   AdminDoctorAccount,
   AdminAuditLog,
   AdminOverview,
@@ -680,6 +681,16 @@ export async function rejectDoctor(approvalRequestId: string, reason: string) {
 
 export async function fetchAdminDoctors() {
   const result = await request<{ data: AdminDoctorAccount[] }>('/admin/doctors');
+  return result.data;
+}
+
+export async function fetchAdminPatients(params?: { workspaceId?: string; q?: string; limit?: number }) {
+  const search = new URLSearchParams();
+  if (params?.workspaceId) search.set('workspaceId', params.workspaceId);
+  if (params?.q) search.set('q', params.q);
+  if (typeof params?.limit === 'number') search.set('limit', String(params.limit));
+  const query = search.toString();
+  const result = await request<{ data: AdminPatientRecord[] }>(`/admin/patients${query ? `?${query}` : ''}`);
   return result.data;
 }
 

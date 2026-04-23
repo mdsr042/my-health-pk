@@ -367,6 +367,25 @@ export interface AdminDoctorAccount {
   };
 }
 
+export interface AdminPatientRecord {
+  id: string;
+  mrn: string;
+  name: string;
+  phone: string;
+  age: number;
+  gender: Patient['gender'];
+  cnic: string;
+  workspace: {
+    id: string;
+    name: string;
+    city: string;
+  };
+  totalAppointments: number;
+  lastAppointmentDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AdminOverview {
   pendingApprovals: number;
   activeDoctors: number;

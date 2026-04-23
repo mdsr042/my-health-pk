@@ -3492,6 +3492,87 @@ app.get('/api/admin/doctors', requireAuth, requireRole('platform_admin'), asyncH
   });
 }));
 
+app.get('/api/admin/patients', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const workspaceId = String(req.query?.workspaceId ?? '').trim();
+  const searchQuery = String(req.query?.q ?? '').trim();
+  const limitInput = Number.parseInt(String(req.query?.limit ?? '200'), 10);
+  const limit = Number.isFinite(limitInput) ? Math.min(Math.max(limitInput, 1), 500) : 200;
+
+  const conditions = ['w.is_demo = FALSE'];
+  const params = [];
+
+  if (workspaceId) {
+    params.push(workspaceId);
+    conditions.push(`p.workspace_id = $${params.length}`);
+  }
+
+  if (searchQuery) {
+    params.push(`%${searchQuery}%`);
+    const searchParamRef = `$${params.length}`;
+    conditions.push(
+      `(p.name ILIKE ${searchParamRef} OR p.mrn ILIKE ${searchParamRef} OR p.phone ILIKE ${searchParamRef} OR p.cnic ILIKE ${searchParamRef} OR w.name ILIKE ${searchParamRef})`
+    );
+  }
+
+  params.push(limit);
+
+  const { rows } = await query(
+    `
+      SELECT
+        p.id,
+        p.mrn,
+        p.name,
+        p.phone,
+        p.age,
+        p.gender,
+        p.cnic,
+        p.created_at,
+        p.updated_at,
+        w.id AS workspace_id,
+        w.name AS workspace_name,
+        w.city AS workspace_city,
+        COALESCE(appointment_stats.total_appointments, 0) AS total_appointments,
+        appointment_stats.last_appointment_date
+      FROM patients p
+      JOIN workspaces w ON w.id = p.workspace_id
+      LEFT JOIN (
+        SELECT
+          workspace_id,
+          patient_id,
+          COUNT(*)::int AS total_appointments,
+          MAX(date) AS last_appointment_date
+        FROM appointments
+        GROUP BY workspace_id, patient_id
+      ) appointment_stats ON appointment_stats.workspace_id = p.workspace_id AND appointment_stats.patient_id = p.id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY p.updated_at DESC, p.created_at DESC
+      LIMIT $${params.length}
+    `,
+    params
+  );
+
+  res.json({
+    data: rows.map(row => ({
+      id: row.id,
+      mrn: row.mrn,
+      name: row.name,
+      phone: row.phone,
+      age: row.age,
+      gender: row.gender,
+      cnic: row.cnic,
+      workspace: {
+        id: row.workspace_id,
+        name: row.workspace_name,
+        city: row.workspace_city,
+      },
+      totalAppointments: row.total_appointments,
+      lastAppointmentDate: row.last_appointment_date,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  });
+}));
+
 app.get('/api/admin/diagnosis-catalog', requireAuth, requireRole('platform_admin'), asyncHandler(async (_req, res) => {
   res.json({ data: await listDiagnosisCatalogEntries() });
 }));
