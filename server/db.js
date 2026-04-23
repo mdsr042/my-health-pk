@@ -1396,9 +1396,28 @@ async function runSchemaMigrations(client) {
     `);
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS processed_bundles (
+        id TEXT PRIMARY KEY,
+        bundle_id TEXT NOT NULL UNIQUE,
+        device_id TEXT NOT NULL DEFAULT '',
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        bundle_type TEXT NOT NULL DEFAULT 'mutation',
+        root_entity_id TEXT NOT NULL DEFAULT '',
+        entity_type TEXT NOT NULL DEFAULT '',
+        entity_id TEXT NOT NULL DEFAULT '',
+        result_status TEXT NOT NULL DEFAULT 'accepted',
+        response_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS processed_mutations (
         id TEXT PRIMARY KEY,
         mutation_id TEXT NOT NULL UNIQUE,
+        bundle_id TEXT NOT NULL DEFAULT '',
         device_id TEXT NOT NULL DEFAULT '',
         workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
         entity_type TEXT NOT NULL DEFAULT '',
@@ -1413,11 +1432,16 @@ async function runSchemaMigrations(client) {
     `);
 
     await ensureAuditColumns(client, 'desktop_devices');
+    await ensureAuditColumns(client, 'processed_bundles');
     await ensureAuditColumns(client, 'processed_mutations');
+    await client.query(`ALTER TABLE processed_mutations ADD COLUMN IF NOT EXISTS bundle_id TEXT NOT NULL DEFAULT ''`);
     await ensureIndex(client, 'idx_desktop_devices_workspace_doctor', 'desktop_devices', '(workspace_id, doctor_user_id)');
     await ensureIndex(client, 'idx_desktop_devices_device_id', 'desktop_devices', '(device_id)');
+    await ensureIndex(client, 'idx_processed_bundles_workspace_processed', 'processed_bundles', '(workspace_id, processed_at DESC)');
+    await ensureIndex(client, 'idx_processed_bundles_bundle_id', 'processed_bundles', '(bundle_id)');
     await ensureIndex(client, 'idx_processed_mutations_workspace_processed', 'processed_mutations', '(workspace_id, processed_at DESC)');
     await ensureIndex(client, 'idx_processed_mutations_mutation_id', 'processed_mutations', '(mutation_id)');
+    await ensureIndex(client, 'idx_processed_mutations_bundle_id', 'processed_mutations', '(bundle_id)');
   });
 
   await runMigration(client, '016_patient_documents', async () => {
@@ -1443,6 +1467,32 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_patient_documents_workspace_patient', 'patient_documents', '(workspace_id, patient_id, created_at DESC)');
     await ensureIndex(client, 'idx_patient_documents_workspace_appointment', 'patient_documents', '(workspace_id, appointment_id, created_at DESC)');
     await ensureIndex(client, 'idx_patient_documents_workspace_entity', 'patient_documents', '(workspace_id, entity_type, entity_id)');
+  });
+
+  await runMigration(client, '017_sync_bundle_processing', async () => {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS processed_bundles (
+        id TEXT PRIMARY KEY,
+        bundle_id TEXT NOT NULL UNIQUE,
+        device_id TEXT NOT NULL DEFAULT '',
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        bundle_type TEXT NOT NULL DEFAULT 'mutation',
+        root_entity_id TEXT NOT NULL DEFAULT '',
+        entity_type TEXT NOT NULL DEFAULT '',
+        entity_id TEXT NOT NULL DEFAULT '',
+        result_status TEXT NOT NULL DEFAULT 'accepted',
+        response_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`ALTER TABLE processed_mutations ADD COLUMN IF NOT EXISTS bundle_id TEXT NOT NULL DEFAULT ''`);
+    await ensureAuditColumns(client, 'processed_bundles');
+    await ensureAuditColumns(client, 'processed_mutations');
+    await ensureIndex(client, 'idx_processed_bundles_workspace_processed', 'processed_bundles', '(workspace_id, processed_at DESC)');
+    await ensureIndex(client, 'idx_processed_bundles_bundle_id', 'processed_bundles', '(bundle_id)');
+    await ensureIndex(client, 'idx_processed_mutations_bundle_id', 'processed_mutations', '(bundle_id)');
   });
 }
 

@@ -120,7 +120,12 @@ export interface DesktopRuntimeInfo {
   backupOverdue: boolean;
   pendingMutations: number;
   failedMutations: number;
+  pendingBundles: number;
+  failedBundles: number;
+  completedBundles: number;
   oldestPendingAt: string;
+  rebuildRequired?: boolean;
+  rebuildReason?: string;
   entitlement: {
     status: 'valid' | 'valid_but_recheck_due' | 'grace' | 'restricted' | 'locked' | 'trial' | 'active' | 'suspended' | 'cancelled' | 'unknown';
     planName: string;
@@ -156,7 +161,17 @@ export interface DesktopSyncIssueSummary {
     entity_type: string;
     entity_id: string;
     conflict_type: string;
+    mutation_id?: string;
+    bundle_id?: string;
     details_json: string;
+    local_summary?: string;
+    server_summary?: string;
+    local_snapshot?: Record<string, unknown> | null;
+    server_snapshot?: Record<string, unknown> | null;
+    server_base_version?: string;
+    resolution_status?: 'pending' | 'resolved';
+    chosen_action?: string;
+    resolution_reason?: string;
     created_at: string;
     resolved_at: string;
   }>;
@@ -167,6 +182,15 @@ export interface DesktopDiagnosticsExportResult {
   code?: string;
   message?: string;
   filePath?: string;
+}
+
+export interface DesktopPreflightReport {
+  ok: boolean;
+  checks: Array<{
+    check: string;
+    ok: boolean;
+    message: string;
+  }>;
 }
 
 export interface DesktopAttachmentTransfer {
@@ -190,6 +214,9 @@ export interface DesktopAttachmentTransfer {
 
 export interface DesktopOutboxMutation {
   mutationId: string;
+  bundleId: string;
+  bundleType: 'patient_master' | 'encounter' | 'attachment_metadata' | 'mutation';
+  rootEntityId: string;
   deviceId: string;
   workspaceId: string;
   entityType: string;
@@ -204,6 +231,69 @@ export interface DesktopOutboxMutation {
   lastErrorMessage?: string;
   nextRetryAt?: string;
   processedAt?: string;
+}
+
+export interface DesktopSyncBundle {
+  bundleId: string;
+  bundleType: DesktopOutboxMutation['bundleType'];
+  rootEntityId: string;
+  deviceId: string;
+  workspaceId: string;
+  entityType: string;
+  entityId: string;
+  status?: 'pending' | 'syncing' | 'completed' | 'retryable' | 'conflict' | 'dead_letter';
+  itemCount?: number;
+  committedItemCount?: number;
+  createdAt?: string;
+  mutations: DesktopOutboxMutation[];
+}
+
+export interface DesktopSyncBundleResult {
+  bundleId: string;
+  bundleType: DesktopOutboxMutation['bundleType'] | string;
+  rootEntityId: string;
+  status: 'accepted' | 'accepted_already_processed' | 'conflict' | 'validation_rejected' | 'permission_rejected' | 'entitlement_rejected' | 'retryable_failure';
+  committedMutationCount: number;
+  canonicalBundle?: Record<string, unknown> | null;
+  serverSnapshot?: Record<string, unknown> | null;
+  localSnapshot?: Record<string, unknown> | null;
+  serverBaseVersion?: string;
+  conflictType?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface DesktopSyncMutationResult {
+  mutationId: string;
+  bundleId?: string;
+  status: 'accepted' | 'accepted_already_processed' | 'conflict' | 'validation_rejected' | 'permission_rejected' | 'entitlement_rejected' | 'retryable_failure';
+  entityType: string;
+  entityId: string;
+  canonicalEntity?: Record<string, unknown> | null;
+  result?: Record<string, unknown> | null;
+  localSnapshot?: Record<string, unknown> | null;
+  serverSnapshot?: Record<string, unknown> | null;
+  serverBaseVersion?: string;
+  conflictType?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface DesktopSyncPullChanges {
+  patients: Patient[];
+  appointments: Appointment[];
+  drafts: Record<string, ConsultationDraft>;
+  notes: ClinicalNote[];
+  attachments: DesktopAttachmentTransfer[];
+}
+
+export interface DesktopSyncPullResult {
+  checkpoint: string;
+  changes: DesktopSyncPullChanges;
+  entitlement: DesktopRuntimeInfo['entitlement'];
+  checkpointStatus?: 'ok' | 'unknown_checkpoint' | 'expired_checkpoint' | 'rebuild_required';
+  rebuildRequired?: boolean;
+  snapshot?: DesktopBootstrapSnapshot | null;
 }
 
 export interface DesktopDeviceRegistrationPayload {

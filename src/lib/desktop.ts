@@ -1,4 +1,4 @@
-import type { DesktopAttachmentTransfer, DesktopBootstrapSnapshot, DesktopDiagnosticsExportResult, DesktopOutboxMutation, DesktopRuntimeInfo, DesktopSyncIssueSummary, SessionPayload } from '@/lib/app-types';
+import type { DesktopAttachmentTransfer, DesktopBootstrapSnapshot, DesktopDiagnosticsExportResult, DesktopOutboxMutation, DesktopRuntimeInfo, DesktopSyncIssueSummary, DesktopSyncMutationResult, SessionPayload } from '@/lib/app-types';
 
 const webRuntime: DesktopRuntimeInfo = {
   isDesktop: false,
@@ -10,6 +10,9 @@ const webRuntime: DesktopRuntimeInfo = {
   backupOverdue: false,
   pendingMutations: 0,
   failedMutations: 0,
+  pendingBundles: 0,
+  failedBundles: 0,
+  completedBundles: 0,
   oldestPendingAt: '',
   entitlement: null,
 };
@@ -96,7 +99,7 @@ export async function getDesktopSyncIssues(): Promise<DesktopSyncIssueSummary> {
 
 export async function runDesktopSyncNow() {
   if (!isDesktopRuntime()) {
-    return { ok: false, code: 'WEB_RUNTIME' };
+    return { ok: false, code: 'WEB_RUNTIME', results: [] as DesktopSyncMutationResult[] };
   }
   return window.desktopApp!.runSync();
 }
@@ -113,6 +116,30 @@ export async function exportDesktopDiagnosticsNow(): Promise<DesktopDiagnosticsE
     return { ok: false, code: 'WEB_RUNTIME', message: 'Desktop diagnostics are only available in the desktop app.' };
   }
   return window.desktopApp!.exportDiagnostics();
+}
+
+export async function retryDesktopRetryablesNow() {
+  if (!isDesktopRuntime()) {
+    return { ok: false, code: 'WEB_RUNTIME', message: 'Desktop retry is only available in the desktop app.' };
+  }
+  return window.desktopApp!.retryRetryableBundles();
+}
+
+export async function resolveDesktopConflict(payload: {
+  conflictId: string;
+  action: string;
+}) {
+  if (!isDesktopRuntime()) {
+    return { ok: false, code: 'WEB_RUNTIME', message: 'Conflict resolution is only available in the desktop app.' };
+  }
+  return window.desktopApp!.resolveConflict(payload);
+}
+
+export async function wipeDesktopLocalStateNow() {
+  if (!isDesktopRuntime()) {
+    return { ok: false, code: 'WEB_RUNTIME', message: 'Desktop wipe is only available in the desktop app.' };
+  }
+  return window.desktopApp!.wipeLocalState();
 }
 
 export async function queueDesktopAttachmentTransfer(attachment: DesktopAttachmentTransfer) {

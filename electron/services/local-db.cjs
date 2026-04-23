@@ -50,6 +50,9 @@ function createDesktopDatabase({ userDataPath, secrets }) {
 
     CREATE TABLE IF NOT EXISTS outbox_mutations (
       mutation_id TEXT PRIMARY KEY,
+      bundle_id TEXT NOT NULL DEFAULT '',
+      bundle_type TEXT NOT NULL DEFAULT 'mutation',
+      root_entity_id TEXT NOT NULL DEFAULT '',
       device_id TEXT NOT NULL,
       workspace_id TEXT NOT NULL,
       entity_type TEXT NOT NULL,
@@ -64,6 +67,24 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       last_error_message TEXT NOT NULL DEFAULT '',
       next_retry_at TEXT NOT NULL DEFAULT '',
       processed_at TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_bundles (
+      bundle_id TEXT PRIMARY KEY,
+      bundle_type TEXT NOT NULL DEFAULT 'mutation',
+      root_entity_id TEXT NOT NULL DEFAULT '',
+      device_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL DEFAULT '',
+      entity_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      item_count INTEGER NOT NULL DEFAULT 0,
+      committed_item_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at TEXT NOT NULL DEFAULT '',
+      last_error_code TEXT NOT NULL DEFAULT '',
+      last_error_message TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS pull_checkpoints (
@@ -139,6 +160,26 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     );
   `);
 
+  function ensureColumn(tableName, columnName, definition) {
+    const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+    if (columns.some(column => column.name === columnName)) return;
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+
+  ensureColumn('outbox_mutations', 'bundle_id', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('outbox_mutations', 'bundle_type', "TEXT NOT NULL DEFAULT 'mutation'");
+  ensureColumn('outbox_mutations', 'root_entity_id', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('sync_conflicts', 'mutation_id', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('sync_conflicts', 'bundle_id', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('sync_conflicts', 'local_summary', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('sync_conflicts', 'server_summary', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('sync_conflicts', 'local_snapshot_json', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('sync_conflicts', 'server_snapshot_json', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('sync_conflicts', 'server_base_version', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('sync_conflicts', 'resolution_status', "TEXT NOT NULL DEFAULT 'pending'");
+  ensureColumn('sync_conflicts', 'chosen_action', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('sync_conflicts', 'resolution_reason', "TEXT NOT NULL DEFAULT ''");
+
   const initialDeviceId = `desktop_${crypto.randomUUID()}`;
   db.prepare(`
     INSERT INTO sync_state (id, device_id, is_locked, last_sync_status)
@@ -148,6 +189,145 @@ function createDesktopDatabase({ userDataPath, secrets }) {
 
   function nowIso() {
     return new Date().toISOString();
+  }
+
+  function getMeta(key, fallback = '') {
+    return readRow(`SELECT value FROM desktop_meta WHERE key = ?`, [key])?.value ?? fallback;
+  }
+
+  function setMeta(key, value = '') {
+    db.prepare(`
+      INSERT INTO desktop_meta (key, value)
+      VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(key, String(value ?? ''));
+    return true;
+  }
+
+  function clearMeta(key) {
+    db.prepare(`DELETE FROM desktop_meta WHERE key = ?`).run(key);
+    return true;
+  }
+
+  function setRebuildRequired(required, reason = '') {
+    if (required) {
+      setMeta('rebuild_required', '1');
+      setMeta('rebuild_reason', reason || 'Desktop sync needs a cache rebuild before it can continue.');
+    } else {
+      clearMeta('rebuild_required');
+      clearMeta('rebuild_reason');
+    }
+    return true;
+  }
+
+  function parseJsonText(value, fallback = null) {
+    if (!value) return fallback;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+
+  function summarizeSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return '';
+    if (snapshot.name || snapshot.id || snapshot.status) {
+      return [snapshot.name, snapshot.id, snapshot.status].filter(Boolean).join(' • ');
+    }
+    if (snapshot.appointmentId || snapshot.patientId || snapshot.chiefComplaint) {
+      return [snapshot.appointmentId, snapshot.patientId, snapshot.chiefComplaint].filter(Boolean).join(' • ');
+    }
+    const text = JSON.stringify(snapshot);
+    return text.length > 180 ? `${text.slice(0, 177)}...` : text;
+  }
+
+  function isMeaningfulValue(value) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
+    if (typeof value === 'boolean') return value;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return false;
+  }
+
+  function normalizeDraftSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return {};
+    const next = { ...snapshot };
+    delete next.savedAt;
+    return next;
+  }
+
+  function decideSystemConflictResolution(conflictType, localSnapshot, serverSnapshot, serverBaseVersion) {
+    if (conflictType === 'appointment_conflict') {
+      return {
+        action: 'refresh_from_server',
+        reason: 'The visit state changed elsewhere, so refreshing from the server is the safest automatic choice.',
+      };
+    }
+
+    if (conflictType === 'draft_conflict') {
+      const normalizedLocal = normalizeDraftSnapshot(localSnapshot);
+      const normalizedServer = normalizeDraftSnapshot(serverSnapshot);
+      if (JSON.stringify(normalizedLocal) === JSON.stringify(normalizedServer)) {
+        return {
+          action: 'discard_local',
+          reason: 'The local draft already matches the server content, so the system keeps the server copy.',
+        };
+      }
+
+      const localHasClinicalContent = Object.values(normalizedLocal).some(isMeaningfulValue);
+      if (localHasClinicalContent && serverBaseVersion) {
+        return {
+          action: 'keep_local_as_new_draft',
+          reason: 'The local draft still contains meaningful clinical work, so the system preserves it against the latest server base version.',
+        };
+      }
+
+      return {
+        action: 'discard_local',
+        reason: 'The local draft does not add enough unique content to outweigh the newer server draft, so the system keeps the server copy.',
+      };
+    }
+
+    if (conflictType === 'patient_conflict') {
+      const fields = ['mrn', 'name', 'phone', 'age', 'gender', 'cnic', 'address', 'bloodGroup', 'emergencyContact'];
+      let localOnlyAdditions = 0;
+      let conflictingValues = 0;
+
+      for (const field of fields) {
+        const localValue = localSnapshot?.[field];
+        const serverValue = serverSnapshot?.[field];
+        const localMeaningful = isMeaningfulValue(localValue);
+        const serverMeaningful = isMeaningfulValue(serverValue);
+
+        if (localMeaningful && !serverMeaningful) {
+          localOnlyAdditions += 1;
+          continue;
+        }
+
+        if (localMeaningful && serverMeaningful && String(localValue).trim() !== String(serverValue).trim()) {
+          conflictingValues += 1;
+        }
+      }
+
+      if (localOnlyAdditions > 0 && conflictingValues === 0 && serverBaseVersion) {
+        return {
+          action: 'use_local',
+          reason: 'The local patient record only fills missing server details without contradicting populated server fields, so the system keeps the local update.',
+        };
+      }
+
+      return {
+        action: 'use_server',
+        reason: 'The patient record has competing populated values, so the system prefers the current server demographics for safety.',
+      };
+    }
+
+    return {
+      action: 'use_server',
+      reason: 'The system could not safely merge this conflict automatically, so it kept the canonical server version.',
+    };
   }
 
   function readRow(statement, params = []) {
@@ -164,6 +344,9 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     );
     const pendingMutations = readRow(`SELECT COUNT(*) AS count FROM outbox_mutations WHERE status IN ('pending', 'retryable')`)?.count ?? 0;
     const failedMutations = readRow(`SELECT COUNT(*) AS count FROM sync_dead_letters`)?.count ?? 0;
+    const pendingBundles = readRow(`SELECT COUNT(*) AS count FROM sync_bundles WHERE status IN ('pending', 'retryable', 'syncing')`)?.count ?? 0;
+    const failedBundles = readRow(`SELECT COUNT(*) AS count FROM sync_bundles WHERE status IN ('dead_letter', 'conflict')`)?.count ?? 0;
+    const completedBundles = readRow(`SELECT COUNT(*) AS count FROM sync_bundles WHERE status = 'completed'`)?.count ?? 0;
     const oldestPending = readRow(`
       SELECT created_local_at
       FROM outbox_mutations
@@ -221,7 +404,12 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       backupOverdue,
       pendingMutations: Number(pendingMutations || 0),
       failedMutations: Number(failedMutations || 0),
+      pendingBundles: Number(pendingBundles || 0),
+      failedBundles: Number(failedBundles || 0),
+      completedBundles: Number(completedBundles || 0),
       oldestPendingAt: oldestPending || '',
+      rebuildRequired: getMeta('rebuild_required', '') === '1',
+      rebuildReason: getMeta('rebuild_reason', ''),
       entitlement: effectiveEntitlement,
     };
   }
@@ -452,6 +640,47 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     return true;
   }
 
+  function applyServerSnapshotToBootstrap(entityType, entityId, serverSnapshot, localSnapshot = null) {
+    if ((!serverSnapshot || typeof serverSnapshot !== 'object') && entityType !== 'consultation_draft') return false;
+
+    const bootstrap = getBootstrapMutable();
+    const nextBootstrap = {
+      ...bootstrap,
+      patients: Array.isArray(bootstrap.patients) ? [...bootstrap.patients] : [],
+      appointments: Array.isArray(bootstrap.appointments) ? [...bootstrap.appointments] : [],
+      notes: Array.isArray(bootstrap.notes) ? [...bootstrap.notes] : [],
+      drafts: bootstrap.drafts && typeof bootstrap.drafts === 'object' ? { ...bootstrap.drafts } : {},
+      attachments: Array.isArray(bootstrap.attachments) ? [...bootstrap.attachments] : [],
+      generatedAt: nowIso(),
+    };
+
+    if (entityType === 'patient' && serverSnapshot?.id) {
+      const index = nextBootstrap.patients.findIndex(item => item.id === serverSnapshot.id);
+      if (index >= 0) nextBootstrap.patients[index] = serverSnapshot;
+      else nextBootstrap.patients.unshift(serverSnapshot);
+    }
+
+    if (entityType === 'appointment' && serverSnapshot?.id) {
+      const index = nextBootstrap.appointments.findIndex(item => item.id === serverSnapshot.id);
+      if (index >= 0) nextBootstrap.appointments[index] = serverSnapshot;
+      else nextBootstrap.appointments.unshift(serverSnapshot);
+    }
+
+    if (entityType === 'consultation_draft') {
+      const draftKey = String(serverSnapshot?.appointmentId || localSnapshot?.appointmentId || entityId || '').trim();
+      if (draftKey) {
+        if (serverSnapshot && Object.keys(serverSnapshot).length > 0) {
+          nextBootstrap.drafts[draftKey] = serverSnapshot;
+        } else {
+          delete nextBootstrap.drafts[draftKey];
+        }
+      }
+    }
+
+    overwriteBootstrapSnapshot(nextBootstrap);
+    return true;
+  }
+
   function getCachedBootstrap() {
     const row = readRow(`SELECT encrypted_session, encrypted_bootstrap FROM auth_cache WHERE id = 1`);
     return {
@@ -460,15 +689,140 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     };
   }
 
+  function ensureBundle(bundle) {
+    db.prepare(`
+      INSERT INTO sync_bundles (
+        bundle_id, bundle_type, root_entity_id, device_id, workspace_id, entity_type, entity_id, status, item_count, committed_item_count, created_at, updated_at, completed_at, last_error_code, last_error_message
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, '', '', '')
+      ON CONFLICT(bundle_id) DO UPDATE SET
+        bundle_type = excluded.bundle_type,
+        root_entity_id = excluded.root_entity_id,
+        device_id = excluded.device_id,
+        workspace_id = excluded.workspace_id,
+        entity_type = excluded.entity_type,
+        entity_id = excluded.entity_id,
+        item_count = (
+          SELECT COUNT(*)
+          FROM outbox_mutations
+          WHERE bundle_id = excluded.bundle_id
+        ),
+        updated_at = excluded.updated_at
+    `).run(
+      bundle.bundleId,
+      bundle.bundleType || 'mutation',
+      bundle.rootEntityId || bundle.entityId || '',
+      bundle.deviceId,
+      bundle.workspaceId,
+      bundle.entityType || '',
+      bundle.entityId || '',
+      bundle.status || 'pending',
+      bundle.itemCount || 0,
+      bundle.createdAt || nowIso(),
+      nowIso()
+    );
+  }
+
+  function refreshBundleState(bundleId) {
+    const bundleKey = String(bundleId || '').trim();
+    if (!bundleKey) return null;
+
+    const summary = db.prepare(`
+      SELECT
+        COUNT(*) AS item_count,
+        SUM(CASE WHEN status = 'processed' THEN 1 ELSE 0 END) AS committed_item_count,
+        SUM(CASE WHEN status = 'dead_letter' AND last_error_code = 'CONFLICT' THEN 1 ELSE 0 END) AS conflict_count,
+        SUM(CASE WHEN status = 'dead_letter' AND last_error_code <> 'CONFLICT' THEN 1 ELSE 0 END) AS dead_letter_count,
+        SUM(CASE WHEN status = 'retryable' THEN 1 ELSE 0 END) AS retryable_count,
+        SUM(CASE WHEN status IN ('pending', 'syncing') THEN 1 ELSE 0 END) AS pending_count,
+        MAX(CASE WHEN last_error_code <> '' THEN last_error_code ELSE NULL END) AS last_error_code,
+        MAX(CASE WHEN last_error_message <> '' THEN last_error_message ELSE NULL END) AS last_error_message
+      FROM outbox_mutations
+      WHERE bundle_id = ?
+    `).get(bundleKey);
+
+    const itemCount = Number(summary?.item_count || 0);
+    if (itemCount === 0) {
+      db.prepare(`DELETE FROM sync_bundles WHERE bundle_id = ?`).run(bundleKey);
+      return null;
+    }
+
+    const committedItemCount = Number(summary?.committed_item_count || 0);
+    const conflictCount = Number(summary?.conflict_count || 0);
+    const deadLetterCount = Number(summary?.dead_letter_count || 0);
+    const retryableCount = Number(summary?.retryable_count || 0);
+    const pendingCount = Number(summary?.pending_count || 0);
+
+    let status = 'pending';
+    if (committedItemCount === itemCount) {
+      status = 'completed';
+    } else if (conflictCount > 0) {
+      status = 'conflict';
+    } else if (deadLetterCount > 0) {
+      status = 'dead_letter';
+    } else if (retryableCount > 0) {
+      status = 'retryable';
+    } else if (pendingCount > 0) {
+      status = 'pending';
+    }
+
+    db.prepare(`
+      UPDATE sync_bundles
+      SET status = ?,
+          item_count = ?,
+          committed_item_count = ?,
+          updated_at = CURRENT_TIMESTAMP,
+          completed_at = CASE WHEN ? = 'completed' THEN COALESCE(NULLIF(completed_at, ''), ?) ELSE '' END,
+          last_error_code = CASE WHEN ? IN ('retryable', 'conflict', 'dead_letter') THEN COALESCE(?, '') ELSE '' END,
+          last_error_message = CASE WHEN ? IN ('retryable', 'conflict', 'dead_letter') THEN COALESCE(?, '') ELSE '' END
+      WHERE bundle_id = ?
+    `).run(
+      status,
+      itemCount,
+      committedItemCount,
+      status,
+      nowIso(),
+      status,
+      summary?.last_error_code ?? '',
+      status,
+      summary?.last_error_message ?? '',
+      bundleKey
+    );
+
+    return { bundleId: bundleKey, status, itemCount, committedItemCount };
+  }
+
+  function markBundlesSyncing(bundleIds = []) {
+    const uniqueBundleIds = Array.from(new Set((bundleIds || []).map(item => String(item || '').trim()).filter(Boolean)));
+    const markStatement = db.prepare(`
+      UPDATE sync_bundles
+      SET status = 'syncing',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE bundle_id = ?
+        AND status IN ('pending', 'retryable')
+    `);
+
+    const transaction = db.transaction(items => {
+      for (const bundleId of items) {
+        markStatement.run(bundleId);
+      }
+    });
+
+    transaction(uniqueBundleIds);
+    return uniqueBundleIds.length;
+  }
+
   function enqueueMutation(mutation) {
     db.prepare(`
       INSERT OR REPLACE INTO outbox_mutations (
-        mutation_id, device_id, workspace_id, entity_type, entity_id, operation_type,
+        mutation_id, bundle_id, bundle_type, root_entity_id, device_id, workspace_id, entity_type, entity_id, operation_type,
         encrypted_payload, base_version, created_local_at, status, retry_count,
         last_error_code, last_error_message, next_retry_at, processed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       mutation.mutationId,
+      mutation.bundleId || mutation.mutationId,
+      mutation.bundleType || 'mutation',
+      mutation.rootEntityId || mutation.entityId,
       mutation.deviceId,
       mutation.workspaceId,
       mutation.entityType,
@@ -484,11 +838,34 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       mutation.nextRetryAt || '',
       mutation.processedAt || ''
     );
+
+    ensureBundle({
+      bundleId: mutation.bundleId || mutation.mutationId,
+      bundleType: mutation.bundleType || 'mutation',
+      rootEntityId: mutation.rootEntityId || mutation.entityId,
+      deviceId: mutation.deviceId,
+      workspaceId: mutation.workspaceId,
+      entityType: mutation.entityType,
+      entityId: mutation.entityId,
+      status: 'pending',
+      createdAt: mutation.createdLocalAt || nowIso(),
+    });
+    db.prepare(`
+      UPDATE sync_bundles
+      SET item_count = (
+        SELECT COUNT(*)
+        FROM outbox_mutations
+        WHERE bundle_id = ?
+      ),
+      status = CASE WHEN status = 'completed' THEN 'pending' ELSE status END,
+      updated_at = CURRENT_TIMESTAMP
+      WHERE bundle_id = ?
+    `).run(mutation.bundleId || mutation.mutationId, mutation.bundleId || mutation.mutationId);
   }
 
   function getPendingMutations(limit = 50) {
     const rows = db.prepare(`
-      SELECT mutation_id, device_id, workspace_id, entity_type, entity_id, operation_type, encrypted_payload,
+      SELECT mutation_id, bundle_id, bundle_type, root_entity_id, device_id, workspace_id, entity_type, entity_id, operation_type, encrypted_payload,
              base_version, created_local_at, status, retry_count, last_error_code, last_error_message, next_retry_at
       FROM outbox_mutations
       WHERE status IN ('pending', 'retryable')
@@ -499,6 +876,9 @@ function createDesktopDatabase({ userDataPath, secrets }) {
 
     return rows.map(row => ({
       mutationId: row.mutation_id,
+      bundleId: row.bundle_id,
+      bundleType: row.bundle_type,
+      rootEntityId: row.root_entity_id,
       deviceId: row.device_id,
       workspaceId: row.workspace_id,
       entityType: row.entity_type,
@@ -512,6 +892,54 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       lastErrorCode: row.last_error_code,
       lastErrorMessage: row.last_error_message,
       nextRetryAt: row.next_retry_at,
+    }));
+  }
+
+  function getPendingBundles(limit = 20) {
+    const bundles = db.prepare(`
+      SELECT bundle_id, bundle_type, root_entity_id, device_id, workspace_id, entity_type, entity_id, status, item_count, created_at
+      FROM sync_bundles
+      WHERE status IN ('pending', 'retryable', 'syncing')
+      ORDER BY created_at ASC
+      LIMIT ?
+    `).all(limit);
+
+    return bundles.map(bundle => ({
+      bundleId: bundle.bundle_id,
+      bundleType: bundle.bundle_type,
+      rootEntityId: bundle.root_entity_id,
+      deviceId: bundle.device_id,
+      workspaceId: bundle.workspace_id,
+      entityType: bundle.entity_type,
+      entityId: bundle.entity_id,
+      status: bundle.status,
+      itemCount: bundle.item_count,
+      createdAt: bundle.created_at,
+      mutations: db.prepare(`
+        SELECT mutation_id, bundle_id, bundle_type, root_entity_id, device_id, workspace_id, entity_type, entity_id, operation_type, encrypted_payload,
+               base_version, created_local_at, status, retry_count, last_error_code, last_error_message, next_retry_at
+        FROM outbox_mutations
+        WHERE bundle_id = ?
+        ORDER BY created_local_at ASC
+      `).all(bundle.bundle_id).map(row => ({
+        mutationId: row.mutation_id,
+        bundleId: row.bundle_id,
+        bundleType: row.bundle_type,
+        rootEntityId: row.root_entity_id,
+        deviceId: row.device_id,
+        workspaceId: row.workspace_id,
+        entityType: row.entity_type,
+        entityId: row.entity_id,
+        operationType: row.operation_type,
+        payload: row.encrypted_payload ? JSON.parse(secrets.decryptText(row.encrypted_payload)) : {},
+        baseVersion: row.base_version,
+        createdLocalAt: row.created_local_at,
+        status: row.status,
+        retryCount: row.retry_count,
+        lastErrorCode: row.last_error_code,
+        lastErrorMessage: row.last_error_message,
+        nextRetryAt: row.next_retry_at,
+      })),
     }));
   }
 
@@ -566,7 +994,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     const attachments = Array.isArray(bootstrap.attachments) ? [...bootstrap.attachments] : [];
 
     for (const item of accepted) {
-      const result = item?.result ?? {};
+      const result = item?.canonicalEntity ?? item?.result ?? {};
 
       if (result?.patient?.id) {
         const nextPatient = result.patient;
@@ -712,14 +1140,20 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       setCheckpoint('workspace', checkpoint);
     }
     touchSuccessfulSync();
+    setRebuildRequired(false);
     return true;
   }
 
   function recordSyncResults(results = []) {
     const transaction = db.transaction(items => {
+      const touchedBundleIds = new Set();
       for (const item of items) {
         const mutationId = String(item?.mutationId ?? '').trim();
         if (!mutationId) continue;
+        const mutationRow = readRow(`SELECT bundle_id, encrypted_payload FROM outbox_mutations WHERE mutation_id = ?`, [mutationId]);
+        if (mutationRow?.bundle_id) {
+          touchedBundleIds.add(String(mutationRow.bundle_id));
+        }
 
         if (item.status === 'accepted' || item.status === 'accepted_already_processed') {
           db.prepare(`
@@ -736,28 +1170,42 @@ function createDesktopDatabase({ userDataPath, secrets }) {
           updateAttachmentStatusFromSync(
             item,
             'uploaded',
-            String(item?.result?.remoteKey ?? item?.result?.attachment?.remoteKey ?? '')
+            String(item?.canonicalEntity?.remoteKey ?? item?.result?.remoteKey ?? item?.result?.attachment?.remoteKey ?? '')
           );
           continue;
         }
 
         if (item.status === 'conflict') {
+          const localSnapshot = mutationRow?.encrypted_payload
+            ? parseJsonText(secrets.decryptText(mutationRow.encrypted_payload), null)
+            : null;
           db.prepare(`
-            INSERT OR REPLACE INTO sync_conflicts (id, entity_type, entity_id, conflict_type, details_json, created_at, resolved_at)
-            VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM sync_conflicts WHERE id = ?), CURRENT_TIMESTAMP), '')
+            INSERT OR REPLACE INTO sync_conflicts (
+              id, mutation_id, bundle_id, entity_type, entity_id, conflict_type, details_json,
+              local_summary, server_summary, local_snapshot_json, server_snapshot_json, server_base_version,
+              resolution_status, chosen_action, resolution_reason, created_at, resolved_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', '', COALESCE((SELECT created_at FROM sync_conflicts WHERE id = ?), CURRENT_TIMESTAMP), '')
           `).run(
             `conflict_${mutationId}`,
+            mutationId,
+            String(mutationRow?.bundle_id ?? ''),
             String(item.entityType ?? ''),
             String(item.entityId ?? ''),
             String(item.conflictType ?? 'mutation_conflict'),
             JSON.stringify(item),
+            summarizeSnapshot(localSnapshot),
+            summarizeSnapshot(item.serverSnapshot),
+            localSnapshot ? JSON.stringify(localSnapshot) : '',
+            item.serverSnapshot ? JSON.stringify(item.serverSnapshot) : '',
+            String(item.serverBaseVersion ?? ''),
             `conflict_${mutationId}`
           );
 
           db.prepare(`
             INSERT OR REPLACE INTO sync_dead_letters (id, mutation_id, reason_code, reason_message, created_at)
             VALUES (?, ?, 'CONFLICT', ?, COALESCE((SELECT created_at FROM sync_dead_letters WHERE mutation_id = ?), CURRENT_TIMESTAMP))
-          `).run(`dead_${mutationId}`, mutationId, String(item.error ?? 'Conflict requires attention'), mutationId);
+          `).run(`dead_${mutationId}`, mutationId, String(item.errorMessage ?? item.error ?? 'Conflict requires attention'), mutationId);
 
           db.prepare(`
             UPDATE outbox_mutations
@@ -766,7 +1214,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
                 last_error_message = ?,
                 next_retry_at = ''
             WHERE mutation_id = ?
-          `).run(String(item.error ?? 'Conflict requires attention'), mutationId);
+          `).run(String(item.errorMessage ?? item.error ?? 'Conflict requires attention'), mutationId);
           updateAttachmentStatusFromSync(item, 'failed');
           continue;
         }
@@ -775,7 +1223,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
           db.prepare(`
             INSERT OR REPLACE INTO sync_dead_letters (id, mutation_id, reason_code, reason_message, created_at)
             VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM sync_dead_letters WHERE mutation_id = ?), CURRENT_TIMESTAMP))
-          `).run(`dead_${mutationId}`, mutationId, String(item.status).toUpperCase(), String(item.error ?? ''), mutationId);
+          `).run(`dead_${mutationId}`, mutationId, String(item.errorCode || item.status).toUpperCase(), String(item.errorMessage ?? item.error ?? ''), mutationId);
 
           db.prepare(`
             UPDATE outbox_mutations
@@ -784,7 +1232,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
                 last_error_message = ?,
                 next_retry_at = ''
             WHERE mutation_id = ?
-          `).run(String(item.status).toUpperCase(), String(item.error ?? ''), mutationId);
+          `).run(String(item.errorCode || item.status).toUpperCase(), String(item.errorMessage ?? item.error ?? ''), mutationId);
           updateAttachmentStatusFromSync(item, 'failed');
           continue;
         }
@@ -798,7 +1246,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
           db.prepare(`
             INSERT OR REPLACE INTO sync_dead_letters (id, mutation_id, reason_code, reason_message, created_at)
             VALUES (?, ?, 'RETRY_EXHAUSTED', ?, COALESCE((SELECT created_at FROM sync_dead_letters WHERE mutation_id = ?), CURRENT_TIMESTAMP))
-          `).run(`dead_${mutationId}`, mutationId, String(item.error ?? 'Retry attempts exhausted'), mutationId);
+          `).run(`dead_${mutationId}`, mutationId, String(item.errorMessage ?? item.error ?? 'Retry attempts exhausted'), mutationId);
 
           db.prepare(`
             UPDATE outbox_mutations
@@ -808,7 +1256,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
                 last_error_message = ?,
                 next_retry_at = ''
             WHERE mutation_id = ?
-          `).run(nextRetryCount, String(item.error ?? 'Retry attempts exhausted'), mutationId);
+          `).run(nextRetryCount, String(item.errorMessage ?? item.error ?? 'Retry attempts exhausted'), mutationId);
           updateAttachmentStatusFromSync(item, 'failed');
         } else {
           db.prepare(`
@@ -819,9 +1267,13 @@ function createDesktopDatabase({ userDataPath, secrets }) {
                 last_error_message = ?,
                 next_retry_at = ?
             WHERE mutation_id = ?
-          `).run(nextRetryCount, String(item.status || 'RETRYABLE_FAILURE').toUpperCase(), String(item.error ?? ''), nextRetryAt, mutationId);
+          `).run(nextRetryCount, String(item.errorCode || item.status || 'RETRYABLE_FAILURE').toUpperCase(), String(item.errorMessage ?? item.error ?? ''), nextRetryAt, mutationId);
           updateAttachmentStatusFromSync(item, 'pending');
         }
+      }
+
+      for (const bundleId of touchedBundleIds) {
+        refreshBundleState(bundleId);
       }
     });
 
@@ -850,6 +1302,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       setCheckpoint('workspace', checkpoint);
     }
     touchSuccessfulSync();
+    setRebuildRequired(false);
     return true;
   }
 
@@ -997,14 +1450,139 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     `).all();
 
     const conflicts = db.prepare(`
-      SELECT id, entity_type, entity_id, conflict_type, details_json, created_at, resolved_at
+      SELECT id, mutation_id, bundle_id, entity_type, entity_id, conflict_type, details_json, local_summary, server_summary,
+             local_snapshot_json, server_snapshot_json, server_base_version, resolution_status, chosen_action, created_at, resolved_at
+             , resolution_reason
       FROM sync_conflicts
       WHERE resolved_at = ''
       ORDER BY created_at DESC
       LIMIT 100
-    `).all();
+    `).all().map(item => ({
+      ...item,
+      local_snapshot: parseJsonText(item.local_snapshot_json, null),
+      server_snapshot: parseJsonText(item.server_snapshot_json, null),
+    }));
 
     return { pending, deadLetters, conflicts };
+  }
+
+  function retryRetryableBundles() {
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE outbox_mutations
+        SET status = 'pending',
+            last_error_code = '',
+            last_error_message = '',
+            next_retry_at = ''
+        WHERE status = 'retryable'
+      `).run();
+      db.prepare(`
+        UPDATE sync_bundles
+        SET status = 'pending',
+            last_error_code = '',
+            last_error_message = '',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'retryable'
+      `).run();
+    })();
+    return { ok: true };
+  }
+
+  function resolveConflict({ conflictId = '', action = '' } = {}) {
+    const conflict = readRow(`SELECT * FROM sync_conflicts WHERE id = ? LIMIT 1`, [conflictId]);
+    if (!conflict) {
+      return { ok: false, code: 'CONFLICT_NOT_FOUND', message: 'Conflict could not be found.' };
+    }
+
+    const mutationId = String(conflict.mutation_id || '').trim();
+    const bundleId = String(conflict.bundle_id || '').trim();
+    const entityType = String(conflict.entity_type || '').trim();
+    const entityId = String(conflict.entity_id || '').trim();
+    const conflictType = String(conflict.conflict_type || '').trim();
+    const serverSnapshot = parseJsonText(conflict.server_snapshot_json, null);
+    const localSnapshot = parseJsonText(conflict.local_snapshot_json, null);
+    const serverBaseVersion = String(conflict.server_base_version || '').trim();
+    const requestedAction = String(action || '').trim();
+    const systemDecision = requestedAction === 'system_decide'
+      ? decideSystemConflictResolution(conflictType, localSnapshot, serverSnapshot, serverBaseVersion)
+      : null;
+    const resolvedAction = systemDecision?.action || requestedAction;
+    const resolutionReason = systemDecision?.reason || '';
+
+    db.transaction(() => {
+      if (resolvedAction === 'discard_local' || resolvedAction === 'use_server' || resolvedAction === 'refresh_from_server') {
+        if (mutationId) {
+          db.prepare(`DELETE FROM outbox_mutations WHERE mutation_id = ?`).run(mutationId);
+          db.prepare(`DELETE FROM sync_dead_letters WHERE mutation_id = ?`).run(mutationId);
+        }
+        applyServerSnapshotToBootstrap(entityType, entityId, serverSnapshot || {}, localSnapshot);
+      } else if (resolvedAction === 'use_local' || resolvedAction === 'retry_with_server_version' || resolvedAction === 'retry_allowed_transition' || resolvedAction === 'keep_local_as_new_draft') {
+        if (mutationId) {
+          db.prepare(`
+            UPDATE outbox_mutations
+            SET status = 'pending',
+                base_version = ?,
+                last_error_code = '',
+                last_error_message = '',
+                next_retry_at = ''
+            WHERE mutation_id = ?
+          `).run(serverBaseVersion, mutationId);
+          db.prepare(`DELETE FROM sync_dead_letters WHERE mutation_id = ?`).run(mutationId);
+        }
+      }
+
+      db.prepare(`
+        UPDATE sync_conflicts
+        SET resolution_status = 'resolved',
+            chosen_action = ?,
+            resolution_reason = ?,
+            resolved_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        requestedAction === 'system_decide'
+          ? `system_decide:${resolvedAction}`
+          : String(resolvedAction || ''),
+        resolutionReason,
+        conflictId
+      );
+
+      if (bundleId) {
+        refreshBundleState(bundleId);
+      }
+    })();
+
+    return {
+      ok: true,
+      action: resolvedAction,
+      message: requestedAction === 'system_decide'
+        ? `System chose ${resolvedAction.replaceAll('_', ' ')}. ${resolutionReason}`
+        : '',
+    };
+  }
+
+  function wipeLocalState() {
+    db.transaction(() => {
+      db.prepare(`DELETE FROM auth_cache`).run();
+      db.prepare(`DELETE FROM outbox_mutations`).run();
+      db.prepare(`DELETE FROM sync_bundles`).run();
+      db.prepare(`DELETE FROM pull_checkpoints`).run();
+      db.prepare(`DELETE FROM sync_runs`).run();
+      db.prepare(`DELETE FROM sync_conflicts`).run();
+      db.prepare(`DELETE FROM sync_dead_letters`).run();
+      db.prepare(`DELETE FROM attachment_transfers`).run();
+      db.prepare(`DELETE FROM device_entitlements`).run();
+      db.prepare(`DELETE FROM local_pin`).run();
+      db.prepare(`DELETE FROM desktop_meta`).run();
+      db.prepare(`
+        UPDATE sync_state
+        SET is_locked = 0,
+            last_successful_sync_at = '',
+            last_sync_status = 'idle',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = 1
+      `).run();
+    })();
+    return { ok: true };
   }
 
   function resetSyncState() {
@@ -1020,12 +1598,84 @@ function createDesktopDatabase({ userDataPath, secrets }) {
         WHERE status IN ('retryable', 'dead_letter')
       `).run();
       db.prepare(`
+        UPDATE sync_bundles
+        SET status = 'pending',
+            committed_item_count = (
+              SELECT COUNT(*)
+              FROM outbox_mutations
+              WHERE outbox_mutations.bundle_id = sync_bundles.bundle_id
+                AND outbox_mutations.status = 'processed'
+            ),
+            completed_at = CASE
+              WHEN EXISTS (
+                SELECT 1
+                FROM outbox_mutations
+                WHERE outbox_mutations.bundle_id = sync_bundles.bundle_id
+                  AND outbox_mutations.status = 'processed'
+              ) THEN completed_at
+              ELSE ''
+            END,
+            last_error_code = '',
+            last_error_message = '',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status IN ('retryable', 'dead_letter', 'conflict', 'syncing')
+      `).run();
+      db.prepare(`
         UPDATE sync_state
         SET last_sync_status = 'idle', updated_at = CURRENT_TIMESTAMP
         WHERE id = 1
       `).run();
     })();
     return { ok: true };
+  }
+
+  function startSyncRun(runType = 'sync') {
+    const runId = `syncrun_${crypto.randomUUID()}`;
+    db.prepare(`
+      INSERT INTO sync_runs (id, run_type, status, started_at, summary_json)
+      VALUES (?, ?, 'running', ?, '{}')
+    `).run(runId, runType, nowIso());
+    return runId;
+  }
+
+  function finishSyncRun(runId, status = 'completed', summary = {}) {
+    db.prepare(`
+      UPDATE sync_runs
+      SET status = ?,
+          finished_at = ?,
+          summary_json = ?
+      WHERE id = ?
+    `).run(status, nowIso(), JSON.stringify(summary ?? {}), runId);
+    return true;
+  }
+
+  function summarizeOutbox() {
+    const byStatus = db.prepare(`
+      SELECT status, COUNT(*) AS count
+      FROM outbox_mutations
+      GROUP BY status
+      ORDER BY status ASC
+    `).all();
+    const byEntity = db.prepare(`
+      SELECT entity_type, operation_type, status, COUNT(*) AS count
+      FROM outbox_mutations
+      GROUP BY entity_type, operation_type, status
+      ORDER BY entity_type ASC, operation_type ASC, status ASC
+    `).all();
+    const recentRuns = db.prepare(`
+      SELECT id, run_type, status, started_at, finished_at, summary_json
+      FROM sync_runs
+      ORDER BY started_at DESC
+      LIMIT 20
+    `).all();
+    const bundlesByStatus = db.prepare(`
+      SELECT status, COUNT(*) AS count
+      FROM sync_bundles
+      GROUP BY status
+      ORDER BY status ASC
+    `).all();
+
+    return { byStatus, byEntity, bundlesByStatus, recentRuns };
   }
 
   function exportDiagnosticsSnapshot() {
@@ -1035,12 +1685,16 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       runtime: getRuntimeInfo(),
       issues: listSyncIssues(),
       checkpoint: getCheckpoint('workspace'),
+      rebuildRequired: getMeta('rebuild_required', '') === '1',
+      rebuildReason: getMeta('rebuild_reason', ''),
+      syncSummary: summarizeOutbox(),
       counts: {
         patients: Array.isArray(bootstrap.patients) ? bootstrap.patients.length : 0,
         appointments: Array.isArray(bootstrap.appointments) ? bootstrap.appointments.length : 0,
         notes: Array.isArray(bootstrap.notes) ? bootstrap.notes.length : 0,
         drafts: bootstrap.drafts && typeof bootstrap.drafts === 'object' ? Object.keys(bootstrap.drafts).length : 0,
         outbox: readRow(`SELECT COUNT(*) AS count FROM outbox_mutations`)?.count ?? 0,
+        bundles: readRow(`SELECT COUNT(*) AS count FROM sync_bundles`)?.count ?? 0,
         attachments: readRow(`SELECT COUNT(*) AS count FROM attachment_transfers`)?.count ?? 0,
       },
     };
@@ -1064,6 +1718,8 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     updateBootstrapSnapshot,
     enqueueMutation,
     getPendingMutations,
+    getPendingBundles,
+    markBundlesSyncing,
     recordSyncResults,
     getCheckpoint,
     setCheckpoint,
@@ -1074,8 +1730,14 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     applyAcceptedSyncResults,
     applyPulledChanges,
     listSyncIssues,
+    retryRetryableBundles,
+    resolveConflict,
+    wipeLocalState,
     resetSyncState,
+    startSyncRun,
+    finishSyncRun,
     exportDiagnosticsSnapshot,
+    setRebuildRequired,
     enqueueAttachmentTransfer,
     listAttachments,
     dataDir,

@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const Store = require('electron-store');
+const Store = require('electron-store').default;
 
 function createSecretManager({ safeStorage }) {
   const store = new Store({

@@ -1,4 +1,4 @@
-import type { SessionPayload, DesktopBootstrapSnapshot, DesktopRuntimeInfo, DesktopOutboxMutation, DesktopSyncIssueSummary, DesktopAttachmentTransfer } from '@/lib/app-types';
+import type { SessionPayload, DesktopBootstrapSnapshot, DesktopRuntimeInfo, DesktopOutboxMutation, DesktopSyncIssueSummary, DesktopAttachmentTransfer, DesktopSyncBundleResult, DesktopSyncMutationResult } from '@/lib/app-types';
 
 declare global {
   interface Window {
@@ -15,7 +15,10 @@ declare global {
       getCachedBootstrap: () => Promise<{ session: SessionPayload | null; bootstrap: DesktopBootstrapSnapshot | null }>;
       enqueueMutation: (mutation: DesktopOutboxMutation) => Promise<{ ok: true }>;
       getSyncIssues: () => Promise<DesktopSyncIssueSummary>;
-      runSync: () => Promise<{ ok: boolean; code?: string; message?: string; results?: unknown[]; checkpoint?: string; changesApplied?: boolean }>;
+      runSync: () => Promise<{ ok: boolean; code?: string; message?: string; results?: DesktopSyncMutationResult[]; bundles?: DesktopSyncBundleResult[]; checkpoint?: string; changesApplied?: boolean }>;
+      retryRetryableBundles: () => Promise<{ ok: boolean; code?: string; message?: string }>;
+      resolveConflict: (payload: { conflictId: string; action: string }) => Promise<{ ok: boolean; code?: string; message?: string }>;
+      wipeLocalState: () => Promise<{ ok: boolean; code?: string; message?: string }>;
       rebuildCache: () => Promise<{ ok: boolean; code?: string; message?: string }>;
       exportDiagnostics: () => Promise<{ ok: boolean; code?: string; message?: string; filePath?: string }>;
       queueAttachment: (attachment: DesktopAttachmentTransfer) => Promise<{ ok: true }>;

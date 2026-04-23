@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
-import { exportDesktopDiagnosticsNow, getDesktopRuntimeInfoSync, isDesktopRuntime, lockDesktopNow, rebuildDesktopCacheNow, setupDesktopPin, unlockDesktopWithPin, getDesktopSyncIssues, runDesktopSyncNow } from '@/lib/desktop';
+import { exportDesktopDiagnosticsNow, getDesktopRuntimeInfoSync, isDesktopRuntime, lockDesktopNow, rebuildDesktopCacheNow, resolveDesktopConflict, retryDesktopRetryablesNow, setupDesktopPin, unlockDesktopWithPin, getDesktopSyncIssues, runDesktopSyncNow, wipeDesktopLocalStateNow } from '@/lib/desktop';
 import type { DesktopRuntimeInfo, DesktopSyncIssueSummary } from '@/lib/app-types';
 
 interface DesktopContextValue {
@@ -8,6 +8,9 @@ interface DesktopContextValue {
   refreshRuntime: () => void;
   refreshIssues: () => Promise<void>;
   runSyncNow: () => Promise<void>;
+  retryRetryableBundles: () => Promise<{ ok: boolean; message?: string }>;
+  resolveConflict: (conflictId: string, action: string) => Promise<{ ok: boolean; message?: string }>;
+  wipeLocalState: () => Promise<{ ok: boolean; message?: string }>;
   rebuildCache: () => Promise<{ ok: boolean; message?: string }>;
   exportDiagnostics: () => Promise<{ ok: boolean; message?: string; filePath?: string }>;
   setupPin: (pin: string) => Promise<void>;
@@ -38,6 +41,24 @@ export function DesktopProvider({ children }: { children: ReactNode }) {
 
   const rebuildCache = async () => {
     const result = await rebuildDesktopCacheNow();
+    await refreshIssues();
+    return { ok: result.ok, message: result.message };
+  };
+
+  const retryRetryableBundles = async () => {
+    const result = await retryDesktopRetryablesNow();
+    await refreshIssues();
+    return { ok: result.ok, message: result.message };
+  };
+
+  const resolveConflict = async (conflictId: string, action: string) => {
+    const result = await resolveDesktopConflict({ conflictId, action });
+    await refreshIssues();
+    return { ok: result.ok, message: result.message };
+  };
+
+  const wipeLocalState = async () => {
+    const result = await wipeDesktopLocalStateNow();
     await refreshIssues();
     return { ok: result.ok, message: result.message };
   };
@@ -87,6 +108,9 @@ export function DesktopProvider({ children }: { children: ReactNode }) {
     refreshIssues,
     runSyncNow,
     rebuildCache,
+    retryRetryableBundles,
+    resolveConflict,
+    wipeLocalState,
     exportDiagnostics,
     setupPin,
     unlock,

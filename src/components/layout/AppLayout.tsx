@@ -52,6 +52,10 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
   const [isSearchingPatients, setIsSearchingPatients] = useState(false);
   const [highlightedSearchIndex, setHighlightedSearchIndex] = useState(-1);
   const [syncIssuesOpen, setSyncIssuesOpen] = useState(false);
+  const isDesktopReadOnly = runtime.entitlement?.status === 'restricted';
+  const showGraceBanner = runtime.isDesktop && runtime.entitlement?.status === 'grace';
+  const showRestrictedBanner = runtime.isDesktop && isDesktopReadOnly;
+  const showRebuildBanner = runtime.isDesktop && runtime.rebuildRequired;
 
   const handleSelectPatient = (patientId: string) => {
     onOpenPatient(patientId);
@@ -379,6 +383,8 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
             className="inline-flex gap-2 px-3 md:px-4"
             size="sm"
             onClick={() => setWalkInOpen(true)}
+            disabled={isDesktopReadOnly}
+            title={isDesktopReadOnly ? 'Desktop is currently in read-only mode.' : 'Add a walk-in patient'}
           >
             <UserPlus className="w-4 h-4" />
             <span className="hidden sm:inline">Walk-in</span>
@@ -389,19 +395,19 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
               type="button"
               onClick={() => setSyncIssuesOpen(true)}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                runtime.backupOverdue || runtime.failedMutations > 0
+                runtime.backupOverdue || runtime.failedBundles > 0
                   ? 'border-amber-200 bg-amber-50 text-amber-700'
-                  : runtime.pendingMutations > 0
+                  : runtime.pendingBundles > 0
                     ? 'border-blue-200 bg-blue-50 text-blue-700'
                     : 'border-emerald-200 bg-emerald-50 text-emerald-700'
               }`}
             >
               {runtime.backupOverdue
                 ? 'Backup overdue'
-                : runtime.failedMutations > 0
-                  ? `Attention needed (${runtime.failedMutations})`
-                  : runtime.pendingMutations > 0
-                    ? `Sync pending (${runtime.pendingMutations})`
+                : runtime.failedBundles > 0
+                  ? `Attention needed (${runtime.failedBundles} bundles)`
+                  : runtime.pendingBundles > 0
+                    ? `Sync pending (${runtime.pendingBundles} bundles)`
                     : 'Up to date'}
             </button>
           )}
@@ -518,6 +524,7 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
                               className="h-8 gap-1.5 text-xs"
                               onMouseDown={event => event.preventDefault()}
                               onClick={() => handleSelectPatient(patient.id)}
+                              disabled={isDesktopReadOnly}
                             >
                               <PlayCircle className="h-3.5 w-3.5" /> New Visit
                             </Button>
@@ -527,6 +534,7 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
                               className="h-8 gap-1.5 text-xs"
                               onMouseDown={event => event.preventDefault()}
                               onClick={() => handleBookAppointment(patient)}
+                              disabled={isDesktopReadOnly}
                             >
                               <CalendarPlus className="h-3.5 w-3.5" /> {isCompletedPatient ? 'Book Next Appointment' : 'Book Appointment'}
                             </Button>
@@ -597,6 +605,25 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
           </div>
         )}
 
+        {showRebuildBanner && (
+          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+            Desktop sync needs a local cache rebuild before editing can continue safely.
+            {runtime.rebuildReason ? ` ${runtime.rebuildReason}` : ''}
+          </div>
+        )}
+
+        {showRestrictedBanner && (
+          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+            This workspace is in read-only mode. Cached records remain available, but local edits and new sync work are paused until billing is resolved.
+          </div>
+        )}
+
+        {showGraceBanner && (
+          <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900">
+            Desktop is currently in grace mode. You can keep working, but cloud access should be refreshed soon to avoid interruption.
+          </div>
+        )}
+
         {/* Page content */}
         <main className="flex-1 overflow-auto">
           {children}
@@ -661,10 +688,10 @@ export default function AppLayout({ children, currentPage, onNavigate, onOpenPat
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <Button className="gap-2" onClick={() => { setPreviewPatient(null); handleSelectPatient(previewPatient.id); }}>
+                    <Button className="gap-2" onClick={() => { setPreviewPatient(null); handleSelectPatient(previewPatient.id); }} disabled={isDesktopReadOnly}>
                       <PlayCircle className="h-4 w-4" /> New Visit
                     </Button>
-                    <Button variant="outline" className="gap-2" onClick={() => { setPreviewPatient(null); handleBookAppointment(previewPatient); }}>
+                    <Button variant="outline" className="gap-2" onClick={() => { setPreviewPatient(null); handleBookAppointment(previewPatient); }} disabled={isDesktopReadOnly}>
                       <CalendarPlus className="h-4 w-4" /> {meta.isCompletedPatient ? 'Book Next Appointment' : 'Book Appointment'}
                     </Button>
                     <Button variant="outline" className="gap-2" onClick={() => { setPreviewPatient(null); handleOpenRecord(previewPatient); }}>

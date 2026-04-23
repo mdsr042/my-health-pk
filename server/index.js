@@ -648,6 +648,41 @@ function parseSyncCheckpoint(value) {
   return parsed.toISOString();
 }
 
+function createIssuedSyncCheckpoint(workspaceId, issuedAt = new Date().toISOString()) {
+  return `sync:v1:${String(workspaceId ?? '').trim()}:${issuedAt}`;
+}
+
+function parseIssuedSyncCheckpoint(value, expectedWorkspaceId = '') {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+
+  if (!raw.startsWith('sync:v1:')) {
+    const legacyTimestamp = parseSyncCheckpoint(raw);
+    if (!legacyTimestamp) return null;
+    return {
+      kind: 'legacy',
+      workspaceId: '',
+      issuedAt: legacyTimestamp,
+    };
+  }
+
+  const withoutPrefix = raw.slice('sync:v1:'.length);
+  const separatorIndex = withoutPrefix.indexOf(':');
+  if (separatorIndex <= 0) return null;
+
+  const workspaceId = withoutPrefix.slice(0, separatorIndex).trim();
+  const issuedAtRaw = withoutPrefix.slice(separatorIndex + 1).trim();
+  const issuedAt = parseSyncCheckpoint(issuedAtRaw);
+  if (!workspaceId || !issuedAt) return null;
+  if (expectedWorkspaceId && workspaceId !== expectedWorkspaceId) return null;
+
+  return {
+    kind: 'issued',
+    workspaceId,
+    issuedAt,
+  };
+}
+
 function buildDraftBaseVersion(payload = {}, savedAt = '') {
   return JSON.stringify({
     appointmentId: String(payload?.appointmentId ?? '').trim(),
@@ -670,6 +705,170 @@ function buildDraftBaseVersion(payload = {}, savedAt = '') {
     careActions: payload?.careActions ?? [],
     savedAt: String(savedAt || payload?.savedAt || ''),
   });
+}
+
+function buildAppointmentBaseVersion(appointment = {}) {
+  return JSON.stringify({
+    id: String(appointment?.id ?? '').trim(),
+    patientId: String(appointment?.patientId ?? appointment?.patient_id ?? '').trim(),
+    clinicId: String(appointment?.clinicId ?? appointment?.clinic_id ?? '').trim(),
+    doctorId: String(appointment?.doctorId ?? appointment?.doctor_user_id ?? '').trim(),
+    date: String(appointment?.date ?? '').trim(),
+    time: String(appointment?.time ?? '').trim(),
+    status: String(appointment?.status ?? '').trim(),
+    type: String(appointment?.type ?? '').trim(),
+    chiefComplaint: String(appointment?.chiefComplaint ?? appointment?.chief_complaint ?? '').trim(),
+    tokenNumber: Number(appointment?.tokenNumber ?? appointment?.token_number ?? 0),
+  });
+}
+
+function buildPatientBaseVersion(patient = {}) {
+  return JSON.stringify({
+    id: String(patient?.id ?? '').trim(),
+    mrn: String(patient?.mrn ?? '').trim(),
+    name: String(patient?.name ?? '').trim(),
+    phone: String(patient?.phone ?? '').trim(),
+    age: Number(patient?.age ?? 0),
+    gender: String(patient?.gender ?? '').trim(),
+    cnic: String(patient?.cnic ?? '').trim(),
+    address: String(patient?.address ?? '').trim(),
+    bloodGroup: String(patient?.bloodGroup ?? patient?.blood_group ?? '').trim(),
+    emergencyContact: String(patient?.emergencyContact ?? patient?.emergency_contact ?? '').trim(),
+  });
+}
+
+function createSyncError(message, {
+  status = 'retryable_failure',
+  errorCode = '',
+  conflictType = '',
+  serverSnapshot = null,
+  serverBaseVersion = '',
+} = {}) {
+  const error = new Error(message);
+  error.syncStatus = status;
+  error.errorCode = errorCode || (
+    status === 'conflict'
+      ? 'SYNC_CONFLICT'
+      : status === 'entitlement_rejected'
+        ? 'ENTITLEMENT_REJECTED'
+        : status === 'validation_rejected'
+          ? 'VALIDATION_REJECTED'
+          : 'RETRYABLE_FAILURE'
+  );
+  error.conflictType = conflictType;
+  error.serverSnapshot = serverSnapshot;
+  error.serverBaseVersion = serverBaseVersion;
+  return error;
+}
+
+function resolvePullCheckpointState(rawCheckpoint, workspaceId) {
+  const trimmed = String(rawCheckpoint ?? '').trim();
+  if (!trimmed) {
+    return { checkpointStatus: 'ok', rebuildRequired: false, rebuildReason: '', parsedCheckpoint: null, checkpointMeta: null };
+  }
+
+  const checkpointMeta = parseIssuedSyncCheckpoint(trimmed, workspaceId);
+  if (!checkpointMeta) {
+    return {
+      checkpointStatus: 'unknown_checkpoint',
+      rebuildRequired: true,
+      rebuildReason: 'The saved desktop checkpoint could not be recognized. Rebuild the local cache before syncing again.',
+      parsedCheckpoint: null,
+      checkpointMeta: null,
+    };
+  }
+
+  const parsedCheckpoint = checkpointMeta.issuedAt;
+  const futureSkewMs = new Date(parsedCheckpoint).getTime() - Date.now();
+  const maxFutureSkewMs = 5 * 60 * 1000;
+  if (futureSkewMs > maxFutureSkewMs) {
+    return {
+      checkpointStatus: 'unknown_checkpoint',
+      rebuildRequired: true,
+      rebuildReason: 'The saved desktop checkpoint is ahead of server time. Rebuild the local cache before syncing again.',
+      parsedCheckpoint: null,
+      checkpointMeta: null,
+    };
+  }
+
+  const ageMs = Date.now() - new Date(parsedCheckpoint).getTime();
+  const maxCheckpointAgeMs = 45 * 24 * 60 * 60 * 1000;
+  if (ageMs > maxCheckpointAgeMs) {
+    return {
+      checkpointStatus: 'expired_checkpoint',
+      rebuildRequired: true,
+      rebuildReason: 'The saved desktop checkpoint is too old for safe incremental sync. Rebuild the local cache before syncing again.',
+      parsedCheckpoint: null,
+      checkpointMeta: null,
+    };
+  }
+
+  return { checkpointStatus: 'ok', rebuildRequired: false, rebuildReason: '', parsedCheckpoint, checkpointMeta };
+}
+
+function normalizeDesktopBundle(input = {}) {
+  const rawMutations = Array.isArray(input?.mutations) ? input.mutations : [];
+  const firstMutation = rawMutations[0] ?? {};
+  return {
+    bundleId: String(input?.bundleId ?? firstMutation?.bundleId ?? '').trim(),
+    bundleType: String(input?.bundleType ?? firstMutation?.bundleType ?? 'mutation').trim() || 'mutation',
+    rootEntityId: String(input?.rootEntityId ?? firstMutation?.rootEntityId ?? firstMutation?.entityId ?? '').trim(),
+    deviceId: String(input?.deviceId ?? firstMutation?.deviceId ?? '').trim(),
+    workspaceId: String(input?.workspaceId ?? firstMutation?.workspaceId ?? '').trim(),
+    entityType: String(input?.entityType ?? firstMutation?.entityType ?? '').trim(),
+    entityId: String(input?.entityId ?? firstMutation?.entityId ?? '').trim(),
+    mutations: rawMutations,
+  };
+}
+
+async function processDesktopBundle(client, auth, bundle) {
+  const bundleResult = {
+    bundleId: bundle.bundleId,
+    bundleType: bundle.bundleType,
+    rootEntityId: bundle.rootEntityId,
+    status: 'accepted',
+    committedMutationCount: 0,
+    canonicalBundle: {
+      patients: [],
+      appointments: [],
+      drafts: {},
+      notes: [],
+      attachments: [],
+    },
+  };
+  const mutationResults = [];
+
+  for (const mutation of bundle.mutations) {
+    const responsePayload = await processDesktopMutation(client, auth, mutation);
+    mutationResults.push({
+      mutationId: String(mutation.mutationId ?? '').trim(),
+      bundleId: bundle.bundleId,
+      entityType: String(mutation.entityType ?? '').trim(),
+      entityId: String(mutation.entityId ?? '').trim(),
+      status: 'accepted',
+      canonicalEntity: responsePayload,
+      result: responsePayload,
+    });
+
+    if (responsePayload?.patient?.id) {
+      bundleResult.canonicalBundle.patients.push(responsePayload.patient);
+    }
+    if (responsePayload?.appointment?.id) {
+      bundleResult.canonicalBundle.appointments.push(responsePayload.appointment);
+    }
+    if (responsePayload?.draft?.appointmentId) {
+      bundleResult.canonicalBundle.drafts[responsePayload.draft.appointmentId] = responsePayload.draft;
+    }
+    if (responsePayload?.note?.id) {
+      bundleResult.canonicalBundle.notes.push(responsePayload.note);
+    }
+    if (responsePayload?.attachment?.id) {
+      bundleResult.canonicalBundle.attachments.push(responsePayload.attachment);
+    }
+  }
+
+  bundleResult.committedMutationCount = mutationResults.length;
+  return { bundleResult, mutationResults };
 }
 
 async function getDesktopChangeSet(auth, checkpoint) {
@@ -801,6 +1000,36 @@ async function processDesktopMutation(client, auth, mutation) {
 
   if (entityType === 'patient' && operationType === 'update') {
     const patient = parseOrThrow(patientSchema, payload, 'INVALID_PATIENT');
+    const currentPatientResult = await client.query(
+      `
+        SELECT *
+        FROM patients
+        WHERE id = $1 AND workspace_id = $2
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [patient.id, auth.workspace.id]
+    );
+
+    if (currentPatientResult.rowCount === 0) {
+      throw createSyncError('Patient not found for update', {
+        status: 'validation_rejected',
+        errorCode: 'VALIDATION_REJECTED',
+      });
+    }
+
+    const currentPatient = mapPatient(currentPatientResult.rows[0]);
+    const incomingBaseVersion = String(mutation?.baseVersion ?? '').trim();
+    const currentBaseVersion = buildPatientBaseVersion(currentPatient);
+    if (incomingBaseVersion && currentBaseVersion && incomingBaseVersion !== currentBaseVersion) {
+      throw createSyncError('Patient conflict: the demographic record changed on another client', {
+        status: 'conflict',
+        conflictType: 'patient_conflict',
+        serverSnapshot: currentPatient,
+        serverBaseVersion: currentBaseVersion,
+      });
+    }
+
     const result = await client.query(
       `
         UPDATE patients
@@ -885,6 +1114,17 @@ async function processDesktopMutation(client, auth, mutation) {
 
   if (entityType === 'appointment' && operationType === 'update') {
     const appointment = parseOrThrow(appointmentSchema, payload, 'INVALID_APPOINTMENT');
+    const currentAppointment = await requireOwnedAppointment(client, auth.workspace.id, appointment.id, { lock: true });
+    const incomingBaseVersion = String(mutation?.baseVersion ?? '').trim();
+    const currentBaseVersion = buildAppointmentBaseVersion(mapAppointment(currentAppointment));
+    if (incomingBaseVersion && currentBaseVersion && incomingBaseVersion !== currentBaseVersion) {
+      throw createSyncError('Appointment conflict: the visit changed on another client', {
+        status: 'conflict',
+        conflictType: 'appointment_conflict',
+        serverSnapshot: mapAppointment(currentAppointment),
+        serverBaseVersion: currentBaseVersion,
+      });
+    }
     const saved = await updateAppointmentForWorkspace(client, {
       workspaceId: auth.workspace.id,
       appointmentId: appointment.id,
@@ -901,6 +1141,16 @@ async function processDesktopMutation(client, auth, mutation) {
     }
 
     const appointment = await requireOwnedAppointment(client, auth.workspace.id, appointmentId, { lock: true });
+    const incomingBaseVersion = String(mutation?.baseVersion ?? '').trim();
+    const currentBaseVersion = buildAppointmentBaseVersion(mapAppointment(appointment));
+    if (incomingBaseVersion && currentBaseVersion && incomingBaseVersion !== currentBaseVersion) {
+      throw createSyncError('Appointment conflict: the visit changed on another client', {
+        status: 'conflict',
+        conflictType: 'appointment_conflict',
+        serverSnapshot: mapAppointment(appointment),
+        serverBaseVersion: currentBaseVersion,
+      });
+    }
     if (status === 'in-consultation') {
       const conflict = await client.query(
         `
@@ -916,20 +1166,26 @@ async function processDesktopMutation(client, auth, mutation) {
         [auth.workspace.id, appointment.clinic_id, appointment.date, appointmentId]
       );
       if (conflict.rowCount > 0) {
-        throw new Error('Appointment status conflict: another visit is already in consultation');
+        throw createSyncError('Appointment status conflict: another visit is already in consultation', {
+          status: 'conflict',
+          conflictType: 'appointment_conflict',
+          serverSnapshot: mapAppointment(appointment),
+          serverBaseVersion: currentBaseVersion,
+        });
       }
     }
 
-    await client.query(
+    const updatedAppointment = await client.query(
       `
         UPDATE appointments
         SET status = $3, updated_at = NOW()
         WHERE id = $1 AND workspace_id = $2
+        RETURNING id, patient_id, clinic_id, doctor_user_id, date, time, status, type, chief_complaint, token_number
       `,
       [appointmentId, auth.workspace.id, status]
     );
 
-    return { entityType, operationType, appointmentId, status };
+    return { entityType, operationType, appointment: mapAppointment(updatedAppointment.rows[0]) };
   }
 
   if (entityType === 'consultation_draft' && operationType === 'upsert') {
@@ -948,7 +1204,16 @@ async function processDesktopMutation(client, auth, mutation) {
       : '';
     const incomingBaseVersion = String(mutation?.baseVersion ?? '').trim();
     if (existingDraft.rows[0] && incomingBaseVersion && existingBaseVersion && incomingBaseVersion !== existingBaseVersion) {
-      throw new Error('Draft conflict: the consultation draft changed on another client');
+      throw createSyncError('Draft conflict: the consultation draft changed on another client', {
+        status: 'conflict',
+        conflictType: 'draft_conflict',
+        serverSnapshot: {
+          ...existingDraft.rows[0].payload,
+          appointmentId,
+          savedAt: existingDraft.rows[0].saved_at,
+        },
+        serverBaseVersion: existingBaseVersion,
+      });
     }
     await saveConsultationDraftForEncounter(client, {
       workspaceId: auth.workspace.id,
@@ -2768,97 +3033,224 @@ app.get('/api/desktop/entitlement', requireAuth, requireRole('doctor_owner'), as
 }));
 
 app.post('/api/sync/push', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
-  const mutations = Array.isArray(req.body?.mutations) ? req.body.mutations : [];
+  const inputBundles = Array.isArray(req.body?.bundles)
+    ? req.body.bundles.map(normalizeDesktopBundle)
+    : [];
+  const fallbackMutations = Array.isArray(req.body?.mutations) ? req.body.mutations : [];
+  const bundles = inputBundles.length > 0
+    ? inputBundles
+    : fallbackMutations.map(mutation => normalizeDesktopBundle({
+        bundleId: String(mutation?.bundleId ?? mutation?.mutationId ?? '').trim(),
+        bundleType: String(mutation?.bundleType ?? 'mutation').trim() || 'mutation',
+        rootEntityId: String(mutation?.rootEntityId ?? mutation?.entityId ?? '').trim(),
+        deviceId: String(mutation?.deviceId ?? '').trim(),
+        workspaceId: String(mutation?.workspaceId ?? '').trim(),
+        entityType: String(mutation?.entityType ?? '').trim(),
+        entityId: String(mutation?.entityId ?? '').trim(),
+        mutations: [mutation],
+      }));
   const results = [];
+  const bundleResults = [];
 
-  for (const mutation of mutations) {
-    const mutationId = String(mutation?.mutationId ?? '').trim();
-    if (!mutationId) {
-      results.push({
-        mutationId: '',
+  for (const bundle of bundles) {
+    const bundleId = String(bundle?.bundleId ?? '').trim();
+    const bundleType = String(bundle?.bundleType ?? 'mutation').trim() || 'mutation';
+    const rootEntityId = String(bundle?.rootEntityId ?? '').trim();
+
+    if (!bundleId) {
+      bundleResults.push({
+        bundleId: '',
+        bundleType,
+        rootEntityId,
         status: 'validation_rejected',
-        error: 'Missing mutationId',
+        committedMutationCount: 0,
+        errorCode: 'MISSING_BUNDLE_ID',
+        errorMessage: 'Missing bundleId',
       });
       continue;
     }
 
-    const existing = await query(
-      `SELECT result_status, response_payload FROM processed_mutations WHERE mutation_id = $1 LIMIT 1`,
-      [mutationId]
+    if (!Array.isArray(bundle.mutations) || bundle.mutations.length === 0) {
+      bundleResults.push({
+        bundleId,
+        bundleType,
+        rootEntityId,
+        status: 'validation_rejected',
+        committedMutationCount: 0,
+        errorCode: 'EMPTY_BUNDLE',
+        errorMessage: 'Bundle does not contain mutations',
+      });
+      continue;
+    }
+
+    const missingMutationId = bundle.mutations.find(item => !String(item?.mutationId ?? '').trim());
+    if (missingMutationId) {
+      bundleResults.push({
+        bundleId,
+        bundleType,
+        rootEntityId,
+        status: 'validation_rejected',
+        committedMutationCount: 0,
+        errorCode: 'MISSING_MUTATION_ID',
+        errorMessage: 'Bundle contains a mutation without mutationId',
+      });
+      for (const mutation of bundle.mutations) {
+        results.push({
+          mutationId: String(mutation?.mutationId ?? '').trim(),
+          entityType: String(mutation?.entityType ?? '').trim(),
+          entityId: String(mutation?.entityId ?? '').trim(),
+          status: 'validation_rejected',
+          errorCode: 'MISSING_MUTATION_ID',
+          errorMessage: 'Bundle contains a mutation without mutationId',
+        });
+      }
+      continue;
+    }
+
+    const existingBundle = await query(
+      `SELECT result_status, response_payload FROM processed_bundles WHERE bundle_id = $1 LIMIT 1`,
+      [bundleId]
     );
 
-    if (existing.rowCount > 0) {
-      results.push({
-        mutationId,
-        entityType: String(mutation.entityType ?? '').trim(),
-        entityId: String(mutation.entityId ?? '').trim(),
+    if (existingBundle.rowCount > 0) {
+      const payload = existingBundle.rows[0].response_payload ?? {};
+      bundleResults.push({
+        bundleId,
+        bundleType,
+        rootEntityId,
         status: 'accepted_already_processed',
-        result: existing.rows[0].response_payload ?? {},
+        committedMutationCount: Number(payload?.bundleResult?.committedMutationCount ?? bundle.mutations.length),
+        canonicalBundle: payload?.bundleResult?.canonicalBundle ?? null,
       });
+      if (Array.isArray(payload?.results) && payload.results.length > 0) {
+        results.push(
+          ...payload.results.map(item => ({
+            ...item,
+            status: 'accepted_already_processed',
+          }))
+        );
+      }
       continue;
     }
 
     try {
-      const responsePayload = await withTransaction(client =>
-        processDesktopMutation(client, req.auth, mutation)
-      );
+      const { bundleResult, mutationResults } = await withTransaction(async client => {
+        const processed = await processDesktopBundle(client, req.auth, bundle);
 
-      await query(
-        `
-          INSERT INTO processed_mutations (
-            id, mutation_id, device_id, workspace_id, entity_type, entity_id, operation_type, result_status, response_payload
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, 'accepted', $8)
-        `,
-        [
-          createId('processed_mutation'),
-          mutationId,
-          String(mutation.deviceId ?? '').trim(),
-          req.auth.workspace.id,
-          String(mutation.entityType ?? '').trim(),
-          String(mutation.entityId ?? '').trim(),
-          String(mutation.operationType ?? '').trim(),
-          responsePayload,
-        ]
-      );
+        await client.query(
+          `
+            INSERT INTO processed_bundles (
+              id, bundle_id, device_id, workspace_id, bundle_type, root_entity_id, entity_type, entity_id, result_status, response_payload
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'accepted', $9)
+          `,
+            [
+              createId('processed_bundle'),
+            bundleId,
+            String(bundle.deviceId ?? '').trim(),
+            req.auth.workspace.id,
+            bundleType,
+            rootEntityId,
+            String(bundle.entityType ?? '').trim(),
+            String(bundle.entityId ?? '').trim(),
+            { bundleResult: processed.bundleResult, results: processed.mutationResults },
+          ]
+        );
 
-      results.push({
-        mutationId,
-        entityType: String(mutation.entityType ?? '').trim(),
-        entityId: String(mutation.entityId ?? '').trim(),
-        status: 'accepted',
-        result: responsePayload,
+        for (const [index, mutation] of bundle.mutations.entries()) {
+          await client.query(
+            `
+              INSERT INTO processed_mutations (
+                id, mutation_id, bundle_id, device_id, workspace_id, entity_type, entity_id, operation_type, result_status, response_payload
+              )
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'accepted', $9)
+            `,
+            [
+              createId('processed_mutation'),
+              String(mutation.mutationId ?? '').trim(),
+              bundleId,
+              String(mutation.deviceId ?? '').trim(),
+              req.auth.workspace.id,
+              String(mutation.entityType ?? '').trim(),
+              String(mutation.entityId ?? '').trim(),
+              String(mutation.operationType ?? '').trim(),
+              processed.mutationResults[index]?.canonicalEntity ?? {},
+            ]
+          );
+        }
+
+        return processed;
       });
+
+      bundleResults.push(bundleResult);
+      results.push(...mutationResults);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Mutation failed';
-      const conflictType = /draft conflict/i.test(message)
-        ? 'draft_conflict'
-        : /appointment status conflict/i.test(message)
-          ? 'appointment_conflict'
-          : /conflict/i.test(message)
-            ? 'generic_conflict'
-            : '';
-      const status = /conflict/i.test(message)
-        ? 'conflict'
-        : /entitlement|subscription|trial/i.test(message)
-          ? 'entitlement_rejected'
-          : /not found|invalid/i.test(message)
-            ? 'validation_rejected'
-            : 'retryable_failure';
-      results.push({
-        mutationId,
-        entityType: String(mutation.entityType ?? '').trim(),
-        entityId: String(mutation.entityId ?? '').trim(),
-        conflictType,
+      const message = error instanceof Error ? error.message : 'Bundle failed';
+      const conflictType = error?.conflictType || (
+        /draft conflict/i.test(message)
+          ? 'draft_conflict'
+          : /appointment status conflict|appointment conflict/i.test(message)
+            ? 'appointment_conflict'
+            : /patient conflict/i.test(message)
+              ? 'patient_conflict'
+              : /conflict/i.test(message)
+                ? 'generic_conflict'
+                : ''
+      );
+      const status = error?.syncStatus || (
+        /conflict/i.test(message)
+          ? 'conflict'
+          : /entitlement|subscription|trial/i.test(message)
+            ? 'entitlement_rejected'
+            : /not found|invalid|missing/i.test(message)
+              ? 'validation_rejected'
+              : 'retryable_failure'
+      );
+      const errorCode = error?.errorCode || (
+        status === 'conflict'
+          ? 'SYNC_CONFLICT'
+          : status === 'entitlement_rejected'
+            ? 'ENTITLEMENT_REJECTED'
+            : status === 'validation_rejected'
+              ? 'VALIDATION_REJECTED'
+              : 'RETRYABLE_FAILURE'
+      );
+      const serverSnapshot = error?.serverSnapshot ?? null;
+      const serverBaseVersion = error?.serverBaseVersion ?? '';
+
+      bundleResults.push({
+        bundleId,
+        bundleType,
+        rootEntityId,
         status,
-        error: message,
+        committedMutationCount: 0,
+        conflictType,
+        errorCode,
+        errorMessage: message,
+        serverSnapshot,
+        serverBaseVersion,
       });
+      for (const mutation of bundle.mutations) {
+        results.push({
+          mutationId: String(mutation.mutationId ?? '').trim(),
+          bundleId,
+          entityType: String(mutation.entityType ?? '').trim(),
+          entityId: String(mutation.entityId ?? '').trim(),
+          conflictType,
+          status,
+          errorCode,
+          errorMessage: message,
+          serverSnapshot,
+          serverBaseVersion,
+        });
+      }
     }
   }
 
   res.json({
     data: {
-      checkpoint: new Date().toISOString(),
+      checkpoint: createIssuedSyncCheckpoint(req.auth.workspace.id),
+      bundles: bundleResults,
       results,
     },
   });
@@ -2866,8 +3258,22 @@ app.post('/api/sync/push', requireAuth, requireRole('doctor_owner'), asyncHandle
 
 app.get('/api/sync/pull', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
   const session = await getSessionPayload(req.auth.user.id);
-  const snapshot = await getDesktopBootstrapData(req.auth);
-  const changes = await getDesktopChangeSet(req.auth, req.query?.checkpoint ?? '');
+  const checkpointInput = String(req.query?.checkpoint ?? '').trim();
+  const rebuildRequested = req.query?.rebuild === '1';
+  const checkpointState = rebuildRequested
+    ? {
+        checkpointStatus: 'rebuild_required',
+        rebuildRequired: true,
+        rebuildReason: 'The desktop client requested a full rebuild of the local cache.',
+        parsedCheckpoint: null,
+        checkpointMeta: null,
+      }
+    : resolvePullCheckpointState(checkpointInput, req.auth.workspace.id);
+  const includeSnapshot = !checkpointInput || checkpointState.rebuildRequired || req.query?.rebuild === '1';
+  const snapshot = includeSnapshot ? await getDesktopBootstrapData(req.auth) : null;
+  const changes = checkpointState.rebuildRequired
+    ? { patients: [], appointments: [], drafts: {}, notes: [], attachments: [] }
+    : await getDesktopChangeSet(req.auth, checkpointState.parsedCheckpoint ?? '');
   const subscription = session?.workspace?.subscription ?? null;
   const entitlement = {
     workspaceId: req.auth.workspace.id,
@@ -2892,7 +3298,9 @@ app.get('/api/sync/pull', requireAuth, requireRole('doctor_owner'), asyncHandler
 
   res.json({
     data: {
-      checkpoint: new Date().toISOString(),
+      checkpoint: createIssuedSyncCheckpoint(req.auth.workspace.id),
+      checkpointStatus: checkpointState.checkpointStatus,
+      rebuildRequired: checkpointState.rebuildRequired,
       snapshot,
       changes,
       entitlement,

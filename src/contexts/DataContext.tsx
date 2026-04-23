@@ -21,6 +21,7 @@ import { getLocalDateKey, parseDateKey } from '@/lib/date';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDesktop } from '@/contexts/DesktopContext';
 import { enqueueDesktopMutation, getCachedDesktopBootstrap, getDesktopRuntimeInfoSync, isDesktopRuntime, updateDesktopBootstrapSnapshot } from '@/lib/desktop';
+import { toast } from 'sonner';
 
 interface ConsultationPayload {
   appointmentId: ConsultationDraft['appointmentId'];
@@ -104,6 +105,10 @@ function createDesktopMutationId() {
   return `mutation_${crypto.randomUUID()}`;
 }
 
+function createDesktopBundleId(prefix: string) {
+  return `bundle_${prefix}_${crypto.randomUUID()}`;
+}
+
 function buildDraftBaseVersion(payload: ConsultationPayload | ConsultationDraft) {
   return JSON.stringify({
     appointmentId: payload.appointmentId,
@@ -164,6 +169,51 @@ function areJsonEqual(left: unknown, right: unknown) {
 
 function buildPendingEntitySet(items: Array<{ entity_type: string; entity_id: string }>) {
   return new Set(items.map(item => `${item.entity_type}:${item.entity_id}`));
+}
+
+function buildAppointmentBaseVersion(appointment?: Appointment | null) {
+  if (!appointment) return '';
+  return JSON.stringify({
+    id: appointment.id,
+    patientId: appointment.patientId,
+    clinicId: appointment.clinicId,
+    doctorId: appointment.doctorId,
+    date: appointment.date,
+    time: appointment.time,
+    status: appointment.status,
+    type: appointment.type,
+    chiefComplaint: appointment.chiefComplaint,
+    tokenNumber: appointment.tokenNumber,
+  });
+}
+
+function buildPatientBaseVersion(patient?: Patient | null) {
+  if (!patient) return '';
+  return JSON.stringify({
+    id: patient.id,
+    mrn: patient.mrn,
+    name: patient.name,
+    phone: patient.phone,
+    age: patient.age,
+    gender: patient.gender,
+    cnic: patient.cnic,
+    address: patient.address,
+    bloodGroup: patient.bloodGroup,
+    emergencyContact: patient.emergencyContact,
+  });
+}
+
+function getDesktopWriteBlockReason(runtime: ReturnType<typeof getDesktopRuntimeInfoSync>) {
+  if (runtime.entitlement?.status === 'restricted') {
+    return 'Desktop editing is paused because this workspace is in read-only mode until billing is resolved.';
+  }
+  if (runtime.entitlement?.status === 'locked') {
+    return runtime.entitlement.lockMessage || 'Desktop access is locked until the subscription is renewed.';
+  }
+  if (runtime.rebuildRequired) {
+    return runtime.rebuildReason || 'Desktop sync needs a local cache rebuild before editing can continue safely.';
+  }
+  return '';
 }
 
 function mergePatientsFromBootstrap(local: Patient[], remote: Patient[], pendingEntities: Set<string>) {
@@ -250,20 +300,33 @@ async function enqueueDesktopEntityMutation(
   entityType: string,
   entityId: string,
   operationType: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  options: {
+    baseVersion?: string;
+    bundleId?: string;
+    bundleType?: 'patient_master' | 'encounter' | 'attachment_metadata' | 'mutation';
+    rootEntityId?: string;
+  } = {}
 ) {
   if (!isDesktopRuntime() || !workspaceId) return;
   const runtime = getDesktopRuntimeInfoSync();
   if (!runtime.deviceId) return;
+  const bundleId = options.bundleId || createDesktopBundleId(entityType);
+  const bundleType = options.bundleType || (entityType === 'patient' ? 'patient_master' : 'encounter');
+  const rootEntityId = options.rootEntityId || entityId;
 
   await enqueueDesktopMutation({
     mutationId: createDesktopMutationId(),
+    bundleId,
+    bundleType,
+    rootEntityId,
     deviceId: runtime.deviceId,
     workspaceId,
     entityType,
     entityId,
     operationType,
     payload,
+    baseVersion: options.baseVersion || '',
     createdLocalAt: new Date().toISOString(),
     status: 'pending',
   });
@@ -428,9 +491,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [drafts]);
 
   const addPatient = useCallback(async (patient: Patient) => {
+    const desktopWriteBlockReason = getDesktopWriteBlockReason(runtime);
+    if (desktopWriteBlockReason) {
+      toast.error(desktopWriteBlockReason);
+      return;
+    }
+
     if (isDesktopRuntime()) {
       setPatients(prev => [patient, ...prev.filter(item => item.id !== patient.id)]);
-      await enqueueDesktopEntityMutation(workspace?.id || '', 'patient', patient.id, 'create', patient as unknown as Record<string, unknown>);
+      await enqueueDesktopEntityMutation(workspace?.id || '', 'patient', patient.id, 'create', patient as unknown as Record<string, unknown>, {
+        bundleType: 'patient_master',
+        rootEntityId: patient.id,
+      });
     }
 
     try {
@@ -439,12 +511,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       if (!isDesktopRuntime()) throw error;
     }
-  }, [workspace?.id]);
+  }, [runtime, workspace?.id]);
 
   const updatePatient = useCallback(async (patient: Patient) => {
+    const desktopWriteBlockReason = getDesktopWriteBlockReason(runtime);
+    if (desktopWriteBlockReason) {
+      toast.error(desktopWriteBlockReason);
+      return patient;
+    }
+
+    const previousPatient = patients.find(item => item.id === patient.id);
     if (isDesktopRuntime()) {
       setPatients(prev => prev.map(item => (item.id === patient.id ? patient : item)));
-      await enqueueDesktopEntityMutation(workspace?.id || '', 'patient', patient.id, 'update', patient as unknown as Record<string, unknown>);
+      await enqueueDesktopEntityMutation(workspace?.id || '', 'patient', patient.id, 'update', patient as unknown as Record<string, unknown>, {
+        baseVersion: buildPatientBaseVersion(previousPatient),
+        bundleType: 'patient_master',
+        rootEntityId: patient.id,
+      });
     }
 
     try {
@@ -455,12 +538,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (!isDesktopRuntime()) throw error;
       return patient;
     }
-  }, [workspace?.id]);
+  }, [patients, runtime, workspace?.id]);
 
   const addAppointment = useCallback(async (appointment: Appointment) => {
+    const desktopWriteBlockReason = getDesktopWriteBlockReason(runtime);
+    if (desktopWriteBlockReason) {
+      toast.error(desktopWriteBlockReason);
+      return;
+    }
+
     if (isDesktopRuntime()) {
       setAppointments(prev => sortAppointments([...prev.filter(item => item.id !== appointment.id), appointment]));
-      await enqueueDesktopEntityMutation(workspace?.id || '', 'appointment', appointment.id, 'create', appointment as unknown as Record<string, unknown>);
+      await enqueueDesktopEntityMutation(workspace?.id || '', 'appointment', appointment.id, 'create', appointment as unknown as Record<string, unknown>, {
+        bundleType: 'encounter',
+        rootEntityId: appointment.id,
+      });
     }
 
     try {
@@ -469,10 +561,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       if (!isDesktopRuntime()) throw error;
     }
-  }, [workspace?.id]);
+  }, [runtime, workspace?.id]);
 
   const upsertAppointment = useCallback(async (appointment: Appointment) => {
-    const exists = appointments.some(item => item.id === appointment.id);
+    const desktopWriteBlockReason = getDesktopWriteBlockReason(runtime);
+    if (desktopWriteBlockReason) {
+      toast.error(desktopWriteBlockReason);
+      return;
+    }
+
+    const previousAppointment = appointments.find(item => item.id === appointment.id);
+    const exists = Boolean(previousAppointment);
     if (isDesktopRuntime()) {
       setAppointments(prev => sortAppointments(exists ? prev.map(item => (item.id === appointment.id ? appointment : item)) : [...prev, appointment]));
       await enqueueDesktopEntityMutation(
@@ -480,7 +579,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
         'appointment',
         appointment.id,
         exists ? 'update' : 'create',
-        appointment as unknown as Record<string, unknown>
+        appointment as unknown as Record<string, unknown>,
+        {
+          baseVersion: buildAppointmentBaseVersion(previousAppointment),
+          bundleType: 'encounter',
+          rootEntityId: appointment.id,
+        }
       );
     }
 
@@ -499,9 +603,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (!isDesktopRuntime()) throw error;
       }
     }
-  }, [appointments, workspace?.id]);
+  }, [appointments, runtime, workspace?.id]);
 
   const updateAppointmentStatus = useCallback(async (appointmentId: string, status: Appointment['status']) => {
+    const desktopWriteBlockReason = getDesktopWriteBlockReason(runtime);
+    if (desktopWriteBlockReason) {
+      toast.error(desktopWriteBlockReason);
+      return;
+    }
+
+    const targetAppointment = appointments.find(appointment => appointment.id === appointmentId) ?? null;
     setAppointments(prev => {
       const target = prev.find(appointment => appointment.id === appointmentId);
       if (!target) return prev;
@@ -528,7 +639,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
 
     if (isDesktopRuntime()) {
-      await enqueueDesktopEntityMutation(workspace?.id || '', 'appointment', appointmentId, 'status_update', { status });
+      await enqueueDesktopEntityMutation(workspace?.id || '', 'appointment', appointmentId, 'status_update', { status }, {
+        baseVersion: buildAppointmentBaseVersion(targetAppointment),
+        bundleType: 'encounter',
+        rootEntityId: appointmentId,
+      });
     }
 
     try {
@@ -536,7 +651,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       if (!isDesktopRuntime()) throw error;
     }
-  }, [workspace?.id]);
+  }, [appointments, runtime, workspace?.id]);
 
   const applyQueueAction = useCallback(async (appointmentId: string, action: QueueAction) => {
     const targetStatus: Appointment['status'] =
@@ -554,6 +669,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [updateAppointmentStatus]);
 
   const saveConsultationDraft = useCallback(async (payload: ConsultationPayload) => {
+    const desktopWriteBlockReason = getDesktopWriteBlockReason(runtime);
+    if (desktopWriteBlockReason) {
+      toast.error(desktopWriteBlockReason);
+      return;
+    }
+
     const previousDraft = drafts[payload.appointmentId];
     const draft: ConsultationDraft = {
       ...payload,
@@ -564,6 +685,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const runtimeInfo = getDesktopRuntimeInfoSync();
       await enqueueDesktopMutation({
         mutationId: createDesktopMutationId(),
+        bundleId: createDesktopBundleId('draft'),
+        bundleType: 'encounter',
+        rootEntityId: payload.appointmentId,
         deviceId: runtimeInfo.deviceId,
         workspaceId: workspace?.id || '',
         entityType: 'consultation_draft',
@@ -580,9 +704,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       if (!isDesktopRuntime()) throw error;
     }
-  }, [drafts, workspace?.id]);
+  }, [drafts, runtime, workspace?.id]);
 
   const completeConsultation = useCallback(async (payload: ConsultationPayload) => {
+    const desktopWriteBlockReason = getDesktopWriteBlockReason(runtime);
+    if (desktopWriteBlockReason) {
+      toast.error(desktopWriteBlockReason);
+      throw new Error(desktopWriteBlockReason);
+    }
+
     const draftPayload: ConsultationDraft = {
       ...payload,
       savedAt: new Date().toISOString(),
@@ -628,7 +758,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       )
     );
     if (isDesktopRuntime()) {
-      await enqueueDesktopEntityMutation(workspace?.id || '', 'consultation', payload.appointmentId, 'complete', draftPayload as unknown as Record<string, unknown>);
+      await enqueueDesktopEntityMutation(workspace?.id || '', 'consultation', payload.appointmentId, 'complete', draftPayload as unknown as Record<string, unknown>, {
+        bundleType: 'encounter',
+        rootEntityId: payload.appointmentId,
+      });
     }
 
     try {
@@ -639,7 +772,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (!isDesktopRuntime()) throw error;
       return optimisticNote;
     }
-  }, [user?.id, workspace?.id]);
+  }, [runtime, user?.id, workspace?.id]);
 
   const addWalkIn = useCallback(async (data: {
     patientId?: string;
@@ -653,6 +786,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     emergencyContact: string;
     chiefComplaint: string;
   }, clinicId: string) => {
+    const desktopWriteBlockReason = getDesktopWriteBlockReason(runtime);
+    if (desktopWriteBlockReason) {
+      toast.error(desktopWriteBlockReason);
+      throw new Error(desktopWriteBlockReason);
+    }
+
     const today = getLocalDateKey();
     const localPatient: Patient = {
       id: data.patientId || `patient_${crypto.randomUUID()}`,
@@ -688,6 +827,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
         patient: localPatient,
         appointment: localAppointment,
         chiefComplaint: data.chiefComplaint || 'Walk-in',
+      }, {
+        bundleType: 'encounter',
+        rootEntityId: localAppointment.id,
       });
     }
 
@@ -719,7 +861,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         matchedBy: data.patientId ? 'selected' : null,
       } as WalkInResult;
     }
-  }, [getAppointmentsForClinicOnDate, patients, user?.id, workspace?.id]);
+  }, [getAppointmentsForClinicOnDate, patients, runtime, user?.id, workspace?.id]);
 
   const searchPatientsByPhone = useCallback(async (phone: string) => {
     if (!phone.trim()) return [];

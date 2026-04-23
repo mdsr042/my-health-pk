@@ -538,6 +538,16 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
       return;
     }
 
+    if (runtime.entitlement?.status === 'restricted') {
+      toast.error('Desktop document changes are paused because this workspace is in read-only mode until billing is resolved.');
+      return;
+    }
+
+    if (runtime.rebuildRequired) {
+      toast.error(runtime.rebuildReason || 'Desktop sync needs a local cache rebuild before new document changes can be queued safely.');
+      return;
+    }
+
     if (!isDesktopRuntime()) {
       toast.info('Desktop document storage is available in the desktop app.');
       return;
@@ -566,6 +576,9 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
     if (runtimeInfo.deviceId) {
       await enqueueDesktopMutation({
         mutationId: `mutation_${crypto.randomUUID()}`,
+        bundleId: `bundle_attachment_${result.attachment.attachmentId}`,
+        bundleType: 'attachment_metadata',
+        rootEntityId: activeAppointment?.id || patient.id,
         deviceId: runtimeInfo.deviceId,
         workspaceId: workspace.id,
         entityType: 'attachment',

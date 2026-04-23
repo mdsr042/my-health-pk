@@ -10,6 +10,17 @@ let desktopDb = null;
 let secretManager = null;
 const desktopApiBase = process.env.ELECTRON_API_URL || process.env.DESKTOP_API_URL || 'http://localhost:4001/api';
 
+function showStartupError(error) {
+  const message = error instanceof Error ? error.message : 'Unknown startup error';
+  const detail = error instanceof Error ? error.stack || message : String(error);
+
+  dialog.showErrorBox(
+    'My Health Desktop Failed To Start',
+    `${message}\n\nIf this mentions better-sqlite3, run:\n\nnpm run desktop:rebuild-native`
+  );
+  console.error('desktop_startup_failed', detail);
+}
+
 function sanitizePathSegment(value, fallback = 'unknown') {
   const normalized = String(value ?? '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
   return normalized || fallback;
@@ -17,30 +28,40 @@ function sanitizePathSegment(value, fallback = 'unknown') {
 
 async function runDesktopSync() {
   const token = desktopDb.getStoredToken();
+  const syncRunId = desktopDb.startSyncRun('push_pull');
   if (!token) {
     desktopDb.markSyncStatus('offline');
+    desktopDb.finishSyncRun(syncRunId, 'blocked', { code: 'NO_TOKEN' });
     return { ok: false, code: 'NO_TOKEN' };
   }
 
   const currentRuntime = desktopDb.getRuntimeInfo();
   if (currentRuntime.entitlement?.status === 'locked') {
     desktopDb.markSyncStatus('attention');
+    desktopDb.finishSyncRun(syncRunId, 'blocked', {
+      code: 'ENTITLEMENT_LOCKED',
+      entitlementStatus: currentRuntime.entitlement.status,
+    });
     return { ok: false, code: 'ENTITLEMENT_LOCKED', message: currentRuntime.entitlement.lockMessage || 'Desktop access is locked until the subscription is renewed.' };
   }
 
+  const pushBlockedByRestriction = currentRuntime.entitlement?.status === 'restricted';
   desktopDb.markSyncStatus('syncing');
-  const pending = desktopDb.getPendingMutations(50);
+  const pendingBundles = desktopDb.getPendingBundles(20);
+  const pending = pendingBundles.flatMap(bundle => bundle.mutations);
   let pushResults = [];
+  let pushBundleResults = [];
 
   try {
-    if (pending.length > 0) {
+    if (pendingBundles.length > 0 && !pushBlockedByRestriction) {
+      desktopDb.markBundlesSyncing(pendingBundles.map(bundle => bundle.bundleId));
       const pushResponse = await fetch(`${desktopApiBase}/sync/push`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ mutations: pending }),
+        body: JSON.stringify({ bundles: pendingBundles }),
       });
 
       const pushBody = await pushResponse.json();
@@ -49,6 +70,7 @@ async function runDesktopSync() {
       }
 
       pushResults = pushBody?.data?.results ?? [];
+      pushBundleResults = pushBody?.data?.bundles ?? [];
       desktopDb.recordSyncResults(pushResults);
       desktopDb.applyAcceptedSyncResults(pushResults);
     }
@@ -67,7 +89,25 @@ async function runDesktopSync() {
     const snapshot = pullBody?.data?.snapshot ?? null;
     const changes = pullBody?.data?.changes ?? null;
     const nextCheckpoint = pullBody?.data?.checkpoint ?? '';
+    const checkpointStatus = pullBody?.data?.checkpointStatus ?? 'ok';
+    const rebuildRequired = Boolean(pullBody?.data?.rebuildRequired);
     const pullEntitlement = pullBody?.data?.entitlement ?? null;
+    if (rebuildRequired || checkpointStatus === 'unknown_checkpoint' || checkpointStatus === 'expired_checkpoint' || checkpointStatus === 'rebuild_required') {
+      desktopDb.setRebuildRequired(true, `Desktop sync checkpoint is ${checkpointStatus.replaceAll('_', ' ')}. Rebuild the local cache to continue syncing safely.`);
+      desktopDb.markSyncStatus('attention');
+      desktopDb.finishSyncRun(syncRunId, 'blocked', {
+        pushed: pending.length,
+        pushedBundles: pendingBundles.length,
+        checkpointStatus,
+        rebuildRequired: true,
+      });
+      return {
+        ok: false,
+        code: 'REBUILD_REQUIRED',
+        message: 'Desktop sync requires a cache rebuild before it can continue.',
+        checkpoint: nextCheckpoint,
+      };
+    }
     const hasGroupedChanges = Boolean(changes) && (
       (Array.isArray(changes?.patients) && changes.patients.length > 0)
       || (Array.isArray(changes?.appointments) && changes.appointments.length > 0)
@@ -104,7 +144,17 @@ async function runDesktopSync() {
       }
     }
 
-    return { ok: true, results: pushResults, checkpoint: nextCheckpoint, changesApplied: hasGroupedChanges };
+    desktopDb.finishSyncRun(syncRunId, 'completed', {
+      pushed: pending.length,
+      pushedBundles: pendingBundles.length,
+      pushResults,
+      pushBundleResults,
+      checkpoint: nextCheckpoint,
+      checkpointStatus,
+      pushBlockedByRestriction,
+      changesApplied: hasGroupedChanges,
+    });
+    return { ok: true, results: pushResults, bundles: pushBundleResults, checkpoint: nextCheckpoint, changesApplied: hasGroupedChanges };
   } catch (error) {
     desktopDb.markSyncStatus('attention');
     if (pending.length > 0) {
@@ -112,10 +162,16 @@ async function runDesktopSync() {
         pending.map(item => ({
           mutationId: item.mutationId,
           status: 'retryable_failure',
-          error: error instanceof Error ? error.message : 'Sync failed',
+          errorCode: 'RETRYABLE_FAILURE',
+          errorMessage: error instanceof Error ? error.message : 'Sync failed',
         }))
       );
     }
+    desktopDb.finishSyncRun(syncRunId, 'failed', {
+      pushed: pending.length,
+      pushedBundles: pendingBundles.length,
+      error: error instanceof Error ? error.message : 'Sync failed',
+    });
     return { ok: false, code: 'SYNC_FAILED', message: error instanceof Error ? error.message : 'Sync failed' };
   }
 }
@@ -148,6 +204,7 @@ async function rebuildDesktopCache() {
     }
   }
   desktopDb.resetSyncState();
+  desktopDb.setRebuildRequired(false);
   desktopDb.touchSuccessfulSync();
   return { ok: true };
 }
@@ -189,6 +246,27 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.info('desktop_renderer_loaded', mainWindow?.webContents.getURL());
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('desktop_renderer_failed_load', { errorCode, errorDescription, validatedURL });
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('desktop_renderer_process_gone', details);
+  });
+
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    console[level === 3 ? 'error' : level === 2 ? 'warn' : 'log']('desktop_renderer_console', {
+      level,
+      message,
+      line,
+      sourceId,
+    });
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -288,6 +366,9 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('desktop:sync:get-issues', async () => desktopDb.listSyncIssues());
   ipcMain.handle('desktop:sync:run', async () => runDesktopSync());
+  ipcMain.handle('desktop:sync:retry-retryable-bundles', async () => desktopDb.retryRetryableBundles());
+  ipcMain.handle('desktop:sync:resolve-conflict', async (_event, payload) => desktopDb.resolveConflict(payload));
+  ipcMain.handle('desktop:sync:wipe-local-state', async () => desktopDb.wipeLocalState());
   ipcMain.handle('desktop:sync:rebuild-cache', async () => rebuildDesktopCache());
   ipcMain.handle('desktop:sync:export-diagnostics', async () => exportDesktopDiagnostics());
   ipcMain.handle('desktop:sync:queue-attachment', async (_event, attachment) => {
@@ -302,6 +383,9 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch(error => {
+  showStartupError(error);
+  app.quit();
 });
 
 app.on('window-all-closed', () => {
