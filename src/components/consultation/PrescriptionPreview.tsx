@@ -276,13 +276,13 @@ export default function PrescriptionPreview({
                       </p>
                       <div className="mt-0.5 flex flex-wrap items-start justify-between gap-x-3 gap-y-0.5">
                         {languageMode !== 'ur' && englishLine && (
-                          <p className="flex-1 min-w-[220px] text-[13px] leading-4.5 text-foreground">
+                          <p className="flex-1 min-w-[220px] text-[12px] leading-4 text-foreground">
                             {englishLine}
                           </p>
                         )}
                         {languageMode !== 'en' && urduLine && (
                           <p
-                            className="ml-auto w-full text-[13px] leading-6 text-foreground text-right sm:w-auto sm:min-w-[250px] sm:max-w-[46%]"
+                            className="ml-auto w-full text-[12px] leading-5 text-foreground text-right sm:w-auto sm:min-w-[250px] sm:max-w-[46%]"
                             dir="rtl"
                             style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
                           >
@@ -293,13 +293,13 @@ export default function PrescriptionPreview({
                       {(med.instructions || med.instructionsUrdu) && (
                         <div className="mt-1 space-y-0.5">
                           {languageMode !== 'ur' && med.instructions && (
-                            <p className="text-[11px] leading-4 text-muted-foreground">
+                            <p className="text-[10px] leading-3.5 text-muted-foreground">
                               {med.instructions}
                             </p>
                           )}
                           {languageMode !== 'en' && med.instructionsUrdu && (
                             <p
-                              className="text-[12px] leading-5.5 text-muted-foreground text-right"
+                              className="text-[11px] leading-4.5 text-muted-foreground text-right"
                               dir="rtl"
                               style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
                             >
