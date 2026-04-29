@@ -162,19 +162,6 @@ export default function ProcedureModal({ open, onOpenChange, onAdd, procedures }
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-foreground">Category</label>
-                  <Input
-                    value={selected?.category ?? 'General'}
-                    onChange={event => setSelected(current => ({
-                      id: current?.id || `procedure-custom-${Date.now()}`,
-                      name: current?.name || search,
-                      category: event.target.value,
-                      notes: current?.notes || '',
-                    }))}
-                    placeholder="General / Minor procedure / Nursing"
-                  />
-                </div>
-                <div className="space-y-1.5">
                   <label className="text-xs font-medium text-foreground">Notes</label>
                   <Textarea
                     value={selected?.notes ?? ''}

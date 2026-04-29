@@ -35,6 +35,14 @@ export default function OrdersPanel({ activeOrders, activeProcedures, activeCare
   const orders = [...activeOrders, ...historicalOrders];
   const careActions = [...activeCareActions, ...historicalCareActions];
   const procedures = [...activeProcedures, ...historicalProcedures];
+  const labOrders = orders.filter(order => {
+    const category = order.category.toLowerCase();
+    return !['radiology', 'ct', 'mri', 'ultrasound', 'x-ray', 'xray'].some(keyword => category.includes(keyword));
+  });
+  const radiologyOrders = orders.filter(order => {
+    const category = order.category.toLowerCase();
+    return ['radiology', 'ct', 'mri', 'ultrasound', 'x-ray', 'xray'].some(keyword => category.includes(keyword));
+  });
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
@@ -114,29 +122,58 @@ export default function OrdersPanel({ activeOrders, activeProcedures, activeCare
             </CardContent>
           </Card>
         )}
-        {orders.map(order => (
-          <Card key={order.id} className="border-0 shadow-sm">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${order.category.includes('Radiology') || order.category.includes('CT') || order.category.includes('MRI') || order.category.includes('Ultrasound') ? 'bg-info/10' : 'bg-warning/10'}`}>
-                {order.category.includes('Radiology') || order.category.includes('CT') || order.category.includes('MRI') || order.category.includes('Ultrasound')
-                  ? <Scan className="w-4 h-4 text-info" />
-                  : <FlaskConical className="w-4 h-4 text-warning" />}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-foreground">{order.testName}</p>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(order.date).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' })}
-                </p>
-              </div>
-              <Badge variant="outline" className={`text-[10px] ${order.priority === 'urgent' ? 'border-destructive/30 text-destructive' : ''}`}>
-                {order.priority}
-              </Badge>
-              <Badge variant="outline" className={`text-[10px] ${order.status === 'resulted' ? 'bg-success/10 text-success border-success/20' : 'bg-warning/10 text-warning border-warning/20'}`}>
-                {order.status}
-              </Badge>
-            </CardContent>
-          </Card>
-        ))}
+        {labOrders.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Lab Orders</p>
+            {labOrders.map(order => (
+              <Card key={order.id} className="border-0 shadow-sm">
+                <CardContent className="p-4 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-warning/10">
+                    <FlaskConical className="w-4 h-4 text-warning" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-foreground">{order.testName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(order.date).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' })}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className={`text-[10px] ${order.priority === 'urgent' ? 'border-destructive/30 text-destructive' : ''}`}>
+                    {order.priority}
+                  </Badge>
+                  <Badge variant="outline" className={`text-[10px] ${order.status === 'resulted' ? 'bg-success/10 text-success border-success/20' : 'bg-warning/10 text-warning border-warning/20'}`}>
+                    {order.status}
+                  </Badge>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+        {radiologyOrders.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Radiology</p>
+            {radiologyOrders.map(order => (
+              <Card key={order.id} className="border-0 shadow-sm">
+                <CardContent className="p-4 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-info/10">
+                    <Scan className="w-4 h-4 text-info" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-foreground">{order.testName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(order.date).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' })}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className={`text-[10px] ${order.priority === 'urgent' ? 'border-destructive/30 text-destructive' : ''}`}>
+                    {order.priority}
+                  </Badge>
+                  <Badge variant="outline" className={`text-[10px] ${order.status === 'resulted' ? 'bg-success/10 text-success border-success/20' : 'bg-warning/10 text-warning border-warning/20'}`}>
+                    {order.status}
+                  </Badge>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

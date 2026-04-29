@@ -54,7 +54,7 @@ function buildCompactUrduLine(med: Medication) {
   const lineWithDuration = urduBase
     ? `${stripDurationSuffix(urduBase)}${med.duration ? ` - ${translateDurationToUrdu(med.duration)}` : ''}`
     : fallbackWithDuration;
-  return [lineWithDuration.trim(), med.instructionsUrdu].filter(Boolean).join(' • ');
+  return lineWithDuration.trim();
 }
 
 function inferMedicationLanguageMode(med: Medication) {
@@ -64,6 +64,11 @@ function inferMedicationLanguageMode(med: Medication) {
   if (hasEnglish && hasUrdu) return 'bilingual';
   if (hasUrdu) return 'ur';
   return 'en';
+}
+
+function isRadiologyOrder(order: LabOrder) {
+  const category = order.category.toLowerCase();
+  return order.type === 'radiology' || ['radiology', 'ultrasound', 'ct', 'mri', 'x-ray', 'xray'].some(keyword => category.includes(keyword));
 }
 
 interface PrescriptionPreviewProps {
@@ -97,7 +102,6 @@ export default function PrescriptionPreview({
   const [printMode, setPrintMode] = useState<'branded' | 'minimal'>('branded');
   const now = new Date();
   const today = now.toLocaleDateString('en-PK', { year: 'numeric', month: 'long', day: 'numeric' });
-  const printedAt = now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
   const vitalsList = [
     { label: 'BP', value: vitals.bp || 'N/A' },
     { label: 'Pulse', value: vitals.pulse ? `${vitals.pulse} bpm` : 'N/A' },
@@ -113,6 +117,8 @@ export default function PrescriptionPreview({
   const doctorQualifications = doctor?.qualifications?.trim() || 'Qualifications not added';
   const doctorPmcNumber = doctor?.pmcNumber?.trim() || 'Not added';
   const displayedVitals = vitalsList;
+  const labOnlyOrders = labOrders.filter(order => !isRadiologyOrder(order));
+  const radiologyOrders = labOrders.filter(order => isRadiologyOrder(order));
 
   return (
     <div className="p-4 lg:p-6">
@@ -135,22 +141,18 @@ export default function PrescriptionPreview({
         style={{ minHeight: '297mm' }}
       >
         {printMode === 'branded' ? (
-          <div className="bg-primary px-8 py-4 text-primary-foreground">
-            <div className="flex items-center justify-between text-[11px] text-primary-foreground/80 mb-3">
-              <p>{printedAt}</p>
-              <p className="font-medium">Prescription</p>
-            </div>
+          <div className="border-b border-border px-8 py-5">
             <div className="flex items-start justify-between gap-6">
               <div>
-                <h1 className="text-lg font-bold">{activeClinic?.logo} {activeClinic?.name}</h1>
-                <p className="text-xs text-primary-foreground/80">{activeClinic?.location}, {activeClinic?.city}</p>
-                <p className="text-xs text-primary-foreground/80">Phone: {activeClinic?.phone}</p>
+                <h1 className="text-xl font-semibold tracking-[0.18em] text-foreground">{activeClinic?.logo} {activeClinic?.name}</h1>
+                <p className="text-xs text-muted-foreground">{activeClinic?.location}, {activeClinic?.city}</p>
+                <p className="text-xs text-muted-foreground">Phone: {activeClinic?.phone}</p>
               </div>
               <div className="text-right">
-                <p className="text-base font-bold">{doctorName}</p>
-                <p className="text-xs text-primary-foreground/80">{doctorSpecialization}</p>
-                <p className="text-xs text-primary-foreground/80">{doctorQualifications}</p>
-                <p className="text-[11px] text-primary-foreground/60">PMC Reg: {doctorPmcNumber}</p>
+                <p className="text-2xl font-semibold text-foreground">{doctorName}</p>
+                <p className="text-xs text-muted-foreground">{doctorSpecialization}</p>
+                <p className="text-xs text-muted-foreground">{doctorQualifications}</p>
+                <p className="text-[11px] text-muted-foreground">PMC Reg: {doctorPmcNumber}</p>
               </div>
             </div>
           </div>
@@ -158,13 +160,11 @@ export default function PrescriptionPreview({
           <div className="border-b border-border px-8 py-4">
             <div className="flex items-start justify-between gap-6">
               <div>
-                <p className="text-xs uppercase tracking-widest text-muted-foreground">Prescription</p>
                 <p className="text-lg font-semibold text-foreground">{doctorName}</p>
                 <p className="text-sm text-muted-foreground">{doctorSpecialization}</p>
               </div>
               <div className="text-right text-sm text-muted-foreground">
                 <p>{today}</p>
-                <p>{printedAt}</p>
                 <p>PMC: {doctorPmcNumber}</p>
               </div>
             </div>
@@ -172,7 +172,8 @@ export default function PrescriptionPreview({
         )}
 
         <div className="px-8 py-5 flex-1 flex flex-col">
-          <div className="grid grid-cols-3 gap-x-4 gap-y-2 text-sm border-b border-border pb-3">
+          <div className="rounded-md border border-border px-4 py-3">
+            <div className="grid grid-cols-3 gap-x-4 gap-y-2 text-sm">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80">Patient</p>
               <p className="text-sm text-foreground">{patient.name}</p>
@@ -193,9 +194,10 @@ export default function PrescriptionPreview({
               <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80">Phone</p>
               <p className="text-sm text-foreground">{patient.phone}</p>
             </div>
+            </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-[240px_1fr] flex-1 border border-border">
+          <div className="mt-4 grid grid-cols-[240px_1fr] flex-1 border border-border">
             <div className="border-r border-border px-4 py-4 space-y-4">
               {diagnoses.length > 0 && (
                 <section>
@@ -248,32 +250,31 @@ export default function PrescriptionPreview({
             </div>
 
             <div className="px-5 py-4 flex flex-col">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-2xl font-serif font-bold text-primary">℞</span>
-                <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider">Prescription</h3>
+              <div className="mb-4 border-b border-border pb-2">
+                <span className="text-[30px] font-serif font-semibold text-foreground">℞</span>
               </div>
 
               {medications.length === 0 ? (
                 <p className="text-sm text-muted-foreground italic">No medications prescribed</p>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {medications.map((med, index) => (
-                    <div key={med.id} className="pb-2 border-b border-dashed border-border/80 last:border-b-0">
+                    <div key={med.id} className="pb-3 border-b border-dashed border-border/80 last:border-b-0">
                       {(() => {
                         const languageMode = inferMedicationLanguageMode(med);
-                        const englishLine = [med.prescriptionLine || med.frequency, med.instructions].filter(Boolean).join(' • ');
+                        const englishLine = med.prescriptionLine || med.frequency;
                         const urduLine = buildCompactUrduLine(med);
 
                         return (
                           <>
-                      <p className="text-sm font-medium leading-5 text-foreground">
+                      <p className="text-sm font-semibold leading-5 text-foreground">
                         {index + 1}. {buildMedicationTitle(med)}
                       </p>
                       <p className="text-xs leading-4 text-muted-foreground">
                         {med.generic}
                         {med.route && ` • ${med.route}`}
                       </p>
-                      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                      <div className="mt-1 flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                         {languageMode !== 'ur' && englishLine && (
                           <p className="flex-1 min-w-[260px] text-sm leading-5 text-foreground">
                             {englishLine}
@@ -281,7 +282,7 @@ export default function PrescriptionPreview({
                         )}
                         {languageMode !== 'en' && urduLine && (
                           <p
-                            className="ml-auto w-full text-xs leading-5 text-foreground text-right sm:w-auto sm:min-w-[260px] sm:max-w-[45%]"
+                            className="ml-auto w-full text-sm leading-7 text-foreground text-right sm:w-auto sm:min-w-[280px] sm:max-w-[48%]"
                             dir="rtl"
                             style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
                           >
@@ -289,6 +290,24 @@ export default function PrescriptionPreview({
                           </p>
                         )}
                       </div>
+                      {(med.instructions || med.instructionsUrdu) && (
+                        <div className="mt-1.5 space-y-1">
+                          {languageMode !== 'ur' && med.instructions && (
+                            <p className="text-xs leading-5 text-muted-foreground">
+                              {med.instructions}
+                            </p>
+                          )}
+                          {languageMode !== 'en' && med.instructionsUrdu && (
+                            <p
+                              className="text-sm leading-7 text-muted-foreground text-right"
+                              dir="rtl"
+                              style={{ fontFamily: 'Noto Nastaliq Urdu, Jameel Noori Nastaleeq, serif' }}
+                            >
+                              {med.instructionsUrdu}
+                            </p>
+                          )}
+                        </div>
+                      )}
                           </>
                         );
                       })()}
@@ -314,7 +333,7 @@ export default function PrescriptionPreview({
                 </div>
               )}
 
-              {(procedures.length > 0 || labOrders.length > 0) && (
+              {(procedures.length > 0 || labOnlyOrders.length > 0 || radiologyOrders.length > 0) && (
                 <div className="mt-5 space-y-3 border-t border-border pt-4">
                   {procedures.length > 0 && (
                     <section>
@@ -332,13 +351,27 @@ export default function PrescriptionPreview({
                     </section>
                   )}
 
-                  {labOrders.length > 0 && (
+                  {labOnlyOrders.length > 0 && (
                     <section>
-                      <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">
-                        Investigations / Radiology
-                      </h3>
+                      <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Lab Orders</h3>
                       <div className="space-y-1.5">
-                        {labOrders.map((order, index) => (
+                        {labOnlyOrders.map((order, index) => (
+                          <div key={order.id} className="text-sm leading-5 text-foreground">
+                            <p>{index + 1}. {order.testName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {[order.category, order.priority?.toUpperCase()].filter(Boolean).join(' • ')}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {radiologyOrders.length > 0 && (
+                    <section>
+                      <h3 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider mb-1.5">Radiology</h3>
+                      <div className="space-y-1.5">
+                        {radiologyOrders.map((order, index) => (
                           <div key={order.id} className="text-sm leading-5 text-foreground">
                             <p>{index + 1}. {order.testName}</p>
                             <p className="text-xs text-muted-foreground">

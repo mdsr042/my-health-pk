@@ -130,6 +130,11 @@ function getMedicationIdentityKey(medication: Medication) {
   ].join('|');
 }
 
+function isRadiologyOrder(order: LabOrder) {
+  const category = String(order.category ?? '').toLowerCase();
+  return order.type === 'radiology' || ['radiology', 'ultrasound', 'ct', 'mri', 'x-ray', 'xray'].some(keyword => category.includes(keyword));
+}
+
 function normalizeConditionLookup(value: string) {
   return String(value ?? '')
     .trim()
@@ -916,6 +921,8 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
   const previousMedicationsAvailable = Boolean(latestPreviousNote?.medications.length);
   const previousInvestigationsAvailable = Boolean(latestPreviousNote?.labOrders.length);
   const previousAdviceAvailable = Boolean(latestPreviousNote?.instructions || latestPreviousNote?.followUp);
+  const activeLabOrders = labOrders.filter(order => !isRadiologyOrder(order));
+  const activeRadiologyOrders = labOrders.filter(order => isRadiologyOrder(order));
   const diagnosisSuggestions = (() => {
     const savedConditions = diagnosisQuery.trim()
       ? conditionLibrary.filter(item => {
@@ -1477,33 +1484,55 @@ export default function ConsultationPage({ patientId }: ConsultationPageProps) {
                       </div>
                       <div className="flex gap-2">
                         <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openLabModal('lab')}>
-                          <Plus className="w-3.5 h-3.5" /> Lab
+                          <Plus className="w-3.5 h-3.5" /> Add Lab
                         </Button>
                         <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openLabModal('radiology')}>
-                          <Plus className="w-3.5 h-3.5" /> Radiology
+                          <Plus className="w-3.5 h-3.5" /> Add Radiology
                         </Button>
                       </div>
                     </div>
                     {labOrders.length === 0 ? (
                       <p className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 text-center">No investigations ordered yet</p>
                     ) : (
-                      <div className="space-y-2">
-                        {labOrders.map(order => (
-                          <div key={order.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
-                            <div className={`w-7 h-7 rounded-md flex items-center justify-center ${order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI') ? 'bg-info/10' : 'bg-warning/10'}`}>
-                              {order.category.includes('Radiology') || order.category.includes('Ultrasound') || order.category.includes('CT') || order.category.includes('MRI')
-                                ? <Scan className="w-3.5 h-3.5 text-info" />
-                                : <FlaskConical className="w-3.5 h-3.5 text-warning" />}
-                            </div>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium text-foreground">{order.testName}</p>
-                              <p className="text-xs text-muted-foreground">{order.category}</p>
-                            </div>
-                            <Badge variant="outline" className={`text-[10px] ${order.priority === 'stat' ? 'border-destructive/30 text-destructive' : order.priority === 'urgent' ? 'border-warning/30 text-warning' : ''}`}>
-                              {order.priority}
-                            </Badge>
+                      <div className="space-y-3">
+                        {activeLabOrders.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Lab Orders</p>
+                            {activeLabOrders.map(order => (
+                              <div key={order.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                                <div className="w-7 h-7 rounded-md flex items-center justify-center bg-warning/10">
+                                  <FlaskConical className="w-3.5 h-3.5 text-warning" />
+                                </div>
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium text-foreground">{order.testName}</p>
+                                  <p className="text-xs text-muted-foreground">{order.category}</p>
+                                </div>
+                                <Badge variant="outline" className={`text-[10px] ${order.priority === 'stat' ? 'border-destructive/30 text-destructive' : order.priority === 'urgent' ? 'border-warning/30 text-warning' : ''}`}>
+                                  {order.priority}
+                                </Badge>
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
+                        {activeRadiologyOrders.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Radiology</p>
+                            {activeRadiologyOrders.map(order => (
+                              <div key={order.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                                <div className="w-7 h-7 rounded-md flex items-center justify-center bg-info/10">
+                                  <Scan className="w-3.5 h-3.5 text-info" />
+                                </div>
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium text-foreground">{order.testName}</p>
+                                  <p className="text-xs text-muted-foreground">{order.category}</p>
+                                </div>
+                                <Badge variant="outline" className={`text-[10px] ${order.priority === 'stat' ? 'border-destructive/30 text-destructive' : order.priority === 'urgent' ? 'border-warning/30 text-warning' : ''}`}>
+                                  {order.priority}
+                                </Badge>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </CardContent>

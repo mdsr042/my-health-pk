@@ -31,6 +31,7 @@ interface MedicationModalProps {
 }
 
 const instructionPresets = [
+  { value: 'before_meals', en: 'Take before meals', ur: 'کھانے سے پہلے لیں' },
   { value: 'after_meals', en: 'Take after meals', ur: 'کھانے کے بعد لیں' },
   { value: 'empty_stomach', en: 'Take on empty stomach', ur: 'خالی پیٹ لیں' },
   { value: 'before_breakfast', en: 'Take before breakfast', ur: 'ناشتے سے پہلے لیں' },
@@ -39,13 +40,14 @@ const instructionPresets = [
   { value: 'custom', en: 'Custom instruction', ur: '' },
 ] as const;
 
-const dosePatternSnippets = ['1+1+1', '1+0+1', '1+1', '5+5', '0+0+3'] as const;
+const dosePatternSnippets = ['1+0+0', '1+0+1', '1+1+1', '0+0+1'] as const;
 const durationSnippets = [
   { label: '3d', value: '3 days' },
   { label: '5d', value: '5 days' },
   { label: '7d', value: '7 days' },
   { label: '10d', value: '10 days' },
   { label: '2w', value: '2 weeks' },
+  { label: '4w', value: '4 weeks' },
   { label: 'Continue', value: 'Continue' },
 ] as const;
 
@@ -471,7 +473,7 @@ export default function MedicationModal({
 
   const patternError = useMemo(() => {
     if (!dosePattern.trim() || parsedPattern) return '';
-    return 'Use patterns like 1, 1+1, 1+0+1, 5+5, 0+0+3, or special codes SOS / HS.';
+    return 'Use patterns like 1+0+0, 1+0+1, 1+1+1, 0+0+1, or special codes SOS / HS.';
   }, [dosePattern, parsedPattern]);
   const requiredDosePatternError = selected && !dosePattern.trim() ? 'Dose pattern is required before adding this medication.' : '';
   const canSubmitMedication = Boolean(selected && selected.name.trim() && dosePattern.trim() && parsedPattern);
@@ -1290,10 +1292,10 @@ export default function MedicationModal({
                             <Input
                               value={dosePattern}
                               onChange={e => handleDosePatternChange(e.target.value)}
-                              placeholder="1 / 1+1 / 1+0+1 / 5+5 / 0+0+3 / SOS / HS"
+                              placeholder="1+0+0 / 1+0+1 / 1+1+1 / 0+0+1 / SOS / HS"
                               className="h-8 text-sm"
                             />
-                            <p className="text-[11px] text-muted-foreground">Examples: 1, 1+1, 1+0+1, 5+5, 0+0+3, SOS, HS</p>
+                            <p className="text-[11px] text-muted-foreground">Examples: 1+0+0, 1+0+1, 1+1+1, 0+0+1, SOS, HS</p>
                             {(patternError || requiredDosePatternError) && (
                               <p className="text-[11px] text-destructive">{patternError || requiredDosePatternError}</p>
                             )}
@@ -1327,7 +1329,7 @@ export default function MedicationModal({
                           <p className="text-[11px] text-muted-foreground">Optional short note like after food, before breakfast, or when needed.</p>
                         </div>
                         <div className="space-y-1.5">
-                          <Label className="text-xs">Note Search / Preset</Label>
+                          <Label className="text-xs">Auto Suggest Note</Label>
                           <div className="relative">
                             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                             <Input
@@ -1342,7 +1344,7 @@ export default function MedicationModal({
                                   setCustomInstructions(value);
                                 }
                               }}
-                              placeholder={languageMode === 'ur' ? 'Search Urdu note...' : 'Search note...'}
+                              placeholder={languageMode === 'ur' ? 'Type to auto suggest Urdu note...' : 'Type to auto suggest note...'}
                               className="h-8 pl-9 pr-9 text-sm"
                             />
                             {instructionSearch && (
