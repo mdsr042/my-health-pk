@@ -22,6 +22,10 @@
   - `npm run desktop:trace-sync -- --bundle <bundle-id>`
   - `npm run desktop:trace-sync -- --mutation <mutation-id>`
   - `npm run desktop:trace-sync -- --device <device-id>`
+- Pilot cohort go/no-go summary:
+  - `npm run desktop:cohort-health`
+- Chaos resilience runner:
+  - `npm run desktop:chaos`
 - Run desktop sync integration coverage:
   - `npm run test:desktop:integration`
 - Run 100-doctor rollout gate:
@@ -32,6 +36,8 @@
 
 - Manual desktop release workflow and upload path:
   - see `docs/desktop-release.md`
+- Support and recovery workflow:
+  - see `docs/desktop-support-runbook.md`
 
 ## What to inspect when sync looks wrong
 
@@ -73,6 +79,8 @@
 - Retry from the desktop app when:
   - the item is `retryable`
   - network or temporary server conditions caused the failure
+- Export a local backup before destructive recovery actions whenever possible.
+- Run `Verify Local Integrity` before rebuild when the local database may be inconsistent.
 - Rebuild the cache when:
   - the desktop UI says `rebuild required`
   - the pull checkpoint is invalid or expired

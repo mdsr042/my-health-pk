@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
-import { exportDesktopDiagnosticsNow, getDesktopRuntimeInfoSync, isDesktopRuntime, lockDesktopNow, rebuildDesktopCacheNow, resolveDesktopConflict, retryDesktopRetryablesNow, setupDesktopPin, unlockDesktopWithPin, getDesktopSyncIssues, runDesktopSyncNow, wipeDesktopLocalStateNow } from '@/lib/desktop';
+import { exportDesktopBackupNow, exportDesktopDiagnosticsNow, getDesktopRuntimeInfoSync, isDesktopRuntime, lockDesktopNow, rebuildDesktopCacheNow, resolveDesktopConflict, retryDesktopRetryablesNow, setupDesktopPin, unlockDesktopWithPin, getDesktopSyncIssues, runDesktopSyncNow, verifyDesktopIntegrityNow, wipeDesktopLocalStateNow } from '@/lib/desktop';
 import type { DesktopRuntimeInfo, DesktopSyncIssueSummary } from '@/lib/app-types';
 
 interface DesktopContextValue {
@@ -13,12 +13,15 @@ interface DesktopContextValue {
   wipeLocalState: () => Promise<{ ok: boolean; message?: string }>;
   rebuildCache: () => Promise<{ ok: boolean; message?: string }>;
   exportDiagnostics: () => Promise<{ ok: boolean; message?: string; filePath?: string }>;
+  exportBackup: () => Promise<{ ok: boolean; message?: string; filePath?: string; manifestPath?: string }>;
+  verifyIntegrity: () => Promise<{ ok: boolean; message?: string; checkedAt?: string; issues?: string[] }>;
   setupPin: (pin: string) => Promise<void>;
   unlock: (pin: string) => Promise<{ ok: boolean; message?: string }>;
   lock: () => Promise<void>;
 }
 
 const DesktopContext = createContext<DesktopContextValue | null>(null);
+const IDLE_LOCK_MS = 15 * 60 * 1000;
 
 export function DesktopProvider({ children }: { children: ReactNode }) {
   const [runtime, setRuntime] = useState<DesktopRuntimeInfo>(() => getDesktopRuntimeInfoSync());
@@ -68,6 +71,22 @@ export function DesktopProvider({ children }: { children: ReactNode }) {
     return { ok: result.ok, message: result.message, filePath: result.filePath };
   };
 
+  const exportBackup = async () => {
+    const result = await exportDesktopBackupNow();
+    return { ok: result.ok, message: result.message, filePath: result.filePath, manifestPath: result.manifestPath };
+  };
+
+  const verifyIntegrity = async () => {
+    const result = await verifyDesktopIntegrityNow();
+    await refreshIssues();
+    return {
+      ok: result.ok,
+      message: result.ok ? '' : result.issues?.[0] || 'Local integrity verification failed.',
+      checkedAt: result.checkedAt,
+      issues: result.issues,
+    };
+  };
+
   const setupPin = async (pin: string) => {
     const next = await setupDesktopPin(pin);
     setRuntime(next);
@@ -101,6 +120,44 @@ export function DesktopProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, []);
 
+  React.useEffect(() => {
+    if (!isDesktopRuntime()) return;
+    if (!runtime.pinConfigured) return;
+
+    let timeoutId = 0;
+
+    const scheduleLock = () => {
+      window.clearTimeout(timeoutId);
+      const current = getDesktopRuntimeInfoSync();
+      if (current.locked || !current.pinConfigured) return;
+      timeoutId = window.setTimeout(() => {
+        const latest = getDesktopRuntimeInfoSync();
+        if (latest.locked || !latest.pinConfigured) return;
+        void lock().then(() => {
+          void refreshIssues();
+        });
+      }, IDLE_LOCK_MS);
+    };
+
+    const activityEvents: Array<keyof WindowEventMap> = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'focus'];
+    const handleActivity = () => scheduleLock();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        scheduleLock();
+      }
+    };
+
+    scheduleLock();
+    activityEvents.forEach(eventName => window.addEventListener(eventName, handleActivity, { passive: true }));
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      activityEvents.forEach(eventName => window.removeEventListener(eventName, handleActivity));
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [runtime.locked, runtime.pinConfigured]);
+
   const value = useMemo(() => ({
     runtime,
     issues,
@@ -112,6 +169,8 @@ export function DesktopProvider({ children }: { children: ReactNode }) {
     resolveConflict,
     wipeLocalState,
     exportDiagnostics,
+    exportBackup,
+    verifyIntegrity,
     setupPin,
     unlock,
     lock,

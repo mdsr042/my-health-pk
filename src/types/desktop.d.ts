@@ -21,6 +21,8 @@ declare global {
       wipeLocalState: () => Promise<{ ok: boolean; code?: string; message?: string }>;
       rebuildCache: () => Promise<{ ok: boolean; code?: string; message?: string }>;
       exportDiagnostics: () => Promise<{ ok: boolean; code?: string; message?: string; filePath?: string }>;
+      exportBackup: () => Promise<{ ok: boolean; code?: string; message?: string; filePath?: string; manifestPath?: string }>;
+      verifyIntegrity: () => Promise<{ ok: boolean; integrity: string; checkedAt: string; issues: string[]; rebuildRequired: boolean }>;
       queueAttachment: (attachment: DesktopAttachmentTransfer) => Promise<{ ok: true }>;
       pickAndStoreAttachment: (payload: {
         workspaceId: string;

@@ -348,6 +348,7 @@ async function createBaseSchema(client) {
       timings TEXT NOT NULL DEFAULT 'By appointment',
       specialties JSONB NOT NULL DEFAULT '[]'::jsonb,
       logo TEXT NOT NULL DEFAULT '🏥',
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -1493,6 +1494,11 @@ async function runSchemaMigrations(client) {
     await ensureIndex(client, 'idx_processed_bundles_workspace_processed', 'processed_bundles', '(workspace_id, processed_at DESC)');
     await ensureIndex(client, 'idx_processed_bundles_bundle_id', 'processed_bundles', '(bundle_id)');
     await ensureIndex(client, 'idx_processed_mutations_bundle_id', 'processed_mutations', '(bundle_id)');
+  });
+
+  await runMigration(client, '018_clinic_operational_status', async () => {
+    await client.query(`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE`);
+    await ensureIndex(client, 'idx_clinics_workspace_active', 'clinics', '(workspace_id, is_active)');
   });
 }
 

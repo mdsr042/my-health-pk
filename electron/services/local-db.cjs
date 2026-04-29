@@ -3,11 +3,12 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const crypto = require('node:crypto');
 
-function createDesktopDatabase({ userDataPath, secrets }) {
+function createDesktopDatabase({ userDataPath, secrets, appVersion = '0.0.0' }) {
   const dataDir = path.join(userDataPath, 'desktop-data');
   fs.mkdirSync(dataDir, { recursive: true });
 
-  const db = new Database(path.join(dataDir, 'offline-client.sqlite'));
+  const dbPath = path.join(dataDir, 'offline-client.sqlite');
+  const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
@@ -220,6 +221,19 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     return true;
   }
 
+  function recordAuditEvent(eventType, eventLevel = 'info', details = {}) {
+    db.prepare(`
+      INSERT INTO audit_events (id, event_type, event_level, details_json, created_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).run(
+      `audit_${crypto.randomUUID()}`,
+      String(eventType || 'desktop_event').trim() || 'desktop_event',
+      String(eventLevel || 'info').trim() || 'info',
+      JSON.stringify(details ?? {})
+    );
+    return true;
+  }
+
   function parseJsonText(value, fallback = null) {
     if (!value) return fallback;
     try {
@@ -420,6 +434,9 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       SET is_locked = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = 1
     `).run(isLocked ? 1 : 0);
+    recordAuditEvent(isLocked ? 'desktop_locked' : 'desktop_unlocked', 'info', {
+      locked: Boolean(isLocked),
+    });
     return getRuntimeInfo();
   }
 
@@ -483,12 +500,18 @@ function createDesktopDatabase({ userDataPath, secrets }) {
         locked_until = '',
         updated_at = CURRENT_TIMESTAMP
     `).run(salt, hash);
+    recordAuditEvent('pin_configured', 'info', {
+      hasPin: true,
+    });
     return setLocked(false);
   }
 
   function verifyPin(pin) {
     const entitlement = readRow(`SELECT * FROM device_entitlements WHERE id = 1`);
     if (entitlement?.status === 'locked') {
+      recordAuditEvent('pin_unlock_blocked', 'warn', {
+        reason: 'entitlement_locked',
+      });
       return {
         ok: false,
         code: 'ENTITLEMENT_LOCKED',
@@ -498,10 +521,17 @@ function createDesktopDatabase({ userDataPath, secrets }) {
 
     const pinState = readRow(`SELECT * FROM local_pin WHERE id = 1`);
     if (!pinState?.pin_hash) {
+      recordAuditEvent('pin_unlock_failed', 'warn', {
+        reason: 'pin_not_configured',
+      });
       return { ok: false, code: 'PIN_NOT_CONFIGURED', message: 'PIN is not configured yet.' };
     }
 
     if (pinState.locked_until && new Date(pinState.locked_until).getTime() > Date.now()) {
+      recordAuditEvent('pin_unlock_failed', 'warn', {
+        reason: 'pin_temp_locked',
+        lockedUntil: pinState.locked_until,
+      });
       return { ok: false, code: 'PIN_TEMP_LOCKED', message: 'Too many attempts. Try again shortly.' };
     }
 
@@ -514,6 +544,11 @@ function createDesktopDatabase({ userDataPath, secrets }) {
         SET failed_attempts = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = 1
       `).run(nextAttempts, lockedUntil);
+      recordAuditEvent('pin_unlock_failed', nextAttempts >= 5 ? 'error' : 'warn', {
+        reason: nextAttempts >= 5 ? 'pin_temp_locked' : 'invalid_pin',
+        failedAttempts: nextAttempts,
+        lockedUntil,
+      });
       return { ok: false, code: nextAttempts >= 5 ? 'PIN_TEMP_LOCKED' : 'INVALID_PIN', message: nextAttempts >= 5 ? 'Too many attempts. Try again in 5 minutes.' : 'Incorrect PIN.' };
     }
 
@@ -524,6 +559,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     `).run();
 
     setLocked(false);
+    recordAuditEvent('pin_unlock_succeeded', 'info', {});
     return { ok: true, runtime: getRuntimeInfo() };
   }
 
@@ -572,6 +608,11 @@ function createDesktopDatabase({ userDataPath, secrets }) {
         });
       }
     })();
+
+    recordAuditEvent('desktop_session_bootstrapped', 'info', {
+      workspaceId: session?.workspace?.id || '',
+      doctorUserId: session?.user?.id || '',
+    });
 
     return getRuntimeInfo();
   }
@@ -1466,6 +1507,39 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     return { pending, deadLetters, conflicts };
   }
 
+  function sanitizeSyncIssuesForDiagnostics(issues) {
+    return {
+      pending: (issues?.pending ?? []).map(item => ({
+        mutation_id: item.mutation_id,
+        entity_type: item.entity_type,
+        entity_id: item.entity_id,
+        operation_type: item.operation_type,
+        created_local_at: item.created_local_at,
+        status: item.status,
+        retry_count: item.retry_count,
+        last_error_code: item.last_error_code,
+      })),
+      deadLetters: (issues?.deadLetters ?? []).map(item => ({
+        id: item.id,
+        mutation_id: item.mutation_id,
+        reason_code: item.reason_code,
+        created_at: item.created_at,
+      })),
+      conflicts: (issues?.conflicts ?? []).map(item => ({
+        id: item.id,
+        mutation_id: item.mutation_id,
+        bundle_id: item.bundle_id,
+        entity_type: item.entity_type,
+        entity_id: item.entity_id,
+        conflict_type: item.conflict_type,
+        created_at: item.created_at,
+        resolved_at: item.resolved_at,
+        resolution_status: item.resolution_status,
+        chosen_action: item.chosen_action,
+      })),
+    };
+  }
+
   function retryRetryableBundles() {
     db.transaction(() => {
       db.prepare(`
@@ -1551,6 +1625,16 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       }
     })();
 
+    recordAuditEvent('sync_conflict_resolved', 'info', {
+      conflictId,
+      entityType,
+      entityId,
+      conflictType,
+      action: requestedAction,
+      resolvedAction,
+      bundleId,
+    });
+
     return {
       ok: true,
       action: resolvedAction,
@@ -1582,6 +1666,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
         WHERE id = 1
       `).run();
     })();
+    recordAuditEvent('local_state_wiped', 'warn', {});
     return { ok: true };
   }
 
@@ -1626,6 +1711,7 @@ function createDesktopDatabase({ userDataPath, secrets }) {
         WHERE id = 1
       `).run();
     })();
+    recordAuditEvent('sync_state_reset', 'info', {});
     return { ok: true };
   }
 
@@ -1674,19 +1760,183 @@ function createDesktopDatabase({ userDataPath, secrets }) {
       GROUP BY status
       ORDER BY status ASC
     `).all();
+    const deadLettersByReason = db.prepare(`
+      SELECT reason_code, COUNT(*) AS count
+      FROM sync_dead_letters
+      GROUP BY reason_code
+      ORDER BY count DESC, reason_code ASC
+    `).all();
+    const conflictsByType = db.prepare(`
+      SELECT conflict_type, COUNT(*) AS count
+      FROM sync_conflicts
+      WHERE resolved_at = ''
+      GROUP BY conflict_type
+      ORDER BY count DESC, conflict_type ASC
+    `).all();
+    const oldestPendingBundle = db.prepare(`
+      SELECT created_at
+      FROM sync_bundles
+      WHERE status IN ('pending', 'retryable', 'syncing', 'conflict')
+      ORDER BY created_at ASC
+      LIMIT 1
+    `).get();
 
-    return { byStatus, byEntity, bundlesByStatus, recentRuns };
+    const oldestPendingBundleAgeMinutes = oldestPendingBundle?.created_at
+      ? Math.max(0, Math.floor((Date.now() - new Date(oldestPendingBundle.created_at).getTime()) / (60 * 1000)))
+      : 0;
+
+    return {
+      byStatus,
+      byEntity,
+      bundlesByStatus,
+      deadLettersByReason,
+      conflictsByType,
+      oldestPendingBundleAgeMinutes,
+      recentRuns,
+    };
   }
 
-  function exportDiagnosticsSnapshot() {
+  function verifyIntegrity({ persist = true, source = 'manual' } = {}) {
+    const issues = [];
+    let integrity = 'unknown';
+    let ok = false;
+
+    try {
+      const result = db.pragma('integrity_check', { simple: true });
+      integrity = String(result || '').trim() || 'unknown';
+      ok = integrity.toLowerCase() === 'ok';
+      if (!ok) {
+        issues.push(`SQLite integrity check returned: ${integrity}`);
+      }
+    } catch (error) {
+      ok = false;
+      integrity = 'error';
+      issues.push(error instanceof Error ? error.message : 'SQLite integrity check failed');
+    }
+
+    const checkedAt = nowIso();
+    setMeta('last_integrity_check_at', checkedAt);
+    setMeta('last_integrity_check_status', ok ? 'ok' : 'failed');
+    setMeta('last_integrity_check_source', source);
+
+    if (!ok && persist) {
+      setRebuildRequired(true, 'Local desktop database failed integrity verification. Export a backup if possible, then rebuild the cache before continuing.');
+    }
+
+    if (persist) {
+      recordAuditEvent(ok ? 'local_integrity_ok' : 'local_integrity_failed', ok ? 'info' : 'error', {
+        source,
+        integrity,
+        issues,
+      });
+    }
+
+    return {
+      ok,
+      integrity,
+      checkedAt,
+      issues,
+      rebuildRequired: !ok,
+    };
+  }
+
+  function exportLocalBackup(targetPath, { reason = 'manual_export' } = {}) {
+    const filePath = String(targetPath || '').trim();
+    if (!filePath) {
+      return { ok: false, code: 'INVALID_BACKUP_PATH', message: 'Backup file path is required.' };
+    }
+
+    const backupDir = path.dirname(filePath);
+    fs.mkdirSync(backupDir, { recursive: true });
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    const quotedPath = filePath.replace(/'/g, "''");
+    db.exec(`VACUUM INTO '${quotedPath}'`);
+
+    const manifestPath = `${filePath}.manifest.json`;
+    const attachmentCounts = db.prepare(`
+      SELECT status, COUNT(*) AS count
+      FROM attachment_transfers
+      GROUP BY status
+      ORDER BY status ASC
+    `).all();
+    const manifest = {
+      exportedAt: nowIso(),
+      reason,
+      appVersion,
+      sourceDatabase: dbPath,
+      backupFile: filePath,
+      attachments: {
+        total: readRow(`SELECT COUNT(*) AS count FROM attachment_transfers`)?.count ?? 0,
+        byStatus: attachmentCounts,
+      },
+      runtime: {
+        deviceId: getRuntimeInfo().deviceId,
+        checkpoint: getCheckpoint('workspace'),
+      },
+    };
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+
+    setMeta('last_backup_export_at', manifest.exportedAt);
+    recordAuditEvent('local_backup_exported', 'info', {
+      backupFile: filePath,
+      manifestFile: manifestPath,
+      reason,
+    });
+
+    return {
+      ok: true,
+      filePath,
+      manifestPath,
+    };
+  }
+
+  function ensureUpgradeBackupIfNeeded() {
+    const previousVersion = getMeta('desktop_app_version', '');
+    if (previousVersion === appVersion) return false;
+
+    const backupDir = path.join(dataDir, 'upgrade-backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    const stamp = nowIso().replace(/[:.]/g, '-');
+    const backupFile = path.join(backupDir, `pre-upgrade-${sanitizeFileName(previousVersion || 'fresh-install')}-to-${sanitizeFileName(appVersion)}-${stamp}.sqlite`);
+    const result = exportLocalBackup(backupFile, {
+      reason: previousVersion ? 'pre_upgrade' : 'initial_version_snapshot',
+    });
+
+    if (!result.ok) {
+      throw new Error(result.message || 'Unable to create pre-upgrade backup.');
+    }
+
+    setMeta('desktop_app_version', appVersion);
+    setMeta('last_upgrade_backup_path', result.filePath || '');
+    return true;
+  }
+
+  function sanitizeFileName(value) {
+    return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+  }
+
+  function exportDiagnosticsSnapshot({ includeSensitive = false } = {}) {
     const bootstrap = getBootstrapMutable();
+    const issues = listSyncIssues();
+    const runtime = getRuntimeInfo();
     return {
       exportedAt: nowIso(),
-      runtime: getRuntimeInfo(),
-      issues: listSyncIssues(),
+      runtime,
+      issues: includeSensitive ? issues : sanitizeSyncIssuesForDiagnostics(issues),
       checkpoint: getCheckpoint('workspace'),
       rebuildRequired: getMeta('rebuild_required', '') === '1',
       rebuildReason: getMeta('rebuild_reason', ''),
+      compatibility: {
+        appVersion,
+      },
+      localSafety: {
+        lastIntegrityCheckAt: getMeta('last_integrity_check_at', ''),
+        lastIntegrityCheckStatus: getMeta('last_integrity_check_status', ''),
+        lastBackupExportAt: getMeta('last_backup_export_at', ''),
+      },
       syncSummary: summarizeOutbox(),
       counts: {
         patients: Array.isArray(bootstrap.patients) ? bootstrap.patients.length : 0,
@@ -1698,6 +1948,12 @@ function createDesktopDatabase({ userDataPath, secrets }) {
         attachments: readRow(`SELECT COUNT(*) AS count FROM attachment_transfers`)?.count ?? 0,
       },
     };
+  }
+
+  ensureUpgradeBackupIfNeeded();
+  const startupIntegrity = verifyIntegrity({ persist: true, source: 'startup' });
+  if (!startupIntegrity.ok) {
+    markSyncStatus('attention');
   }
 
   const pinConfigured = Boolean(readRow(`SELECT pin_hash FROM local_pin WHERE id = 1`)?.pin_hash);
@@ -1737,10 +1993,14 @@ function createDesktopDatabase({ userDataPath, secrets }) {
     startSyncRun,
     finishSyncRun,
     exportDiagnosticsSnapshot,
+    exportLocalBackup,
+    verifyIntegrity,
+    recordAuditEvent,
     setRebuildRequired,
     enqueueAttachmentTransfer,
     listAttachments,
     dataDir,
+    close: () => db.close(),
   };
 }
 

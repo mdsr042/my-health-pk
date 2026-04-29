@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('desktopApp', {
   wipeLocalState: () => ipcRenderer.invoke('desktop:sync:wipe-local-state'),
   rebuildCache: () => ipcRenderer.invoke('desktop:sync:rebuild-cache'),
   exportDiagnostics: () => ipcRenderer.invoke('desktop:sync:export-diagnostics'),
+  exportBackup: () => ipcRenderer.invoke('desktop:sync:export-backup'),
+  verifyIntegrity: () => ipcRenderer.invoke('desktop:sync:verify-integrity'),
   queueAttachment: attachment => ipcRenderer.invoke('desktop:sync:queue-attachment', attachment),
   pickAndStoreAttachment: payload => ipcRenderer.invoke('desktop:attachments:pick-store', payload),
   listAttachments: filters => ipcRenderer.invoke('desktop:attachments:list', filters),

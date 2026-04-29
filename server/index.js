@@ -18,6 +18,8 @@ import { getMedicationCatalogEntries, getMedicationCatalogEntry, searchMedicatio
 import { createRateLimitMiddleware } from './rateLimit.js';
 import {
   adviceTemplateSchema,
+  adminClinicUpdateSchema,
+  adminDoctorProfileUpdateSchema,
   appointmentSchema,
   careActionSchema,
   conditionLibrarySchema,
@@ -56,6 +58,8 @@ import { starterTreatmentTemplates } from './treatmentTemplates.js';
 
 const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 4001);
+const syncApiVersion = 'sync-v1';
+const syncMinDesktopVersion = String(process.env.SYNC_MIN_DESKTOP_VERSION || '1.0.0').trim();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distDir = path.resolve(__dirname, '../dist');
@@ -107,6 +111,7 @@ function mapClinic(row) {
     timings: row.timings,
     specialties,
     logo: row.logo,
+    isActive: row.is_active,
   };
 }
 
@@ -228,6 +233,213 @@ function mapReferralFacility(row) {
   };
 }
 
+function toIsoOrNull(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function parseSemver(version = '') {
+  const match = String(version || '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/i);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+function compareSemver(left, right) {
+  if (left.major !== right.major) return left.major - right.major;
+  if (left.minor !== right.minor) return left.minor - right.minor;
+  return left.patch - right.patch;
+}
+
+function getSyncClientVersion(req) {
+  const fromHeader = String(req.headers?.['x-desktop-version'] ?? '').trim();
+  if (fromHeader) return fromHeader;
+  const fromBody = String(req.body?.clientVersion ?? '').trim();
+  if (fromBody) return fromBody;
+  const fromQuery = String(req.query?.clientVersion ?? '').trim();
+  if (fromQuery) return fromQuery;
+  return '';
+}
+
+function getDesktopDeviceId(req) {
+  const fromHeader = String(req.headers?.['x-desktop-device-id'] ?? '').trim();
+  if (fromHeader) return fromHeader;
+  const fromBody = String(req.body?.deviceId ?? '').trim();
+  if (fromBody) return fromBody;
+  const fromBundle = String(req.body?.bundles?.[0]?.deviceId ?? '').trim();
+  if (fromBundle) return fromBundle;
+  const fromMutation = String(req.body?.mutations?.[0]?.deviceId ?? '').trim();
+  if (fromMutation) return fromMutation;
+  const fromQuery = String(req.query?.deviceId ?? '').trim();
+  if (fromQuery) return fromQuery;
+  return '';
+}
+
+function getSyncCompatibility(req) {
+  const clientVersion = getSyncClientVersion(req);
+  const minVersion = syncMinDesktopVersion || '1.0.0';
+
+  if (!clientVersion) {
+    return {
+      apiVersion: syncApiVersion,
+      mode: 'additive',
+      requiredMinDesktopVersion: minVersion,
+      clientVersion: '',
+      compatible: true,
+      reason: 'client_version_not_provided',
+    };
+  }
+
+  const parsedClient = parseSemver(clientVersion);
+  const parsedMin = parseSemver(minVersion);
+  if (!parsedClient || !parsedMin) {
+    return {
+      apiVersion: syncApiVersion,
+      mode: 'additive',
+      requiredMinDesktopVersion: minVersion,
+      clientVersion,
+      compatible: false,
+      reason: 'invalid_client_version',
+    };
+  }
+
+  if (compareSemver(parsedClient, parsedMin) < 0) {
+    return {
+      apiVersion: syncApiVersion,
+      mode: 'additive',
+      requiredMinDesktopVersion: minVersion,
+      clientVersion,
+      compatible: false,
+      reason: 'client_version_unsupported',
+    };
+  }
+
+  return {
+    apiVersion: syncApiVersion,
+    mode: 'additive',
+    requiredMinDesktopVersion: minVersion,
+    clientVersion,
+    compatible: true,
+    reason: 'ok',
+  };
+}
+
+async function requireActiveDesktopDevice(req, res, { allowMissing = true } = {}) {
+  const deviceId = getDesktopDeviceId(req);
+  if (!deviceId) {
+    return allowMissing ? null : { blocked: true, reason: 'missing_device_id' };
+  }
+
+  const { rows } = await query(
+    `
+      SELECT id, device_id, status, app_version, last_seen_at
+      FROM desktop_devices
+      WHERE device_id = $1
+        AND workspace_id = $2
+        AND doctor_user_id = $3
+      LIMIT 1
+    `,
+    [deviceId, req.auth.workspace.id, req.auth.user.id]
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const device = rows[0];
+  if (device.status === 'revoked') {
+    res.status(403).json({
+      error: 'This desktop device has been revoked. Contact support or register a different approved device.',
+      code: 'DEVICE_REVOKED',
+      data: {
+        deviceId,
+        status: 'revoked',
+      },
+    });
+    return { blocked: true, reason: 'device_revoked' };
+  }
+
+  await query(
+    `
+      UPDATE desktop_devices
+      SET last_seen_at = NOW(),
+          app_version = CASE
+            WHEN $2 <> '' THEN $2
+            ELSE app_version
+          END,
+          updated_at = NOW()
+      WHERE id = $1
+    `,
+    [device.id, getSyncClientVersion(req)]
+  );
+
+  return { blocked: false, device };
+}
+
+function computeOfflineSyncHealth({
+  activeDeviceCount,
+  conflicts,
+  retryableFailures,
+  validationRejected,
+  permissionRejected,
+  entitlementRejected,
+  lastSeenAt,
+  lastSyncedAt,
+}) {
+  if (activeDeviceCount <= 0) return 'inactive';
+
+  const nowMs = Date.now();
+  const lastSeenMs = lastSeenAt ? new Date(lastSeenAt).getTime() : 0;
+  const lastSyncedMs = lastSyncedAt ? new Date(lastSyncedAt).getTime() : 0;
+  const staleSeen = !lastSeenMs || nowMs - lastSeenMs > 1000 * 60 * 60 * 24 * 7;
+  const staleSync = !lastSyncedMs || nowMs - lastSyncedMs > 1000 * 60 * 60 * 24 * 14;
+  const hasFailures = (conflicts + retryableFailures + validationRejected + permissionRejected + entitlementRejected) > 0;
+
+  if (staleSeen && staleSync) return 'offline';
+  if (hasFailures || staleSeen || staleSync) return 'attention';
+  return 'healthy';
+}
+
+function getPilotRolloutThresholds() {
+  return {
+    conflicts: Number(process.env.COHORT_MAX_CONFLICTS ?? 0),
+    retryableFailures: Number(process.env.COHORT_MAX_RETRYABLE_FAILURES ?? 5),
+    doctorsWithAttention: Number(process.env.COHORT_MAX_DOCTORS_WITH_ATTENTION ?? 10),
+    doctorsOffline: Number(process.env.COHORT_MAX_DOCTORS_OFFLINE ?? 5),
+  };
+}
+
+function evaluatePilotRollout(summary) {
+  const thresholds = getPilotRolloutThresholds();
+  const reasons = [];
+
+  if (Number(summary?.conflicts ?? 0) > thresholds.conflicts) {
+    reasons.push(`conflicts=${summary.conflicts} exceeds max=${thresholds.conflicts}`);
+  }
+
+  if (Number(summary?.retryableFailures ?? 0) > thresholds.retryableFailures) {
+    reasons.push(`retryableFailures=${summary.retryableFailures} exceeds max=${thresholds.retryableFailures}`);
+  }
+
+  if (Number(summary?.doctorsWithAttention ?? 0) > thresholds.doctorsWithAttention) {
+    reasons.push(`doctorsWithAttention=${summary.doctorsWithAttention} exceeds max=${thresholds.doctorsWithAttention}`);
+  }
+
+  if (Number(summary?.doctorsOffline ?? 0) > thresholds.doctorsOffline) {
+    reasons.push(`doctorsOffline=${summary.doctorsOffline} exceeds max=${thresholds.doctorsOffline}`);
+  }
+
+  return {
+    decision: reasons.length === 0 ? 'GO' : 'NO_GO',
+    reasons,
+    thresholds,
+  };
+}
+
 function mapCareAction(row) {
   return {
     id: row.id,
@@ -271,6 +483,7 @@ async function getWorkspaceClinics(workspaceId) {
   const { rows } = await query(
     `
       SELECT id, name, location, city, phone, timings, specialties, logo
+      , is_active
       FROM clinics
       WHERE workspace_id = $1
       ORDER BY created_at ASC
@@ -2974,7 +3187,10 @@ app.post('/api/desktop/devices/register', requireAuth, requireRole('doctor_owner
         device_name = EXCLUDED.device_name,
         platform = EXCLUDED.platform,
         app_version = EXCLUDED.app_version,
-        status = 'active',
+        status = CASE
+          WHEN desktop_devices.status = 'revoked' THEN desktop_devices.status
+          ELSE 'active'
+        END,
         last_seen_at = NOW(),
         updated_at = NOW()
       RETURNING id, device_id, status, last_seen_at
@@ -2990,6 +3206,19 @@ app.post('/api/desktop/devices/register', requireAuth, requireRole('doctor_owner
     ]
   );
 
+  if (result.rows[0].status === 'revoked') {
+    return res.status(403).json({
+      error: 'This desktop device has been revoked. Contact support or register a different approved device.',
+      code: 'DEVICE_REVOKED',
+      data: {
+        id: result.rows[0].id,
+        deviceId: result.rows[0].device_id,
+        status: result.rows[0].status,
+        lastSeenAt: result.rows[0].last_seen_at,
+      },
+    });
+  }
+
   res.json({
     ok: true,
     data: {
@@ -3002,11 +3231,15 @@ app.post('/api/desktop/devices/register', requireAuth, requireRole('doctor_owner
 }));
 
 app.get('/api/desktop/bootstrap', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const deviceAccess = await requireActiveDesktopDevice(req, res);
+  if (deviceAccess?.blocked) return;
   const snapshot = await getDesktopBootstrapData(req.auth);
   res.json({ data: snapshot });
 }));
 
 app.get('/api/desktop/entitlement', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const deviceAccess = await requireActiveDesktopDevice(req, res);
+  if (deviceAccess?.blocked) return;
   const session = await getSessionPayload(req.auth.user.id);
   const subscription = session?.workspace?.subscription ?? null;
   const status = subscription?.status === 'active'
@@ -3033,6 +3266,20 @@ app.get('/api/desktop/entitlement', requireAuth, requireRole('doctor_owner'), as
 }));
 
 app.post('/api/sync/push', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const compatibility = getSyncCompatibility(req);
+  if (!compatibility.compatible) {
+    return res.status(426).json({
+      error: 'Desktop client version is not supported for sync. Please update the app.',
+      code: 'DESKTOP_CLIENT_OUTDATED',
+      data: {
+        compatibility,
+      },
+    });
+  }
+
+  const deviceAccess = await requireActiveDesktopDevice(req, res);
+  if (deviceAccess?.blocked) return;
+
   const inputBundles = Array.isArray(req.body?.bundles)
     ? req.body.bundles.map(normalizeDesktopBundle)
     : [];
@@ -3249,6 +3496,9 @@ app.post('/api/sync/push', requireAuth, requireRole('doctor_owner'), asyncHandle
 
   res.json({
     data: {
+      apiVersion: syncApiVersion,
+      compatibility,
+      serverTime: new Date().toISOString(),
       checkpoint: createIssuedSyncCheckpoint(req.auth.workspace.id),
       bundles: bundleResults,
       results,
@@ -3257,6 +3507,20 @@ app.post('/api/sync/push', requireAuth, requireRole('doctor_owner'), asyncHandle
 }));
 
 app.get('/api/sync/pull', requireAuth, requireRole('doctor_owner'), asyncHandler(async (req, res) => {
+  const compatibility = getSyncCompatibility(req);
+  if (!compatibility.compatible) {
+    return res.status(426).json({
+      error: 'Desktop client version is not supported for sync. Please update the app.',
+      code: 'DESKTOP_CLIENT_OUTDATED',
+      data: {
+        compatibility,
+      },
+    });
+  }
+
+  const deviceAccess = await requireActiveDesktopDevice(req, res);
+  if (deviceAccess?.blocked) return;
+
   const session = await getSessionPayload(req.auth.user.id);
   const checkpointInput = String(req.query?.checkpoint ?? '').trim();
   const rebuildRequested = req.query?.rebuild === '1';
@@ -3298,12 +3562,66 @@ app.get('/api/sync/pull', requireAuth, requireRole('doctor_owner'), asyncHandler
 
   res.json({
     data: {
+      apiVersion: syncApiVersion,
+      compatibility,
+      serverTime: new Date().toISOString(),
       checkpoint: createIssuedSyncCheckpoint(req.auth.workspace.id),
       checkpointStatus: checkpointState.checkpointStatus,
       rebuildRequired: checkpointState.rebuildRequired,
       snapshot,
       changes,
       entitlement,
+    },
+  });
+}));
+
+app.post('/api/admin/offline-sync/devices/:deviceId/revoke', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const deviceId = String(req.params.deviceId ?? '').trim();
+  const reason = String(req.body?.reason ?? '').trim();
+
+  if (!deviceId) {
+    return res.status(400).json({ error: 'Device ID is required', code: 'INVALID_DEVICE_ID' });
+  }
+
+  const result = await query(
+    `
+      UPDATE desktop_devices
+      SET status = 'revoked',
+          revoked_at = NOW(),
+          updated_at = NOW()
+      WHERE device_id = $1
+      RETURNING id, workspace_id, doctor_user_id, device_id, device_name, status, revoked_at
+    `,
+    [deviceId]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Desktop device not found', code: 'DESKTOP_DEVICE_NOT_FOUND' });
+  }
+
+  const row = result.rows[0];
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    targetUserId: row.doctor_user_id,
+    workspaceId: row.workspace_id,
+    action: 'desktop_device_revoked',
+    details: {
+      deviceId: row.device_id,
+      deviceName: row.device_name,
+      reason,
+    },
+  });
+
+  res.json({
+    ok: true,
+    data: {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      doctorUserId: row.doctor_user_id,
+      deviceId: row.device_id,
+      deviceName: row.device_name,
+      status: row.status,
+      revokedAt: row.revoked_at,
     },
   });
 }));
@@ -3336,14 +3654,43 @@ app.get('/api/admin/overview', requireAuth, requireRole('platform_admin'), async
   });
 }));
 
-app.get('/api/admin/audit-logs', requireAuth, requireRole('platform_admin'), asyncHandler(async (_req, res) => {
+app.get('/api/admin/audit-logs', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const q = String(req.query?.q ?? '').trim();
+  const targetUserId = String(req.query?.targetUserId ?? '').trim();
+  const workspaceId = String(req.query?.workspaceId ?? '').trim();
+  const limitInput = Number.parseInt(String(req.query?.limit ?? '100'), 10);
+  const limit = Number.isFinite(limitInput) ? Math.min(Math.max(limitInput, 1), 300) : 100;
+
+  const conditions = ['1 = 1'];
+  const params = [];
+
+  if (targetUserId) {
+    params.push(targetUserId);
+    conditions.push(`target_user_id = $${params.length}`);
+  }
+
+  if (workspaceId) {
+    params.push(workspaceId);
+    conditions.push(`workspace_id = $${params.length}`);
+  }
+
+  if (q) {
+    params.push(`%${q}%`);
+    const searchRef = `$${params.length}`;
+    conditions.push(`(action ILIKE ${searchRef} OR CAST(details AS TEXT) ILIKE ${searchRef})`);
+  }
+
+  params.push(limit);
+
   const { rows } = await query(
     `
       SELECT id, actor_user_id, target_user_id, workspace_id, action, details, created_at
       FROM admin_audit_logs
+      WHERE ${conditions.join(' AND ')}
       ORDER BY created_at DESC
-      LIMIT 20
-    `
+      LIMIT $${params.length}
+    `,
+    params
   );
 
   res.json({
@@ -3356,6 +3703,307 @@ app.get('/api/admin/audit-logs', requireAuth, requireRole('platform_admin'), asy
       workspaceId: row.workspace_id,
       details: row.details ?? {},
     })),
+  });
+}));
+
+app.get('/api/admin/offline-sync/stats', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const workspaceId = String(req.query?.workspaceId ?? '').trim();
+  const doctorId = String(req.query?.doctorId ?? '').trim();
+  const q = String(req.query?.q ?? '').trim();
+  const statusFilter = String(req.query?.status ?? '').trim();
+  const limitInput = Number.parseInt(String(req.query?.limit ?? '300'), 10);
+  const limit = Number.isFinite(limitInput) ? Math.min(Math.max(limitInput, 1), 500) : 300;
+
+  const conditions = ['u.role = \'doctor_owner\'', 'u.is_demo = FALSE', 'w.is_demo = FALSE'];
+  const params = [];
+
+  if (workspaceId) {
+    params.push(workspaceId);
+    conditions.push(`w.id = $${params.length}`);
+  }
+
+  if (doctorId) {
+    params.push(doctorId);
+    conditions.push(`u.id = $${params.length}`);
+  }
+
+  if (q) {
+    params.push(`%${q}%`);
+    const searchRef = `$${params.length}`;
+    conditions.push(`(dp.full_name ILIKE ${searchRef} OR u.email ILIKE ${searchRef} OR w.name ILIKE ${searchRef} OR w.city ILIKE ${searchRef})`);
+  }
+
+  params.push(limit);
+
+  const { rows } = await query(
+    `
+      WITH doctor_scope AS (
+        SELECT
+          u.id AS doctor_user_id,
+          u.email AS doctor_email,
+          dp.full_name AS doctor_name,
+          w.id AS workspace_id,
+          w.name AS workspace_name,
+          w.city AS workspace_city
+        FROM users u
+        JOIN doctor_profiles dp ON dp.user_id = u.id
+        JOIN workspaces w ON w.owner_user_id = u.id
+        WHERE ${conditions.join(' AND ')}
+      ),
+      device_stats AS (
+        SELECT
+          dd.doctor_user_id,
+          dd.workspace_id,
+          COUNT(*)::int AS device_count,
+          COUNT(*) FILTER (WHERE dd.status = 'active')::int AS active_device_count,
+          COUNT(*) FILTER (WHERE dd.status = 'revoked')::int AS revoked_device_count,
+          MAX(dd.last_seen_at) AS last_seen_at
+        FROM desktop_devices dd
+        GROUP BY dd.doctor_user_id, dd.workspace_id
+      ),
+      bundle_stats AS (
+        SELECT
+          w.owner_user_id AS doctor_user_id,
+          pb.workspace_id,
+          COUNT(*)::int AS bundles_processed,
+          COUNT(*) FILTER (WHERE pb.result_status = 'accepted')::int AS bundles_accepted,
+          COUNT(*) FILTER (WHERE pb.result_status = 'accepted_already_processed')::int AS bundles_accepted_already_processed,
+          COUNT(*) FILTER (WHERE pb.result_status = 'conflict')::int AS bundle_conflicts,
+          COUNT(*) FILTER (WHERE pb.result_status = 'retryable_failure')::int AS bundle_retryable_failures,
+          COUNT(*) FILTER (WHERE pb.result_status = 'validation_rejected')::int AS bundle_validation_rejected,
+          COUNT(*) FILTER (WHERE pb.result_status = 'permission_rejected')::int AS bundle_permission_rejected,
+          COUNT(*) FILTER (WHERE pb.result_status = 'entitlement_rejected')::int AS bundle_entitlement_rejected,
+          MAX(pb.processed_at) AS last_bundle_processed_at
+        FROM processed_bundles pb
+        JOIN workspaces w ON w.id = pb.workspace_id
+        GROUP BY w.owner_user_id, pb.workspace_id
+      ),
+      mutation_stats AS (
+        SELECT
+          w.owner_user_id AS doctor_user_id,
+          pm.workspace_id,
+          COUNT(*)::int AS mutations_processed,
+          COUNT(*) FILTER (WHERE pm.result_status = 'accepted')::int AS mutations_accepted,
+          COUNT(*) FILTER (WHERE pm.result_status = 'accepted_already_processed')::int AS mutations_accepted_already_processed,
+          COUNT(*) FILTER (WHERE pm.result_status = 'conflict')::int AS mutation_conflicts,
+          COUNT(*) FILTER (WHERE pm.result_status = 'retryable_failure')::int AS mutation_retryable_failures,
+          COUNT(*) FILTER (WHERE pm.result_status = 'validation_rejected')::int AS mutation_validation_rejected,
+          COUNT(*) FILTER (WHERE pm.result_status = 'permission_rejected')::int AS mutation_permission_rejected,
+          COUNT(*) FILTER (WHERE pm.result_status = 'entitlement_rejected')::int AS mutation_entitlement_rejected,
+          MAX(pm.processed_at) AS last_mutation_processed_at
+        FROM processed_mutations pm
+        JOIN workspaces w ON w.id = pm.workspace_id
+        GROUP BY w.owner_user_id, pm.workspace_id
+      )
+      SELECT
+        ds.doctor_user_id,
+        ds.doctor_email,
+        ds.doctor_name,
+        ds.workspace_id,
+        ds.workspace_name,
+        ds.workspace_city,
+        COALESCE(dv.device_count, 0) AS device_count,
+        COALESCE(dv.active_device_count, 0) AS active_device_count,
+        COALESCE(dv.revoked_device_count, 0) AS revoked_device_count,
+        dv.last_seen_at,
+        COALESCE(bs.bundles_processed, 0) AS bundles_processed,
+        COALESCE(ms.mutations_processed, 0) AS mutations_processed,
+        COALESCE(bs.bundles_accepted, 0) + COALESCE(ms.mutations_accepted, 0) AS accepted_total,
+        COALESCE(bs.bundles_accepted_already_processed, 0) + COALESCE(ms.mutations_accepted_already_processed, 0) AS accepted_already_processed_total,
+        COALESCE(bs.bundle_conflicts, 0) + COALESCE(ms.mutation_conflicts, 0) AS conflicts_total,
+        COALESCE(bs.bundle_retryable_failures, 0) + COALESCE(ms.mutation_retryable_failures, 0) AS retryable_failures_total,
+        COALESCE(bs.bundle_validation_rejected, 0) + COALESCE(ms.mutation_validation_rejected, 0) AS validation_rejected_total,
+        COALESCE(bs.bundle_permission_rejected, 0) + COALESCE(ms.mutation_permission_rejected, 0) AS permission_rejected_total,
+        COALESCE(bs.bundle_entitlement_rejected, 0) + COALESCE(ms.mutation_entitlement_rejected, 0) AS entitlement_rejected_total,
+        bs.last_bundle_processed_at,
+        ms.last_mutation_processed_at
+      FROM doctor_scope ds
+      LEFT JOIN device_stats dv ON dv.doctor_user_id = ds.doctor_user_id AND dv.workspace_id = ds.workspace_id
+      LEFT JOIN bundle_stats bs ON bs.doctor_user_id = ds.doctor_user_id AND bs.workspace_id = ds.workspace_id
+      LEFT JOIN mutation_stats ms ON ms.doctor_user_id = ds.doctor_user_id AND ms.workspace_id = ds.workspace_id
+      ORDER BY ds.doctor_name ASC
+      LIMIT $${params.length}
+    `,
+    params
+  );
+
+  const deviceRows = rows.length > 0
+    ? (await query(
+        `
+          SELECT
+            dd.workspace_id,
+            dd.doctor_user_id,
+            dd.device_id,
+            dd.device_name,
+            dd.platform,
+            dd.app_version,
+            dd.status,
+            dd.last_seen_at,
+            dd.revoked_at
+          FROM desktop_devices dd
+          WHERE (dd.doctor_user_id, dd.workspace_id) IN (
+            ${rows.map((_, index) => `($${index * 2 + 1}, $${index * 2 + 2})`).join(', ')}
+          )
+          ORDER BY dd.last_seen_at DESC NULLS LAST, dd.updated_at DESC
+        `,
+        rows.flatMap(row => [row.doctor_user_id, row.workspace_id])
+      )).rows
+    : [];
+
+  const devicesByScope = new Map();
+  for (const row of deviceRows) {
+    const key = `${row.doctor_user_id}::${row.workspace_id}`;
+    const items = devicesByScope.get(key) ?? [];
+    items.push({
+      deviceId: row.device_id,
+      deviceName: row.device_name,
+      platform: row.platform,
+      appVersion: row.app_version,
+      status: row.status,
+      lastSeenAt: toIsoOrNull(row.last_seen_at),
+      revokedAt: toIsoOrNull(row.revoked_at),
+    });
+    devicesByScope.set(key, items);
+  }
+
+  const doctors = rows.map(row => {
+    const lastBundleProcessedAt = toIsoOrNull(row.last_bundle_processed_at);
+    const lastMutationProcessedAt = toIsoOrNull(row.last_mutation_processed_at);
+    const lastSyncedAt = lastBundleProcessedAt && lastMutationProcessedAt
+      ? (new Date(lastBundleProcessedAt).getTime() >= new Date(lastMutationProcessedAt).getTime() ? lastBundleProcessedAt : lastMutationProcessedAt)
+      : lastBundleProcessedAt || lastMutationProcessedAt;
+    const health = computeOfflineSyncHealth({
+      activeDeviceCount: Number(row.active_device_count ?? 0),
+      conflicts: Number(row.conflicts_total ?? 0),
+      retryableFailures: Number(row.retryable_failures_total ?? 0),
+      validationRejected: Number(row.validation_rejected_total ?? 0),
+      permissionRejected: Number(row.permission_rejected_total ?? 0),
+      entitlementRejected: Number(row.entitlement_rejected_total ?? 0),
+      lastSeenAt: row.last_seen_at,
+      lastSyncedAt,
+    });
+
+    return {
+      doctor: {
+        id: row.doctor_user_id,
+        name: row.doctor_name,
+        email: row.doctor_email,
+      },
+      workspace: {
+        id: row.workspace_id,
+        name: row.workspace_name,
+        city: row.workspace_city,
+      },
+      devices: {
+        total: Number(row.device_count ?? 0),
+        active: Number(row.active_device_count ?? 0),
+        revoked: Number(row.revoked_device_count ?? 0),
+        lastSeenAt: toIsoOrNull(row.last_seen_at),
+      },
+      sync: {
+        lastBundleProcessedAt,
+        lastMutationProcessedAt,
+        lastSyncedAt,
+        bundlesProcessed: Number(row.bundles_processed ?? 0),
+        mutationsProcessed: Number(row.mutations_processed ?? 0),
+      },
+      outcomes: {
+        conflicts: Number(row.conflicts_total ?? 0),
+        retryableFailures: Number(row.retryable_failures_total ?? 0),
+        validationRejected: Number(row.validation_rejected_total ?? 0),
+        permissionRejected: Number(row.permission_rejected_total ?? 0),
+        entitlementRejected: Number(row.entitlement_rejected_total ?? 0),
+        accepted: Number(row.accepted_total ?? 0),
+        acceptedAlreadyProcessed: Number(row.accepted_already_processed_total ?? 0),
+      },
+      deviceEntries: devicesByScope.get(`${row.doctor_user_id}::${row.workspace_id}`) ?? [],
+      health,
+    };
+  });
+
+  const filteredByStatus = statusFilter
+    ? doctors.filter(item => item.health === statusFilter)
+    : doctors;
+
+  const summary = filteredByStatus.reduce((acc, item) => {
+    acc.doctors += 1;
+    acc.workspaces.add(item.workspace.id);
+    acc.totalDevices += item.devices.total;
+    acc.activeDevices += item.devices.active;
+    acc.revokedDevices += item.devices.revoked;
+    acc.bundlesProcessed += item.sync.bundlesProcessed;
+    acc.mutationsProcessed += item.sync.mutationsProcessed;
+    acc.conflicts += item.outcomes.conflicts;
+    acc.retryableFailures += item.outcomes.retryableFailures;
+    acc.validationRejected += item.outcomes.validationRejected;
+    acc.permissionRejected += item.outcomes.permissionRejected;
+    acc.entitlementRejected += item.outcomes.entitlementRejected;
+    acc.accepted += item.outcomes.accepted;
+    acc.acceptedAlreadyProcessed += item.outcomes.acceptedAlreadyProcessed;
+    if (item.outcomes.conflicts > 0) acc.doctorsWithConflicts += 1;
+    if (item.health === 'attention') acc.doctorsWithAttention += 1;
+    if (item.health === 'offline') acc.doctorsOffline += 1;
+    if (item.sync.lastSyncedAt) {
+      if (!acc.lastSyncedAt || new Date(item.sync.lastSyncedAt).getTime() > new Date(acc.lastSyncedAt).getTime()) {
+        acc.lastSyncedAt = item.sync.lastSyncedAt;
+      }
+    }
+    return acc;
+  }, {
+    doctors: 0,
+    workspaces: new Set(),
+    totalDevices: 0,
+    activeDevices: 0,
+    revokedDevices: 0,
+    doctorsWithConflicts: 0,
+    doctorsWithAttention: 0,
+    doctorsOffline: 0,
+    bundlesProcessed: 0,
+    mutationsProcessed: 0,
+    conflicts: 0,
+    retryableFailures: 0,
+    validationRejected: 0,
+    permissionRejected: 0,
+    entitlementRejected: 0,
+    accepted: 0,
+    acceptedAlreadyProcessed: 0,
+    lastSyncedAt: null,
+  });
+
+  res.json({
+    data: {
+      generatedAt: new Date().toISOString(),
+      rollout: evaluatePilotRollout({
+        doctors: summary.doctors,
+        activeDevices: summary.activeDevices,
+        totalDevices: summary.totalDevices,
+        doctorsWithAttention: summary.doctorsWithAttention,
+        doctorsOffline: summary.doctorsOffline,
+        conflicts: summary.conflicts,
+        retryableFailures: summary.retryableFailures,
+      }),
+      summary: {
+        doctors: summary.doctors,
+        workspaces: summary.workspaces.size,
+        totalDevices: summary.totalDevices,
+        activeDevices: summary.activeDevices,
+        revokedDevices: summary.revokedDevices,
+        doctorsWithConflicts: summary.doctorsWithConflicts,
+        doctorsWithAttention: summary.doctorsWithAttention,
+        doctorsOffline: summary.doctorsOffline,
+        bundlesProcessed: summary.bundlesProcessed,
+        mutationsProcessed: summary.mutationsProcessed,
+        conflicts: summary.conflicts,
+        retryableFailures: summary.retryableFailures,
+        validationRejected: summary.validationRejected,
+        permissionRejected: summary.permissionRejected,
+        entitlementRejected: summary.entitlementRejected,
+        accepted: summary.accepted,
+        acceptedAlreadyProcessed: summary.acceptedAlreadyProcessed,
+        lastSyncedAt: summary.lastSyncedAt,
+      },
+      doctors: filteredByStatus,
+    },
   });
 }));
 
@@ -3377,6 +4025,8 @@ app.get('/api/admin/approval-requests', requireAuth, requireRole('platform_admin
         dp.phone,
         dp.pmc_number,
         dp.specialization,
+        dp.qualifications,
+        dp.notes,
         w.id AS workspace_id,
         w.name AS workspace_name
       FROM approval_requests ar
@@ -3428,6 +4078,8 @@ app.get('/api/admin/doctors', requireAuth, requireRole('platform_admin'), asyncH
         dp.phone,
         dp.pmc_number,
         dp.specialization,
+        dp.qualifications,
+        dp.notes,
         w.id AS workspace_id,
         w.name AS workspace_name,
         w.city AS workspace_city,
@@ -3472,6 +4124,8 @@ app.get('/api/admin/doctors', requireAuth, requireRole('platform_admin'), asyncH
       phone: row.phone,
       pmcNumber: row.pmc_number,
       specialization: row.specialization,
+      qualifications: row.qualifications ?? '',
+      notes: row.notes ?? '',
       workspace: {
         id: row.workspace_id,
         name: row.workspace_name,
@@ -3494,6 +4148,9 @@ app.get('/api/admin/doctors', requireAuth, requireRole('platform_admin'), asyncH
 
 app.get('/api/admin/patients', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
   const workspaceId = String(req.query?.workspaceId ?? '').trim();
+  const doctorId = String(req.query?.doctorId ?? '').trim();
+  const clinicId = String(req.query?.clinicId ?? '').trim();
+  const activity = String(req.query?.activity ?? '').trim();
   const searchQuery = String(req.query?.q ?? '').trim();
   const limitInput = Number.parseInt(String(req.query?.limit ?? '200'), 10);
   const limit = Number.isFinite(limitInput) ? Math.min(Math.max(limitInput, 1), 500) : 200;
@@ -3506,11 +4163,38 @@ app.get('/api/admin/patients', requireAuth, requireRole('platform_admin'), async
     conditions.push(`p.workspace_id = $${params.length}`);
   }
 
+  if (doctorId) {
+    params.push(doctorId);
+    conditions.push(`w.owner_user_id = $${params.length}`);
+  }
+
+  if (clinicId) {
+    params.push(clinicId);
+    const clinicRef = `$${params.length}`;
+    conditions.push(`
+      EXISTS (
+        SELECT 1
+        FROM appointments appointment_filter
+        WHERE appointment_filter.workspace_id = p.workspace_id
+          AND appointment_filter.patient_id = p.id
+          AND appointment_filter.clinic_id = ${clinicRef}
+      )
+    `);
+  }
+
+  if (activity === 'recent') {
+    conditions.push(`appointment_stats.last_appointment_date >= CURRENT_DATE - INTERVAL '30 days'`);
+  } else if (activity === 'inactive') {
+    conditions.push(`(appointment_stats.last_appointment_date IS NULL OR appointment_stats.last_appointment_date < CURRENT_DATE - INTERVAL '90 days')`);
+  } else if (activity === 'new') {
+    conditions.push(`COALESCE(appointment_stats.total_appointments, 0) = 0`);
+  }
+
   if (searchQuery) {
     params.push(`%${searchQuery}%`);
     const searchParamRef = `$${params.length}`;
     conditions.push(
-      `(p.name ILIKE ${searchParamRef} OR p.mrn ILIKE ${searchParamRef} OR p.phone ILIKE ${searchParamRef} OR p.cnic ILIKE ${searchParamRef} OR w.name ILIKE ${searchParamRef})`
+      `(p.name ILIKE ${searchParamRef} OR p.mrn ILIKE ${searchParamRef} OR p.phone ILIKE ${searchParamRef} OR p.cnic ILIKE ${searchParamRef} OR w.name ILIKE ${searchParamRef} OR dp.full_name ILIKE ${searchParamRef})`
     );
   }
 
@@ -3526,24 +4210,43 @@ app.get('/api/admin/patients', requireAuth, requireRole('platform_admin'), async
         p.age,
         p.gender,
         p.cnic,
+        p.address,
+        p.blood_group,
+        p.emergency_contact,
         p.created_at,
         p.updated_at,
         w.id AS workspace_id,
         w.name AS workspace_name,
         w.city AS workspace_city,
+        u.id AS doctor_user_id,
+        u.email AS doctor_email,
+        dp.full_name AS doctor_name,
+        last_clinic.id AS last_clinic_id,
+        last_clinic.name AS last_clinic_name,
         COALESCE(appointment_stats.total_appointments, 0) AS total_appointments,
         appointment_stats.last_appointment_date
       FROM patients p
       JOIN workspaces w ON w.id = p.workspace_id
+      JOIN users u ON u.id = w.owner_user_id
+      JOIN doctor_profiles dp ON dp.user_id = u.id
       LEFT JOIN (
         SELECT
           workspace_id,
           patient_id,
           COUNT(*)::int AS total_appointments,
-          MAX(date) AS last_appointment_date
+          MAX(date::date) AS last_appointment_date
         FROM appointments
         GROUP BY workspace_id, patient_id
       ) appointment_stats ON appointment_stats.workspace_id = p.workspace_id AND appointment_stats.patient_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT c.id, c.name
+        FROM appointments a
+        JOIN clinics c ON c.id = a.clinic_id
+        WHERE a.workspace_id = p.workspace_id
+          AND a.patient_id = p.id
+        ORDER BY a.date DESC, a.time DESC
+        LIMIT 1
+      ) last_clinic ON TRUE
       WHERE ${conditions.join(' AND ')}
       ORDER BY p.updated_at DESC, p.created_at DESC
       LIMIT $${params.length}
@@ -3560,11 +4263,501 @@ app.get('/api/admin/patients', requireAuth, requireRole('platform_admin'), async
       age: row.age,
       gender: row.gender,
       cnic: row.cnic,
+      address: row.address,
+      bloodGroup: row.blood_group,
+      emergencyContact: row.emergency_contact,
       workspace: {
         id: row.workspace_id,
         name: row.workspace_name,
         city: row.workspace_city,
       },
+      doctor: {
+        id: row.doctor_user_id,
+        name: row.doctor_name,
+        email: row.doctor_email,
+      },
+      lastClinic: row.last_clinic_id
+        ? {
+            id: row.last_clinic_id,
+            name: row.last_clinic_name,
+          }
+        : null,
+      totalAppointments: row.total_appointments,
+      lastAppointmentDate: row.last_appointment_date,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  });
+}));
+
+app.put('/api/admin/patients/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const patient = parseOrThrow(patientSchema, req.body ?? {}, 'INVALID_PATIENT');
+
+  const result = await query(
+    `
+      UPDATE patients
+      SET
+        name = $2,
+        phone = $3,
+        age = $4,
+        gender = $5,
+        cnic = $6,
+        address = $7,
+        blood_group = $8,
+        emergency_contact = $9,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [
+      id,
+      patient.name,
+      patient.phone || '',
+      patient.age || 0,
+      patient.gender || 'Male',
+      patient.cnic || '',
+      patient.address || '',
+      patient.bloodGroup || '',
+      patient.emergencyContact || '',
+    ]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Patient not found', code: 'PATIENT_NOT_FOUND' });
+  }
+
+  const workspaceId = result.rows[0].workspace_id;
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    workspaceId,
+    action: 'patient_demographics_updated',
+    details: {
+      patientId: id,
+      name: patient.name,
+      phone: patient.phone || '',
+      age: patient.age || 0,
+      gender: patient.gender || 'Male',
+      cnic: patient.cnic || '',
+    },
+  });
+
+  const patientRows = await query(
+    `
+      SELECT
+        p.id,
+        p.mrn,
+        p.name,
+        p.phone,
+        p.age,
+        p.gender,
+        p.cnic,
+        p.address,
+        p.blood_group,
+        p.emergency_contact,
+        p.created_at,
+        p.updated_at,
+        w.id AS workspace_id,
+        w.name AS workspace_name,
+        w.city AS workspace_city,
+        u.id AS doctor_user_id,
+        u.email AS doctor_email,
+        dp.full_name AS doctor_name,
+        last_clinic.id AS last_clinic_id,
+        last_clinic.name AS last_clinic_name,
+        COALESCE(appointment_stats.total_appointments, 0) AS total_appointments,
+        appointment_stats.last_appointment_date
+      FROM patients p
+      JOIN workspaces w ON w.id = p.workspace_id
+      JOIN users u ON u.id = w.owner_user_id
+      JOIN doctor_profiles dp ON dp.user_id = u.id
+      LEFT JOIN (
+        SELECT
+          workspace_id,
+          patient_id,
+          COUNT(*)::int AS total_appointments,
+          MAX(date::date) AS last_appointment_date
+        FROM appointments
+        GROUP BY workspace_id, patient_id
+      ) appointment_stats ON appointment_stats.workspace_id = p.workspace_id AND appointment_stats.patient_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT c.id, c.name
+        FROM appointments a
+        JOIN clinics c ON c.id = a.clinic_id
+        WHERE a.workspace_id = p.workspace_id
+          AND a.patient_id = p.id
+        ORDER BY a.date DESC, a.time DESC
+        LIMIT 1
+      ) last_clinic ON TRUE
+      WHERE p.id = $1
+      LIMIT 1
+    `,
+    [id]
+  );
+
+  const row = patientRows.rows[0];
+  res.json({
+    data: {
+      id: row.id,
+      mrn: row.mrn,
+      name: row.name,
+      phone: row.phone,
+      age: row.age,
+      gender: row.gender,
+      cnic: row.cnic,
+      address: row.address,
+      bloodGroup: row.blood_group,
+      emergencyContact: row.emergency_contact,
+      workspace: {
+        id: row.workspace_id,
+        name: row.workspace_name,
+        city: row.workspace_city,
+      },
+      doctor: {
+        id: row.doctor_user_id,
+        name: row.doctor_name,
+        email: row.doctor_email,
+      },
+      lastClinic: row.last_clinic_id ? { id: row.last_clinic_id, name: row.last_clinic_name } : null,
+      totalAppointments: row.total_appointments,
+      lastAppointmentDate: row.last_appointment_date,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    },
+  });
+}));
+
+app.get('/api/admin/clinics', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const workspaceId = String(req.query?.workspaceId ?? '').trim();
+  const doctorId = String(req.query?.doctorId ?? '').trim();
+  const status = String(req.query?.status ?? '').trim();
+  const q = String(req.query?.q ?? '').trim();
+  const limitInput = Number.parseInt(String(req.query?.limit ?? '300'), 10);
+  const limit = Number.isFinite(limitInput) ? Math.min(Math.max(limitInput, 1), 500) : 300;
+
+  const conditions = ['w.is_demo = FALSE'];
+  const params = [];
+
+  if (workspaceId) {
+    params.push(workspaceId);
+    conditions.push(`c.workspace_id = $${params.length}`);
+  }
+
+  if (doctorId) {
+    params.push(doctorId);
+    conditions.push(`w.owner_user_id = $${params.length}`);
+  }
+
+  if (status === 'active') {
+    conditions.push(`c.is_active = TRUE`);
+  } else if (status === 'inactive') {
+    conditions.push(`c.is_active = FALSE`);
+  }
+
+  if (q) {
+    params.push(`%${q}%`);
+    const searchRef = `$${params.length}`;
+    conditions.push(`(c.name ILIKE ${searchRef} OR c.city ILIKE ${searchRef} OR c.phone ILIKE ${searchRef} OR w.name ILIKE ${searchRef} OR dp.full_name ILIKE ${searchRef})`);
+  }
+
+  params.push(limit);
+
+  const { rows } = await query(
+    `
+      SELECT
+        c.id,
+        c.name,
+        c.location,
+        c.city,
+        c.phone,
+        c.timings,
+        c.specialties,
+        c.logo,
+        c.is_active,
+        w.id AS workspace_id,
+        w.name AS workspace_name,
+        w.city AS workspace_city,
+        u.id AS doctor_user_id,
+        dp.full_name AS doctor_name,
+        COALESCE(clinic_patient_stats.patient_count, 0) AS patient_count,
+        COALESCE(clinic_appointment_stats.appointment_count, 0) AS appointment_count,
+        clinic_appointment_stats.recent_appointment_date
+      FROM clinics c
+      JOIN workspaces w ON w.id = c.workspace_id
+      JOIN users u ON u.id = w.owner_user_id
+      JOIN doctor_profiles dp ON dp.user_id = u.id
+      LEFT JOIN (
+        SELECT clinic_id, COUNT(DISTINCT patient_id)::int AS patient_count
+        FROM appointments
+        GROUP BY clinic_id
+      ) clinic_patient_stats ON clinic_patient_stats.clinic_id = c.id
+      LEFT JOIN (
+        SELECT clinic_id, COUNT(*)::int AS appointment_count, MAX(date::date) AS recent_appointment_date
+        FROM appointments
+        GROUP BY clinic_id
+      ) clinic_appointment_stats ON clinic_appointment_stats.clinic_id = c.id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY w.name ASC, c.name ASC
+      LIMIT $${params.length}
+    `,
+    params
+  );
+
+  res.json({
+    data: rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      location: row.location,
+      city: row.city,
+      phone: row.phone,
+      timings: row.timings,
+      specialties: Array.isArray(row.specialties) ? row.specialties : [],
+      logo: row.logo,
+      isActive: row.is_active,
+      workspace: {
+        id: row.workspace_id,
+        name: row.workspace_name,
+        city: row.workspace_city,
+      },
+      doctor: {
+        id: row.doctor_user_id,
+        name: row.doctor_name,
+      },
+      patientCount: row.patient_count,
+      appointmentCount: row.appointment_count,
+      recentAppointmentDate: row.recent_appointment_date,
+    })),
+  });
+}));
+
+app.put('/api/admin/clinics/:id', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const payload = parseOrThrow(adminClinicUpdateSchema, req.body ?? {}, 'INVALID_CLINIC');
+
+  const result = await query(
+    `
+      UPDATE clinics
+      SET
+        name = $2,
+        location = $3,
+        city = $4,
+        phone = $5,
+        timings = $6,
+        specialties = $7,
+        logo = $8,
+        is_active = $9,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [
+      id,
+      payload.name.trim(),
+      payload.location.trim(),
+      payload.city.trim(),
+      payload.phone.trim(),
+      payload.timings.trim() || 'By appointment',
+      payload.specialties,
+      payload.logo.trim() || '🏥',
+      payload.isActive,
+    ]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Clinic not found', code: 'CLINIC_NOT_FOUND' });
+  }
+
+  await recordAdminAudit(query, {
+    actorUserId: req.auth.user.id,
+    workspaceId: result.rows[0].workspace_id,
+    action: 'clinic_profile_updated',
+    details: {
+      clinicId: id,
+      name: payload.name.trim(),
+      city: payload.city.trim(),
+      phone: payload.phone.trim(),
+      timings: payload.timings.trim() || 'By appointment',
+      isActive: payload.isActive,
+    },
+  });
+
+  const clinicRows = await query(
+    `
+      SELECT
+        c.id,
+        c.name,
+        c.location,
+        c.city,
+        c.phone,
+        c.timings,
+        c.specialties,
+        c.logo,
+        c.is_active,
+        w.id AS workspace_id,
+        w.name AS workspace_name,
+        w.city AS workspace_city,
+        u.id AS doctor_user_id,
+        dp.full_name AS doctor_name,
+        COALESCE(clinic_patient_stats.patient_count, 0) AS patient_count,
+        COALESCE(clinic_appointment_stats.appointment_count, 0) AS appointment_count,
+        clinic_appointment_stats.recent_appointment_date
+      FROM clinics c
+      JOIN workspaces w ON w.id = c.workspace_id
+      JOIN users u ON u.id = w.owner_user_id
+      JOIN doctor_profiles dp ON dp.user_id = u.id
+      LEFT JOIN (
+        SELECT clinic_id, COUNT(DISTINCT patient_id)::int AS patient_count
+        FROM appointments
+        GROUP BY clinic_id
+      ) clinic_patient_stats ON clinic_patient_stats.clinic_id = c.id
+      LEFT JOIN (
+        SELECT clinic_id, COUNT(*)::int AS appointment_count, MAX(date::date) AS recent_appointment_date
+        FROM appointments
+        GROUP BY clinic_id
+      ) clinic_appointment_stats ON clinic_appointment_stats.clinic_id = c.id
+      WHERE c.id = $1
+      LIMIT 1
+    `,
+    [id]
+  );
+
+  const row = clinicRows.rows[0];
+  res.json({
+    data: {
+      id: row.id,
+      name: row.name,
+      location: row.location,
+      city: row.city,
+      phone: row.phone,
+      timings: row.timings,
+      specialties: Array.isArray(row.specialties) ? row.specialties : [],
+      logo: row.logo,
+      isActive: row.is_active,
+      workspace: {
+        id: row.workspace_id,
+        name: row.workspace_name,
+        city: row.workspace_city,
+      },
+      doctor: {
+        id: row.doctor_user_id,
+        name: row.doctor_name,
+      },
+      patientCount: row.patient_count,
+      appointmentCount: row.appointment_count,
+      recentAppointmentDate: row.recent_appointment_date,
+    },
+  });
+}));
+
+app.get('/api/admin/doctors/:id/patients', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const doctorId = String(req.params.id ?? '').trim();
+  const clinicId = String(req.query?.clinicId ?? '').trim();
+  const searchQuery = String(req.query?.q ?? '').trim();
+  const limitInput = Number.parseInt(String(req.query?.limit ?? '200'), 10);
+  const limit = Number.isFinite(limitInput) ? Math.min(Math.max(limitInput, 1), 500) : 200;
+
+  const conditions = ['w.is_demo = FALSE', 'w.owner_user_id = $1'];
+  const params = [doctorId];
+
+  if (clinicId) {
+    params.push(clinicId);
+    const clinicRef = `$${params.length}`;
+    conditions.push(`
+      EXISTS (
+        SELECT 1
+        FROM appointments appointment_filter
+        WHERE appointment_filter.workspace_id = p.workspace_id
+          AND appointment_filter.patient_id = p.id
+          AND appointment_filter.clinic_id = ${clinicRef}
+      )
+    `);
+  }
+
+  if (searchQuery) {
+    params.push(`%${searchQuery}%`);
+    const searchRef = `$${params.length}`;
+    conditions.push(`(p.name ILIKE ${searchRef} OR p.mrn ILIKE ${searchRef} OR p.phone ILIKE ${searchRef} OR p.cnic ILIKE ${searchRef})`);
+  }
+
+  params.push(limit);
+
+  const { rows } = await query(
+    `
+      SELECT
+        p.id,
+        p.mrn,
+        p.name,
+        p.phone,
+        p.age,
+        p.gender,
+        p.cnic,
+        p.address,
+        p.blood_group,
+        p.emergency_contact,
+        p.created_at,
+        p.updated_at,
+        w.id AS workspace_id,
+        w.name AS workspace_name,
+        w.city AS workspace_city,
+        u.id AS doctor_user_id,
+        u.email AS doctor_email,
+        dp.full_name AS doctor_name,
+        last_clinic.id AS last_clinic_id,
+        last_clinic.name AS last_clinic_name,
+        COALESCE(appointment_stats.total_appointments, 0) AS total_appointments,
+        appointment_stats.last_appointment_date
+      FROM patients p
+      JOIN workspaces w ON w.id = p.workspace_id
+      JOIN users u ON u.id = w.owner_user_id
+      JOIN doctor_profiles dp ON dp.user_id = u.id
+      LEFT JOIN (
+        SELECT
+          workspace_id,
+          patient_id,
+          COUNT(*)::int AS total_appointments,
+          MAX(date::date) AS last_appointment_date
+        FROM appointments
+        GROUP BY workspace_id, patient_id
+      ) appointment_stats ON appointment_stats.workspace_id = p.workspace_id AND appointment_stats.patient_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT c.id, c.name
+        FROM appointments a
+        JOIN clinics c ON c.id = a.clinic_id
+        WHERE a.workspace_id = p.workspace_id
+          AND a.patient_id = p.id
+        ORDER BY a.date DESC, a.time DESC
+        LIMIT 1
+      ) last_clinic ON TRUE
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY p.updated_at DESC, p.created_at DESC
+      LIMIT $${params.length}
+    `,
+    params
+  );
+
+  res.json({
+    data: rows.map(row => ({
+      id: row.id,
+      mrn: row.mrn,
+      name: row.name,
+      phone: row.phone,
+      age: row.age,
+      gender: row.gender,
+      cnic: row.cnic,
+      address: row.address,
+      bloodGroup: row.blood_group,
+      emergencyContact: row.emergency_contact,
+      workspace: {
+        id: row.workspace_id,
+        name: row.workspace_name,
+        city: row.workspace_city,
+      },
+      doctor: {
+        id: row.doctor_user_id,
+        name: row.doctor_name,
+        email: row.doctor_email,
+      },
+      lastClinic: row.last_clinic_id ? { id: row.last_clinic_id, name: row.last_clinic_name } : null,
       totalAppointments: row.total_appointments,
       lastAppointmentDate: row.last_appointment_date,
       createdAt: row.created_at,
@@ -3970,8 +5163,8 @@ app.post('/api/admin/approval-requests/:id/approve', requireAuth, requireRole('p
     if (clinicResult.rowCount === 0) {
       await client.query(
         `
-          INSERT INTO clinics (id, workspace_id, name, location, city, phone, timings, specialties, logo)
-          VALUES ($1, $2, $3, $4, $5, '', 'By appointment', '[]'::jsonb, '🏥')
+          INSERT INTO clinics (id, workspace_id, name, location, city, phone, timings, specialties, logo, is_active)
+          VALUES ($1, $2, $3, $4, $5, '', 'By appointment', '[]'::jsonb, '🏥', TRUE)
         `,
         [createId('clinic'), approval.workspace_id, approval.clinic_name || 'Main Clinic', approval.city || '', approval.city || '']
       );
@@ -4019,6 +5212,105 @@ app.post('/api/admin/approval-requests/:id/reject', requireAuth, requireRole('pl
       workspaceId: approval.workspace_id,
       action: 'doctor_rejected',
       details: { approvalRequestId: id, reason },
+    });
+  });
+
+  res.json({ ok: true });
+}));
+
+app.put('/api/admin/doctors/:id/profile', requireAuth, requireRole('platform_admin'), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const payload = parseOrThrow(adminDoctorProfileUpdateSchema, req.body ?? {}, 'INVALID_ADMIN_DOCTOR_PROFILE');
+
+  await withTransaction(async client => {
+    const existingEmail = await client.query(
+      `
+        SELECT id
+        FROM users
+        WHERE LOWER(email) = LOWER($1)
+          AND id <> $2
+        LIMIT 1
+      `,
+      [payload.email.trim().toLowerCase(), id]
+    );
+
+    if (existingEmail.rowCount > 0) {
+      const error = new Error('Email already exists');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const doctorResult = await client.query(
+      `
+        SELECT u.id, w.id AS workspace_id
+        FROM users u
+        JOIN workspaces w ON w.owner_user_id = u.id
+        WHERE u.id = $1
+          AND u.role = 'doctor_owner'
+        LIMIT 1
+      `,
+      [id]
+    );
+
+    if (doctorResult.rowCount === 0) {
+      const error = new Error('Doctor account not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const workspaceId = doctorResult.rows[0].workspace_id;
+
+    await client.query(
+      `
+        UPDATE users
+        SET email = $2, updated_at = NOW()
+        WHERE id = $1
+      `,
+      [id, payload.email.trim().toLowerCase()]
+    );
+
+    await client.query(
+      `
+        UPDATE doctor_profiles
+        SET full_name = $2, phone = $3, pmc_number = $4, specialization = $5, qualifications = $6, notes = $7, updated_at = NOW()
+        WHERE user_id = $1
+      `,
+      [
+        id,
+        payload.fullName.trim(),
+        payload.phone.trim(),
+        payload.pmcNumber.trim(),
+        payload.specialization.trim(),
+        payload.qualifications.trim(),
+        payload.notes.trim(),
+      ]
+    );
+
+    await client.query(
+      `
+        UPDATE workspaces
+        SET name = $2, city = $3, updated_at = NOW()
+        WHERE id = $1
+      `,
+      [workspaceId, payload.workspaceName.trim(), payload.workspaceCity.trim()]
+    );
+
+    await recordAdminAudit(client, {
+      actorUserId: req.auth.user.id,
+      targetUserId: id,
+      workspaceId,
+      action: 'doctor_profile_updated',
+      details: {
+        email: payload.email.trim().toLowerCase(),
+        fullName: payload.fullName.trim(),
+        phone: payload.phone.trim(),
+        pmcNumber: payload.pmcNumber.trim(),
+        specialization: payload.specialization.trim(),
+        qualifications: payload.qualifications.trim(),
+        notes: payload.notes.trim(),
+        workspaceName: payload.workspaceName.trim(),
+        workspaceCity: payload.workspaceCity.trim(),
+      },
     });
   });
 
@@ -4132,8 +5424,8 @@ app.post('/api/clinics', requireAuth, requireRole('doctor_owner'), asyncHandler(
 
   await query(
     `
-      INSERT INTO clinics (id, workspace_id, name, location, city, phone, timings, specialties, logo, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+      INSERT INTO clinics (id, workspace_id, name, location, city, phone, timings, specialties, logo, is_active, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, NOW())
     `,
     [clinic.id, clinic.workspaceId, clinic.name, clinic.location, clinic.city, clinic.phone, clinic.timings, clinic.specialties, clinic.logo]
   );
@@ -4148,6 +5440,7 @@ app.post('/api/clinics', requireAuth, requireRole('doctor_owner'), asyncHandler(
       timings: clinic.timings,
       specialties: clinic.specialties,
       logo: clinic.logo,
+      isActive: true,
     },
   });
 }));
@@ -4164,7 +5457,7 @@ app.put('/api/clinics/:id', requireAuth, requireRole('doctor_owner'), asyncHandl
       UPDATE clinics
       SET name = $3, location = $4, city = $5, phone = $6, timings = $7, specialties = $8, logo = $9, updated_at = NOW()
       WHERE id = $1 AND workspace_id = $2
-      RETURNING id, name, location, city, phone, timings, specialties, logo
+      RETURNING id, name, location, city, phone, timings, specialties, logo, is_active
     `,
     [id, req.auth.workspace.id, name.trim(), location.trim(), city.trim(), phone.trim(), timings.trim() || 'By appointment', specialties, logo]
   );

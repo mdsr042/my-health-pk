@@ -118,6 +118,26 @@ export async function exportDesktopDiagnosticsNow(): Promise<DesktopDiagnosticsE
   return window.desktopApp!.exportDiagnostics();
 }
 
+export async function exportDesktopBackupNow() {
+  if (!isDesktopRuntime()) {
+    return { ok: false, code: 'WEB_RUNTIME', message: 'Desktop backup export is only available in the desktop app.' };
+  }
+  return window.desktopApp!.exportBackup();
+}
+
+export async function verifyDesktopIntegrityNow() {
+  if (!isDesktopRuntime()) {
+    return {
+      ok: false,
+      integrity: 'web-runtime',
+      checkedAt: new Date().toISOString(),
+      issues: ['Desktop integrity verification is only available in the desktop app.'],
+      rebuildRequired: false,
+    };
+  }
+  return window.desktopApp!.verifyIntegrity();
+}
+
 export async function retryDesktopRetryablesNow() {
   if (!isDesktopRuntime()) {
     return { ok: false, code: 'WEB_RUNTIME', message: 'Desktop retry is only available in the desktop app.' };

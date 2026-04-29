@@ -71,6 +71,8 @@ describe('desktop phase 1 UI states', () => {
       wipeLocalState: vi.fn().mockResolvedValue({ ok: true }),
       rebuildCache: vi.fn().mockResolvedValue({ ok: true }),
       exportDiagnostics: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/diag.json' }),
+      exportBackup: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/backup.sqlite' }),
+      verifyIntegrity: vi.fn().mockResolvedValue({ ok: true, checkedAt: '2026-04-29T12:00:00.000Z', issues: [] }),
       setupPin: vi.fn().mockResolvedValue(undefined),
       unlock: vi.fn().mockResolvedValue({ ok: true }),
       lock: vi.fn(),
@@ -103,6 +105,8 @@ describe('desktop phase 1 UI states', () => {
       wipeLocalState: vi.fn().mockResolvedValue({ ok: true }),
       rebuildCache: vi.fn().mockResolvedValue({ ok: true }),
       exportDiagnostics: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/diag.json' }),
+      exportBackup: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/backup.sqlite' }),
+      verifyIntegrity: vi.fn().mockResolvedValue({ ok: true, checkedAt: '2026-04-29T12:00:00.000Z', issues: [] }),
       setupPin: vi.fn().mockResolvedValue(undefined),
       unlock: vi.fn().mockResolvedValue({ ok: true }),
       lock: vi.fn(),
@@ -133,6 +137,8 @@ describe('desktop phase 1 UI states', () => {
       wipeLocalState: vi.fn().mockResolvedValue({ ok: true }),
       rebuildCache: vi.fn().mockResolvedValue({ ok: true }),
       exportDiagnostics: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/diag.json' }),
+      exportBackup: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/backup.sqlite' }),
+      verifyIntegrity: vi.fn().mockResolvedValue({ ok: true, checkedAt: '2026-04-29T12:00:00.000Z', issues: [] }),
       setupPin: vi.fn().mockResolvedValue(undefined),
       unlock: vi.fn().mockResolvedValue({ ok: true }),
       lock: vi.fn(),
@@ -184,6 +190,8 @@ describe('desktop phase 1 UI states', () => {
       refreshIssues: vi.fn().mockResolvedValue(undefined),
       rebuildCache: vi.fn().mockResolvedValue({ ok: true }),
       exportDiagnostics: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/diag.json' }),
+      exportBackup: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/backup.sqlite' }),
+      verifyIntegrity: vi.fn().mockResolvedValue({ ok: true, checkedAt: '2026-04-29T12:00:00.000Z', issues: [] }),
       runSyncNow: vi.fn().mockResolvedValue(undefined),
       retryRetryableBundles: vi.fn().mockResolvedValue({ ok: true }),
       resolveConflict: vi.fn().mockResolvedValue({ ok: true }),
@@ -203,5 +211,27 @@ describe('desktop phase 1 UI states', () => {
     expect(screen.getByText('Current server')).toBeTruthy();
     expect(screen.getAllByText(/local patient/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/server patient/i).length).toBeGreaterThan(0);
+  });
+
+  it('shows integrity and backup recovery controls in the desktop issues sheet', () => {
+    mockUseDesktop.mockReturnValue({
+      runtime: baseRuntime,
+      issues: { pending: [], deadLetters: [], conflicts: [] },
+      refreshIssues: vi.fn().mockResolvedValue(undefined),
+      rebuildCache: vi.fn().mockResolvedValue({ ok: true }),
+      exportDiagnostics: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/diag.json' }),
+      exportBackup: vi.fn().mockResolvedValue({ ok: true, filePath: '/tmp/backup.sqlite' }),
+      verifyIntegrity: vi.fn().mockResolvedValue({ ok: true, checkedAt: '2026-04-29T12:00:00.000Z', issues: [] }),
+      runSyncNow: vi.fn().mockResolvedValue(undefined),
+      retryRetryableBundles: vi.fn().mockResolvedValue({ ok: true }),
+      resolveConflict: vi.fn().mockResolvedValue({ ok: true }),
+      wipeLocalState: vi.fn().mockResolvedValue({ ok: true }),
+    });
+    mockUseAuth.mockReturnValue({ logout: vi.fn().mockResolvedValue(undefined) });
+
+    render(<DesktopSyncIssuesSheet open={true} onOpenChange={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: /verify local integrity/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /export local backup/i })).toBeTruthy();
   });
 });

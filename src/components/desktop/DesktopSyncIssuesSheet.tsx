@@ -13,7 +13,7 @@ interface DesktopSyncIssuesSheetProps {
 }
 
 export default function DesktopSyncIssuesSheet({ open, onOpenChange }: DesktopSyncIssuesSheetProps) {
-  const { issues, refreshIssues, rebuildCache, exportDiagnostics, runSyncNow, retryRetryableBundles, resolveConflict, wipeLocalState, runtime } = useDesktop();
+  const { issues, refreshIssues, rebuildCache, exportDiagnostics, exportBackup, verifyIntegrity, runSyncNow, retryRetryableBundles, resolveConflict, wipeLocalState, runtime } = useDesktop();
   const { logout } = useAuth();
   const [detailConflictId, setDetailConflictId] = useState('');
 
@@ -64,6 +64,32 @@ export default function DesktopSyncIssuesSheet({ open, onOpenChange }: DesktopSy
     if (result.message) {
       toast.error(result.message);
     }
+  };
+
+  const handleExportBackup = async () => {
+    const result = await exportBackup();
+    if (result.ok) {
+      toast.success('Encrypted desktop backup exported', {
+        description: result.filePath || 'Desktop backup file created.',
+      });
+      return;
+    }
+    if (result.message) {
+      toast.error(result.message);
+    }
+  };
+
+  const handleVerifyIntegrity = async () => {
+    const result = await verifyIntegrity();
+    if (result.ok) {
+      toast.success('Local desktop database passed integrity check', {
+        description: result.checkedAt ? `Verified at ${new Date(result.checkedAt).toLocaleString()}` : undefined,
+      });
+      return;
+    }
+    toast.error(result.message || 'Local integrity verification failed.', {
+      description: result.issues?.[0],
+    });
   };
 
   const handleRetryRetryables = async () => {
@@ -151,6 +177,8 @@ export default function DesktopSyncIssuesSheet({ open, onOpenChange }: DesktopSy
               <Button variant="outline" size="sm" onClick={() => void runSyncNow()}>Run Sync Now</Button>
               <Button variant="outline" size="sm" onClick={() => void handleRetryRetryables()}>Retry Retryable Bundles</Button>
               <Button variant="outline" size="sm" onClick={() => void refreshIssues()}>Refresh</Button>
+              <Button variant="outline" size="sm" onClick={() => void handleVerifyIntegrity()}>Verify Local Integrity</Button>
+              <Button variant="outline" size="sm" onClick={() => void handleExportBackup()}>Export Local Backup</Button>
               <Button variant="outline" size="sm" onClick={() => void handleRebuildCache()}>Rebuild Cache</Button>
               <Button variant="outline" size="sm" onClick={() => void handleExportDiagnostics()}>Export Diagnostics</Button>
               <Button variant="outline" size="sm" onClick={() => void handleSignOutAndWipe()}>Sign Out And Wipe</Button>

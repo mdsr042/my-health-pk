@@ -287,7 +287,19 @@ export interface DesktopSyncPullChanges {
   attachments: DesktopAttachmentTransfer[];
 }
 
+export interface DesktopSyncCompatibility {
+  apiVersion: string;
+  mode: 'additive';
+  requiredMinDesktopVersion: string;
+  clientVersion: string;
+  compatible: boolean;
+  reason: string;
+}
+
 export interface DesktopSyncPullResult {
+  apiVersion?: string;
+  compatibility?: DesktopSyncCompatibility;
+  serverTime?: string;
   checkpoint: string;
   changes: DesktopSyncPullChanges;
   entitlement: DesktopRuntimeInfo['entitlement'];
@@ -349,6 +361,8 @@ export interface AdminDoctorAccount {
   phone: string;
   pmcNumber: string;
   specialization: string;
+  qualifications?: string;
+  notes?: string;
   workspace: {
     id: string;
     name: string;
@@ -375,15 +389,85 @@ export interface AdminPatientRecord {
   age: number;
   gender: Patient['gender'];
   cnic: string;
+  address: string;
+  bloodGroup: string;
+  emergencyContact: string;
   workspace: {
     id: string;
     name: string;
     city: string;
   };
+  doctor: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  lastClinic: {
+    id: string;
+    name: string;
+  } | null;
   totalAppointments: number;
   lastAppointmentDate: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AdminDoctorProfileUpdatePayload {
+  email: string;
+  fullName: string;
+  phone: string;
+  pmcNumber: string;
+  specialization: string;
+  qualifications: string;
+  notes: string;
+  workspaceName: string;
+  workspaceCity: string;
+}
+
+export interface AdminClinicRecord {
+  id: string;
+  name: string;
+  location: string;
+  city: string;
+  phone: string;
+  timings: string;
+  specialties: string[];
+  logo: string;
+  isActive: boolean;
+  workspace: {
+    id: string;
+    name: string;
+    city: string;
+  };
+  doctor: {
+    id: string;
+    name: string;
+  };
+  patientCount: number;
+  appointmentCount: number;
+  recentAppointmentDate: string | null;
+}
+
+export interface AdminClinicUpdatePayload {
+  name: string;
+  location: string;
+  city: string;
+  phone: string;
+  timings: string;
+  specialties: string[];
+  logo: string;
+  isActive: boolean;
+}
+
+export interface AdminPatientUpdatePayload {
+  name: string;
+  phone: string;
+  age: number;
+  gender: Patient['gender'];
+  cnic: string;
+  address: string;
+  bloodGroup: string;
+  emergencyContact: string;
 }
 
 export interface AdminOverview {
@@ -404,6 +488,88 @@ export interface AdminAuditLog {
   targetUserId: string | null;
   workspaceId: string | null;
   details: Record<string, unknown>;
+}
+
+export type AdminOfflineSyncHealth = 'healthy' | 'attention' | 'offline' | 'inactive';
+
+export interface AdminOfflineDoctorStat {
+  doctor: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  workspace: {
+    id: string;
+    name: string;
+    city: string;
+  };
+  devices: {
+    total: number;
+    active: number;
+    revoked: number;
+    lastSeenAt: string | null;
+  };
+  sync: {
+    lastBundleProcessedAt: string | null;
+    lastMutationProcessedAt: string | null;
+    lastSyncedAt: string | null;
+    bundlesProcessed: number;
+    mutationsProcessed: number;
+  };
+  outcomes: {
+    conflicts: number;
+    retryableFailures: number;
+    validationRejected: number;
+    permissionRejected: number;
+    entitlementRejected: number;
+    accepted: number;
+    acceptedAlreadyProcessed: number;
+  };
+  deviceEntries: Array<{
+    deviceId: string;
+    deviceName: string;
+    platform: string;
+    appVersion: string;
+    status: 'active' | 'revoked' | string;
+    lastSeenAt: string | null;
+    revokedAt: string | null;
+  }>;
+  health: AdminOfflineSyncHealth;
+}
+
+export interface AdminOfflineSyncStats {
+  generatedAt: string;
+  rollout: {
+    decision: 'GO' | 'NO_GO';
+    reasons: string[];
+    thresholds: {
+      conflicts: number;
+      retryableFailures: number;
+      doctorsWithAttention: number;
+      doctorsOffline: number;
+    };
+  };
+  summary: {
+    doctors: number;
+    workspaces: number;
+    totalDevices: number;
+    activeDevices: number;
+    revokedDevices: number;
+    doctorsWithConflicts: number;
+    doctorsWithAttention: number;
+    doctorsOffline: number;
+    bundlesProcessed: number;
+    mutationsProcessed: number;
+    conflicts: number;
+    retryableFailures: number;
+    validationRejected: number;
+    permissionRejected: number;
+    entitlementRejected: number;
+    accepted: number;
+    acceptedAlreadyProcessed: number;
+    lastSyncedAt: string | null;
+  };
+  doctors: AdminOfflineDoctorStat[];
 }
 
 export interface MedicationCatalogEntry {

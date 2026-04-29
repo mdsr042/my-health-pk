@@ -9,6 +9,16 @@ let mainWindow = null;
 let desktopDb = null;
 let secretManager = null;
 const desktopApiBase = process.env.ELECTRON_API_URL || process.env.DESKTOP_API_URL || 'http://localhost:4001/api';
+const desktopClientVersion = app.getVersion();
+
+function getDesktopRequestHeaders(token = '') {
+  const runtime = desktopDb?.getRuntimeInfo?.() ?? null;
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    'X-Desktop-Version': desktopClientVersion,
+    ...(runtime?.deviceId ? { 'X-Desktop-Device-Id': runtime.deviceId } : {}),
+  };
+}
 
 function showStartupError(error) {
   const message = error instanceof Error ? error.message : 'Unknown startup error';
@@ -59,13 +69,26 @@ async function runDesktopSync() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getDesktopRequestHeaders(token),
         },
         body: JSON.stringify({ bundles: pendingBundles }),
       });
 
       const pushBody = await pushResponse.json();
       if (!pushResponse.ok) {
+        if (pushResponse.status === 426 || pushBody?.code === 'DESKTOP_CLIENT_OUTDATED') {
+          desktopDb.markSyncStatus('attention');
+          desktopDb.finishSyncRun(syncRunId, 'blocked', {
+            code: 'CLIENT_VERSION_UNSUPPORTED',
+            compatibility: pushBody?.data?.compatibility ?? null,
+          });
+          return {
+            ok: false,
+            code: 'CLIENT_VERSION_UNSUPPORTED',
+            message: pushBody?.error || 'Desktop client version is not supported for sync. Please update the app.',
+            compatibility: pushBody?.data?.compatibility ?? null,
+          };
+        }
         throw new Error(pushBody?.error || `Sync push failed: ${pushResponse.status}`);
       }
 
@@ -77,12 +100,23 @@ async function runDesktopSync() {
 
     const checkpoint = desktopDb.getCheckpoint('workspace');
     const pullResponse = await fetch(`${desktopApiBase}/sync/pull?checkpoint=${encodeURIComponent(checkpoint)}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: getDesktopRequestHeaders(token),
     });
     const pullBody = await pullResponse.json();
     if (!pullResponse.ok) {
+      if (pullResponse.status === 426 || pullBody?.code === 'DESKTOP_CLIENT_OUTDATED') {
+        desktopDb.markSyncStatus('attention');
+        desktopDb.finishSyncRun(syncRunId, 'blocked', {
+          code: 'CLIENT_VERSION_UNSUPPORTED',
+          compatibility: pullBody?.data?.compatibility ?? null,
+        });
+        return {
+          ok: false,
+          code: 'CLIENT_VERSION_UNSUPPORTED',
+          message: pullBody?.error || 'Desktop client version is not supported for sync. Please update the app.',
+          compatibility: pullBody?.data?.compatibility ?? null,
+        };
+      }
       throw new Error(pullBody?.error || `Sync pull failed: ${pullResponse.status}`);
     }
 
@@ -132,9 +166,7 @@ async function runDesktopSync() {
       desktopDb.upsertEntitlement(pullEntitlement);
     } else {
       const entitlementResponse = await fetch(`${desktopApiBase}/desktop/entitlement`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: getDesktopRequestHeaders(token),
       });
       if (entitlementResponse.ok) {
         const entitlementBody = await entitlementResponse.json();
@@ -184,10 +216,10 @@ async function rebuildDesktopCache() {
 
   const [bootstrapResponse, entitlementResponse] = await Promise.all([
     fetch(`${desktopApiBase}/desktop/bootstrap`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: getDesktopRequestHeaders(token),
     }),
     fetch(`${desktopApiBase}/desktop/entitlement`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: getDesktopRequestHeaders(token),
     }),
   ]);
 
@@ -222,7 +254,24 @@ async function exportDesktopDiagnostics() {
 
   const snapshot = desktopDb.exportDiagnosticsSnapshot();
   fs.writeFileSync(result.filePath, JSON.stringify(snapshot, null, 2), 'utf8');
+  desktopDb.recordAuditEvent('diagnostics_exported', 'info', {
+    filePath: result.filePath,
+  });
   return { ok: true, filePath: result.filePath };
+}
+
+async function exportDesktopBackup() {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export Desktop Backup',
+    defaultPath: path.join(app.getPath('documents'), `my-health-desktop-backup-${new Date().toISOString().slice(0, 10)}.sqlite`),
+    filters: [{ name: 'SQLite Backup', extensions: ['sqlite', 'db'] }],
+  });
+
+  if (result.canceled || !result.filePath) {
+    return { ok: false, code: 'CANCELLED' };
+  }
+
+  return desktopDb.exportLocalBackup(result.filePath, { reason: 'manual_export' });
 }
 
 function createWindow() {
@@ -336,7 +385,7 @@ async function pickAndStoreAttachment({ workspaceId = '', patientId = '', appoin
 app.whenReady().then(() => {
   const secrets = createSecretManager({ safeStorage });
   secretManager = secrets;
-  desktopDb = createDesktopDatabase({ userDataPath: app.getPath('userData'), secrets });
+  desktopDb = createDesktopDatabase({ userDataPath: app.getPath('userData'), secrets, appVersion: desktopClientVersion });
 
   ipcMain.on('desktop:runtime-info', event => {
     event.returnValue = desktopDb.getRuntimeInfo();
@@ -371,6 +420,8 @@ app.whenReady().then(() => {
   ipcMain.handle('desktop:sync:wipe-local-state', async () => desktopDb.wipeLocalState());
   ipcMain.handle('desktop:sync:rebuild-cache', async () => rebuildDesktopCache());
   ipcMain.handle('desktop:sync:export-diagnostics', async () => exportDesktopDiagnostics());
+  ipcMain.handle('desktop:sync:export-backup', async () => exportDesktopBackup());
+  ipcMain.handle('desktop:sync:verify-integrity', async () => desktopDb.verifyIntegrity({ persist: true, source: 'manual' }));
   ipcMain.handle('desktop:sync:queue-attachment', async (_event, attachment) => {
     desktopDb.enqueueAttachmentTransfer(attachment);
     return { ok: true };

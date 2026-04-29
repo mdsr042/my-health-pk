@@ -357,4 +357,95 @@ describe('desktop sync store', () => {
     const pending = store.listSyncIssues().pending.find(item => item.mutation_id === 'mut-auto-patient');
     expect(pending?.status).toBe('pending');
   });
+
+  it('exports redacted diagnostics, verifies integrity, and creates a local backup snapshot', () => {
+    const store = createStore();
+
+    store.enqueueMutation({
+      mutationId: 'mut-redacted',
+      bundleId: 'bundle-redacted',
+      bundleType: 'patient_master',
+      rootEntityId: 'pt-redacted',
+      deviceId: 'device-1',
+      workspaceId: 'ws-1',
+      entityType: 'patient',
+      entityId: 'pt-redacted',
+      operationType: 'update',
+      payload: {
+        id: 'pt-redacted',
+        name: 'Sensitive Patient',
+        phone: '03001234567',
+      },
+      baseVersion: 'base-old',
+    });
+
+    store.recordSyncResults([
+      {
+        mutationId: 'mut-redacted',
+        bundleId: 'bundle-redacted',
+        entityType: 'patient',
+        entityId: 'pt-redacted',
+        status: 'conflict',
+        conflictType: 'patient_conflict',
+        errorCode: 'SYNC_CONFLICT',
+        errorMessage: 'Patient changed elsewhere',
+        serverSnapshot: {
+          id: 'pt-redacted',
+          name: 'Server Patient',
+          phone: '03110000000',
+        },
+        serverBaseVersion: 'base-new',
+      },
+    ]);
+
+    const diagnostics = store.exportDiagnosticsSnapshot();
+    expect(diagnostics.issues.conflicts[0].local_snapshot).toBeUndefined();
+    expect(diagnostics.issues.conflicts[0].server_snapshot).toBeUndefined();
+    expect(diagnostics.issues.conflicts[0].mutation_id).toBe('mut-redacted');
+
+    const integrity = store.verifyIntegrity({ persist: true, source: 'test' });
+    expect(integrity.ok).toBe(true);
+    expect(integrity.integrity.toLowerCase()).toBe('ok');
+
+    const backupPath = path.join(tempDirs[tempDirs.length - 1], 'backup.sqlite');
+    const backup = store.exportLocalBackup(backupPath, { reason: 'test_backup' });
+    expect(backup.ok).toBe(true);
+    expect(fs.existsSync(backupPath)).toBe(true);
+    expect(fs.existsSync(`${backupPath}.manifest.json`)).toBe(true);
+  });
+
+  it('moves repeated retryable failures into a dead letter after retry exhaustion', () => {
+    const store = createStore();
+
+    store.enqueueMutation({
+      mutationId: 'mut-retry-exhaust',
+      bundleId: 'bundle-retry-exhaust',
+      bundleType: 'encounter',
+      rootEntityId: 'appt-retry',
+      deviceId: 'device-1',
+      workspaceId: 'ws-1',
+      entityType: 'consultation',
+      entityId: 'appt-retry',
+      operationType: 'complete',
+      payload: { appointmentId: 'appt-retry' },
+    });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      store.recordSyncResults([
+        {
+          mutationId: 'mut-retry-exhaust',
+          entityType: 'consultation',
+          entityId: 'appt-retry',
+          status: 'retryable_failure',
+          errorCode: 'RETRYABLE_FAILURE',
+          errorMessage: `temporary failure ${attempt + 1}`,
+        },
+      ]);
+    }
+
+    const issues = store.listSyncIssues();
+    expect(issues.pending.find(item => item.mutation_id === 'mut-retry-exhaust')).toBeUndefined();
+    expect(issues.deadLetters.find(item => item.mutation_id === 'mut-retry-exhaust')?.reason_code).toBe('RETRY_EXHAUSTED');
+    expect(store.getRuntimeInfo().failedBundles).toBeGreaterThan(0);
+  });
 });

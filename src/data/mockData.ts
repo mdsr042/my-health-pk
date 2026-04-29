@@ -9,6 +9,7 @@ export interface Clinic {
   timings: string;
   specialties: string[];
   logo: string;
+  isActive?: boolean;
 }
 
 export interface Doctor {

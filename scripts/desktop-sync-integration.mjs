@@ -190,6 +190,13 @@ async function main() {
         ],
       }),
     }, doctorToken);
+    assertResult(
+      'sync-push-compat-metadata',
+      pushAccepted.response.ok
+        && pushAccepted.body.data?.apiVersion === 'sync-v1'
+        && pushAccepted.body.data?.compatibility?.mode === 'additive',
+      JSON.stringify(pushAccepted.body.data?.compatibility || {})
+    );
     const acceptedResult = pushAccepted.body.data.results[0];
     assertResult('sync-push-accepted', acceptedResult?.status === 'accepted', acceptedResult?.status || '');
 
@@ -224,6 +231,45 @@ async function main() {
       }),
     }, doctorToken);
     assertResult('sync-push-idempotent', pushAlreadyProcessed.body.data.results[0]?.status === 'accepted_already_processed', pushAlreadyProcessed.body.data.results[0]?.status || '');
+
+    const legacyMutationId = uniqueId('mut-legacy');
+    const legacyBundleId = uniqueId('bundle-legacy');
+    const legacyPatientId = uniqueId('patient-legacy');
+    const legacyPush = await request('/sync/push', {
+      method: 'POST',
+      body: JSON.stringify({
+        mutations: [
+          {
+            mutationId: legacyMutationId,
+            bundleId: legacyBundleId,
+            bundleType: 'patient_master',
+            rootEntityId: legacyPatientId,
+            deviceId: register.body.data.deviceId,
+            workspaceId: doctorLogin.body.session.workspace.id,
+            entityType: 'patient',
+            entityId: legacyPatientId,
+            operationType: 'create',
+            payload: {
+              id: legacyPatientId,
+              mrn: `MRN-${Date.now().toString().slice(-8)}-legacy`,
+              name: 'Legacy Sync Patient',
+              phone: '03440000000',
+              age: 31,
+              gender: 'Male',
+              cnic: '',
+              address: '',
+              bloodGroup: '',
+              emergencyContact: '',
+            },
+          },
+        ],
+      }),
+    }, doctorToken);
+    assertResult(
+      'sync-push-legacy-mutations-compatible',
+      legacyPush.response.ok && legacyPush.body.data?.results?.[0]?.status === 'accepted',
+      JSON.stringify(legacyPush.body.data?.results?.[0] || {})
+    );
 
     const secondPatient = await request('/patients', {
       method: 'POST',
@@ -473,6 +519,8 @@ async function main() {
     assertResult(
       'sync-pull-grouped-deltas',
       pull.response.ok
+        && pull.body.data?.apiVersion === 'sync-v1'
+        && pull.body.data?.compatibility?.mode === 'additive'
         && pull.body.data?.checkpointStatus === 'ok'
         && Array.isArray(pullChanges.patients)
         && Array.isArray(pullChanges.appointments),
@@ -496,6 +544,64 @@ async function main() {
         && futureCheckpointPull.body.data?.rebuildRequired === true
         && futureCheckpointPull.body.data?.checkpointStatus === 'unknown_checkpoint',
       JSON.stringify(futureCheckpointPull.body.data || {})
+    );
+
+    const outdatedPush = await request('/sync/push', {
+      method: 'POST',
+      headers: {
+        'X-Desktop-Version': '0.0.1',
+      },
+      body: JSON.stringify({
+        bundles: [],
+      }),
+    }, doctorToken);
+    assertResult(
+      'sync-push-outdated-client-rejected',
+      outdatedPush.response.status === 426 && outdatedPush.body.code === 'DESKTOP_CLIENT_OUTDATED',
+      JSON.stringify(outdatedPush.body || {})
+    );
+
+    const outdatedPull = await request('/sync/pull', {
+      headers: {
+        'X-Desktop-Version': '0.0.1',
+      },
+    }, doctorToken);
+    assertResult(
+      'sync-pull-outdated-client-rejected',
+      outdatedPull.response.status === 426 && outdatedPull.body.code === 'DESKTOP_CLIENT_OUTDATED',
+      JSON.stringify(outdatedPull.body || {})
+    );
+
+    const revokeDevice = await request(`/admin/offline-sync/devices/${register.body.data.deviceId}/revoke`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'integration_test' }),
+    }, adminToken);
+    assertResult(
+      'admin-revoke-device',
+      revokeDevice.response.ok && revokeDevice.body.data?.status === 'revoked',
+      JSON.stringify(revokeDevice.body.data || {})
+    );
+
+    const revokedBootstrap = await request('/desktop/bootstrap', {
+      headers: {
+        'X-Desktop-Device-Id': register.body.data.deviceId,
+      },
+    }, doctorToken);
+    assertResult(
+      'desktop-bootstrap-revoked-device-blocked',
+      revokedBootstrap.response.status === 403 && revokedBootstrap.body.code === 'DEVICE_REVOKED',
+      JSON.stringify(revokedBootstrap.body || {})
+    );
+
+    const revokedPull = await request('/sync/pull', {
+      headers: {
+        'X-Desktop-Device-Id': register.body.data.deviceId,
+      },
+    }, doctorToken);
+    assertResult(
+      'sync-pull-revoked-device-blocked',
+      revokedPull.response.status === 403 && revokedPull.body.code === 'DEVICE_REVOKED',
+      JSON.stringify(revokedPull.body || {})
     );
 
     const processed = await pg.query(`SELECT mutation_id, bundle_id, result_status FROM processed_mutations WHERE mutation_id = ANY($1::text[]) ORDER BY mutation_id ASC`, [[patientMutationId]]);

@@ -1,6 +1,11 @@
 import type {
+  AdminClinicRecord,
+  AdminClinicUpdatePayload,
+  AdminDoctorProfileUpdatePayload,
   AdminPatientRecord,
+  AdminPatientUpdatePayload,
   AdminDoctorAccount,
+  AdminOfflineSyncStats,
   AdminAuditLog,
   AdminOverview,
   AdviceTemplate,
@@ -40,7 +45,7 @@ import type {
   DesktopDeviceRegistrationPayload,
   } from '@/lib/app-types';
 import type { Appointment, CareAction, Clinic, ClinicalNote, Patient } from '@/data/mockData';
-import { clearDesktopStoredTokenSync, getDesktopStoredTokenSync, isDesktopRuntime } from '@/lib/desktop';
+import { clearDesktopStoredTokenSync, getDesktopRuntimeInfoSync, getDesktopStoredTokenSync, isDesktopRuntime } from '@/lib/desktop';
 
 const API_BASE = '/api';
 const AUTH_TOKEN_KEY = 'my-health/auth-token';
@@ -91,10 +96,12 @@ export function clearStoredAuthToken() {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getStoredAuthToken();
+  const desktopDeviceId = isDesktopRuntime() ? getDesktopRuntimeInfoSync().deviceId : '';
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(desktopDeviceId ? { 'X-Desktop-Device-Id': desktopDeviceId } : {}),
       ...(init?.headers ?? {}),
     },
     ...init,
@@ -294,9 +301,34 @@ export async function fetchApprovalRequests() {
   return result.data;
 }
 
-export async function fetchAdminAuditLogs() {
-  const result = await request<{ data: AdminAuditLog[] }>('/admin/audit-logs');
+export async function fetchAdminAuditLogs(params?: { q?: string; targetUserId?: string; workspaceId?: string; limit?: number }) {
+  const search = new URLSearchParams();
+  if (params?.q) search.set('q', params.q);
+  if (params?.targetUserId) search.set('targetUserId', params.targetUserId);
+  if (params?.workspaceId) search.set('workspaceId', params.workspaceId);
+  if (typeof params?.limit === 'number') search.set('limit', String(params.limit));
+  const query = search.toString();
+  const result = await request<{ data: AdminAuditLog[] }>(`/admin/audit-logs${query ? `?${query}` : ''}`);
   return result.data;
+}
+
+export async function fetchAdminOfflineSyncStats(params?: { q?: string; workspaceId?: string; doctorId?: string; status?: string; limit?: number }) {
+  const search = new URLSearchParams();
+  if (params?.q) search.set('q', params.q);
+  if (params?.workspaceId) search.set('workspaceId', params.workspaceId);
+  if (params?.doctorId) search.set('doctorId', params.doctorId);
+  if (params?.status) search.set('status', params.status);
+  if (typeof params?.limit === 'number') search.set('limit', String(params.limit));
+  const query = search.toString();
+  const result = await request<{ data: AdminOfflineSyncStats }>(`/admin/offline-sync/stats${query ? `?${query}` : ''}`);
+  return result.data;
+}
+
+export async function revokeAdminOfflineDevice(deviceId: string, reason: string) {
+  return request<{ ok: true; data: { id: string; deviceId: string; status: string; revokedAt: string | null } }>(`/admin/offline-sync/devices/${encodeURIComponent(deviceId)}/revoke`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export async function searchMedicationCatalog(query: string, limit = 20, cursor = 0) {
@@ -684,14 +716,62 @@ export async function fetchAdminDoctors() {
   return result.data;
 }
 
-export async function fetchAdminPatients(params?: { workspaceId?: string; q?: string; limit?: number }) {
+export async function fetchAdminPatients(params?: { workspaceId?: string; doctorId?: string; clinicId?: string; activity?: string; q?: string; limit?: number }) {
   const search = new URLSearchParams();
   if (params?.workspaceId) search.set('workspaceId', params.workspaceId);
+  if (params?.doctorId) search.set('doctorId', params.doctorId);
+  if (params?.clinicId) search.set('clinicId', params.clinicId);
+  if (params?.activity) search.set('activity', params.activity);
   if (params?.q) search.set('q', params.q);
   if (typeof params?.limit === 'number') search.set('limit', String(params.limit));
   const query = search.toString();
   const result = await request<{ data: AdminPatientRecord[] }>(`/admin/patients${query ? `?${query}` : ''}`);
   return result.data;
+}
+
+export async function updateAdminPatient(patientId: string, payload: AdminPatientUpdatePayload) {
+  const result = await request<{ data: AdminPatientRecord }>(`/admin/patients/${patientId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function fetchAdminClinics(params?: { workspaceId?: string; doctorId?: string; status?: string; q?: string; limit?: number }) {
+  const search = new URLSearchParams();
+  if (params?.workspaceId) search.set('workspaceId', params.workspaceId);
+  if (params?.doctorId) search.set('doctorId', params.doctorId);
+  if (params?.status) search.set('status', params.status);
+  if (params?.q) search.set('q', params.q);
+  if (typeof params?.limit === 'number') search.set('limit', String(params.limit));
+  const query = search.toString();
+  const result = await request<{ data: AdminClinicRecord[] }>(`/admin/clinics${query ? `?${query}` : ''}`);
+  return result.data;
+}
+
+export async function updateAdminClinic(clinicId: string, payload: AdminClinicUpdatePayload) {
+  const result = await request<{ data: AdminClinicRecord }>(`/admin/clinics/${clinicId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.data;
+}
+
+export async function fetchAdminDoctorPatients(doctorId: string, params?: { clinicId?: string; q?: string; limit?: number }) {
+  const search = new URLSearchParams();
+  if (params?.clinicId) search.set('clinicId', params.clinicId);
+  if (params?.q) search.set('q', params.q);
+  if (typeof params?.limit === 'number') search.set('limit', String(params.limit));
+  const query = search.toString();
+  const result = await request<{ data: AdminPatientRecord[] }>(`/admin/doctors/${doctorId}/patients${query ? `?${query}` : ''}`);
+  return result.data;
+}
+
+export async function updateAdminDoctorProfile(doctorId: string, payload: AdminDoctorProfileUpdatePayload) {
+  await request<{ ok: true }>(`/admin/doctors/${doctorId}/profile`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function updateDoctorAccountStatus(doctorId: string, status: 'active' | 'suspended') {

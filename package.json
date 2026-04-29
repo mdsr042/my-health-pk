@@ -2,6 +2,8 @@
   "name": "vite_react_shadcn_ts",
   "private": true,
   "version": "0.0.0",
+  "description": "Offline-first clinical desktop and web app for My Health Pakistan.",
+  "author": "My Health Pakistan",
   "type": "module",
   "packageManager": "npm@10.9.2",
   "scripts": {
@@ -14,9 +16,11 @@
     "desktop:doctor-check": "node scripts/desktop-doctor-check.mjs",
     "desktop:doctor-check:running": "node scripts/desktop-doctor-check.mjs --expect-running",
     "desktop:trace-sync": "node scripts/trace-desktop-sync.mjs",
+    "desktop:cohort-health": "node scripts/pilot-cohort-health.mjs",
+    "desktop:chaos": "node scripts/desktop-chaos.mjs",
     "desktop:rebuild-native": "electron-rebuild -f -w better-sqlite3",
     "desktop:pack": "npm run build && electron-builder --dir",
-    "desktop:dist": "npm run build && electron-builder",
+    "desktop:dist": "npm run build && electron-builder --publish never",
     "rollout:100": "node scripts/rollout-gate-100.mjs",
     "rollout:100:quick": "node scripts/rollout-gate-100.mjs --quick",
     "catalog:fetch:pk": "node scripts/fetch-drap-medicines.mjs",
@@ -134,6 +138,7 @@
     "extraMetadata": {
       "main": "electron/main.cjs"
     },
+    "artifactName": "My-Health-Desktop-${version}-${arch}.${ext}",
     "win": {
       "target": [
         {

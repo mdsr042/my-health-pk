@@ -32,6 +32,12 @@ const checks = [
     description: 'Desktop end-to-end sync integration',
     command: 'npm run test:desktop:integration',
     required: !isQuick,
+    requiredOutputSnippets: [
+      'PASS sync-push-compat-metadata',
+      'PASS sync-push-legacy-mutations-compatible',
+      'PASS sync-push-outdated-client-rejected',
+      'PASS sync-pull-outdated-client-rejected',
+    ],
   },
   {
     id: 'production-build',
@@ -56,9 +62,32 @@ function runCheck(check) {
     process.stderr.write(result.stderr);
   }
 
-  const ok = result.status === 0;
+  const outputText = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const requiredOutputSnippets = Array.isArray(check.requiredOutputSnippets)
+    ? check.requiredOutputSnippets
+    : [];
+  const missingSnippets = requiredOutputSnippets.filter(
+    snippet => !outputText.includes(snippet),
+  );
+
+  const commandOk = result.status === 0;
+  const outputOk = missingSnippets.length === 0;
+  const ok = commandOk && outputOk;
+
+  if (!outputOk) {
+    process.stdout.write(
+      `[ROLL-100] ${check.id} missing required output markers: ${missingSnippets.join(', ')}\n`,
+    );
+  }
+
   process.stdout.write(`[ROLL-100] ${check.id} => ${ok ? 'PASS' : 'FAIL'}\n`);
-  return { ...check, ok, code: result.status ?? 1 };
+  return {
+    ...check,
+    ok,
+    code: result.status ?? 1,
+    missingSnippets,
+    commandOk,
+  };
 }
 
 const selectedChecks = checks.filter((item) => item.required);
@@ -76,6 +105,9 @@ if (failed.length > 0) {
   process.stdout.write('\nFailed checks:\n');
   for (const item of failed) {
     process.stdout.write(`- ${item.id} (${item.description})\n`);
+    if (item.missingSnippets?.length) {
+      process.stdout.write(`  missing markers: ${item.missingSnippets.join(', ')}\n`);
+    }
   }
   process.stdout.write(
     '\nRollout gate is NOT ready for 100 active doctors. Fix failed checks and rerun.\n',

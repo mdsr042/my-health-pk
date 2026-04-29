@@ -16,8 +16,10 @@ This project uses a manual GitHub Actions workflow (`workflow_dispatch`) for des
 
 1. Ensure the repository has GitHub Actions enabled.
 2. Ensure maintainers have permission to run workflows and create releases.
-3. Optional for production trust:
-   - add Windows code-signing secrets before broad rollout (not required for internal pilot builds).
+3. Production trust requirements before broader rollout:
+   - add Windows code-signing secrets for installer and app binaries
+   - bump `package.json` version before each release so installer filenames stay version-correct
+   - keep release artifacts immutable
 
 ## How to create a new desktop release
 
@@ -57,6 +59,18 @@ Typical files include:
   - sync fixes
   - conflict handling changes
   - known limitations
+- Update policy:
+  - optional update for normal releases
+  - required update only for protocol/schema incompatibility such as `DESKTOP_CLIENT_OUTDATED`
+
+## Safe upgrade behavior
+
+- Before destructive recovery actions, export a local desktop backup from the app.
+- Desktop startup now creates an upgrade backup snapshot before moving to a new app version.
+- If a new release has migration or startup issues:
+  - stop rollout
+  - use the previous release asset
+  - inspect diagnostics and support runbook guidance before reissuing
 
 ## Rollback guidance
 

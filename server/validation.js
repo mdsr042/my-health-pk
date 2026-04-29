@@ -211,6 +211,29 @@ export const referralFacilitySchema = z.object({
   phone: z.string().trim().max(40).default(''),
 });
 
+export const adminDoctorProfileUpdateSchema = z.object({
+  email: z.string().trim().email('Valid email is required'),
+  fullName: trimmedString('Doctor name'),
+  phone: z.string().trim().max(40).default(''),
+  pmcNumber: z.string().trim().max(80).default(''),
+  specialization: z.string().trim().max(120).default(''),
+  qualifications: z.string().trim().max(255).default(''),
+  notes: z.string().trim().max(1000).default(''),
+  workspaceName: trimmedString('Workspace name'),
+  workspaceCity: z.string().trim().max(120).default(''),
+});
+
+export const adminClinicUpdateSchema = z.object({
+  name: trimmedString('Clinic name'),
+  location: z.string().trim().max(255).default(''),
+  city: trimmedString('City', 120),
+  phone: z.string().trim().max(40).default(''),
+  timings: z.string().trim().max(120).default('By appointment'),
+  specialties: z.array(z.string().trim().max(80)).max(20).default([]),
+  logo: z.string().trim().max(40).default('🏥'),
+  isActive: z.boolean().default(true),
+});
+
 export const careActionSchema = z.object({
   appointmentId: z.string().trim().min(1, 'Appointment is required'),
   patientId: z.string().trim().min(1, 'Patient is required'),
